@@ -13,6 +13,12 @@ if TYPE_CHECKING:
 
 
 class ArtifactKind(Enum):
+    # Enum members are process-lifetime singletons, so identity hashing
+    # (object.__hash__) is both correct and far cheaper than Enum's default
+    # hash(self._name_): the frozensets below and every kind in {...}
+    # membership test on the resolver's hot path pay it per link.
+    __hash__ = object.__hash__
+
     WHEEL = "wheel"
 
     SDIST = "sdist"

@@ -1416,3 +1416,48 @@ def test_find_links_scan_defers_the_stat_to_the_first_fingerprint(
     assert stats == 1
     assert candidate_metadata_fingerprint(record) == fingerprint
     assert stats == 1
+
+
+class TestArtifactKindHashing:
+    """ArtifactKind uses identity hashing (object.__hash__) for speed. Enum
+    members are process-lifetime singletons, so this stays correct while
+    avoiding Enum's much slower default hash(self._name_) on every
+    ``kind in SOURCE_ARTIFACT_KINDS`` membership test on the resolver's hot
+    path.
+    """
+
+    def test_uses_identity_hash(self) -> None:
+        from cpip.index.source_models import ArtifactKind
+
+        assert ArtifactKind.__hash__ is object.__hash__
+
+    def test_frozenset_membership_is_exact(self) -> None:
+        from cpip.index.source_models import (
+            INSTALLABLE_ARTIFACT_KINDS,
+            SOURCE_ARTIFACT_KINDS,
+            ArtifactKind,
+        )
+
+        assert ArtifactKind.SDIST in SOURCE_ARTIFACT_KINDS
+        assert ArtifactKind.SOURCE_TREE in SOURCE_ARTIFACT_KINDS
+        assert ArtifactKind.WHEEL not in SOURCE_ARTIFACT_KINDS
+        assert ArtifactKind.METADATA not in SOURCE_ARTIFACT_KINDS
+        assert ArtifactKind.UNKNOWN not in SOURCE_ARTIFACT_KINDS
+
+        assert ArtifactKind.WHEEL in INSTALLABLE_ARTIFACT_KINDS
+        assert ArtifactKind.SDIST in INSTALLABLE_ARTIFACT_KINDS
+        assert ArtifactKind.SOURCE_TREE in INSTALLABLE_ARTIFACT_KINDS
+        assert ArtifactKind.METADATA not in INSTALLABLE_ARTIFACT_KINDS
+
+    def test_members_are_stable_dict_keys(self) -> None:
+        from cpip.index.source_models import ArtifactKind
+
+        mapping = {kind: kind.value for kind in ArtifactKind}
+
+        for kind in ArtifactKind:
+            assert mapping[kind] == kind.value
+
+        # Equality is still identity-based and consistent with the hash.
+        assert hash(ArtifactKind.WHEEL) == hash(ArtifactKind.WHEEL)
+        assert ArtifactKind.WHEEL == ArtifactKind.WHEEL
+        assert ArtifactKind.WHEEL != ArtifactKind.SDIST
