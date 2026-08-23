@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from benchmark_support import (
     reset_caches,
     simple_index_html,
@@ -415,3 +416,37 @@ def test_compute_best_candidate(benchmark: BenchmarkFixture) -> None:
 
     result = benchmark(compute_best)
     assert result.best_candidate is not None
+
+
+def test_catalog_links_from_cache(
+    benchmark: BenchmarkFixture,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """load_links() rebuilding Link objects from a cached PyPI-scale catalog.
+
+    Sized to a large real project (boto3's page holds ~2000 artifacts); every
+    warm resolve pays this materialization once per project page.
+    """
+    from cpip.index.catalog_cache import load_links, save_links
+    from cpip.network.cache import SafeFileCache
+
+    cache = SafeFileCache(str(tmp_path_factory.mktemp("catalog-links-cache")))
+    page_url = "https://example.invalid/simple/package/"
+    links = [
+        Link.from_url(
+            f"https://example.invalid/packages/{filename}",
+            source_url=page_url,
+            text=filename,
+            hashes={"sha256": "a" * 64},
+            requires_python=">=3.9",
+        )
+        for filename in wheel_filenames(2000)
+    ]
+    save_links(cache, page_url, links)
+
+    def load_all() -> int:
+        loaded = load_links(cache, page_url)
+        assert loaded is not None
+        return len(loaded)
+
+    assert benchmark(load_all) == 2000
