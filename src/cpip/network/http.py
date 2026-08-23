@@ -8,7 +8,7 @@ import io
 import json
 import logging
 import os
-import platform
+import sys
 import threading
 import time
 import urllib.parse
@@ -347,7 +347,11 @@ class NetworkSession:
         if version is None:
             version = get_cpip_version()
 
-        return f"cpip/{version} Python/{platform.python_version()}"
+        # `platform.python_version()` is this expression, and importing
+        # `platform` for it costs the session a module it never uses again.
+        python_version = "%s.%s.%s" % sys.version_info[:3]
+
+        return f"cpip/{version} Python/{python_version}"
 
     def get(self, url: str, **kwargs: Any) -> HttpResponse:
         return self.request("GET", url, **kwargs)
