@@ -76,6 +76,30 @@ def test_build_backend_includes_package_data(tmp_path: Path) -> None:
         assert "data_pkg/__pycache__/module.pyc" not in names
 
 
+def test_build_backend_packages_pep639_license_metadata(tmp_path: Path) -> None:
+    project = write_project(tmp_path, "licensed-pkg", "licensed_pkg", "1.0")
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8")
+        + 'license = "MIT"\nlicense-files = ["LICENSE.txt"]\n',
+        encoding="utf-8",
+    )
+    project.joinpath("LICENSE.txt").write_text("license text\n", encoding="utf-8")
+    wheel_dir = tmp_path / "wheelhouse"
+
+    wheel_name = ProjectBuilder(project).build_wheel(wheel_dir)
+
+    with zipfile.ZipFile(wheel_dir / wheel_name) as archive:
+        metadata = archive.read("licensed_pkg-1.0.dist-info/METADATA").decode()
+        license_text = archive.read(
+            "licensed_pkg-1.0.dist-info/licenses/LICENSE.txt",
+        ).decode()
+    assert "Metadata-Version: 2.4\n" in metadata
+    assert "License-Expression: MIT\n" in metadata
+    assert "License-File: LICENSE.txt\n" in metadata
+    assert license_text == "license text\n"
+
+
 def test_build_backend_builds_editable_wheel(tmp_path: Path) -> None:
     project = write_project(tmp_path, "editable-pkg", "editable_pkg", "1.0")
     wheel_dir = tmp_path / "wheelhouse"

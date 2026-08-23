@@ -14,11 +14,27 @@ in the host environment.
 | idna | 3.18 | BSD-3-Clause |
 | nab-resolver | 0.0.13.dev0 | MIT |
 | typing_extensions | 4.16.0 | PSF-2.0 |
+| tomli | 2.4.1 | MIT |
+| distlib Windows launchers | frozen snapshot inherited from pip | PSF-2.0 |
 
-The corresponding license texts are under `licenses/`. To refresh this stack,
-resolve each pinned release above for Python 3.9, copy the package sources
-and license texts here, remove generated caches and native optional modules,
-then update this file and run the full test suite.
+License texts are stored under `licenses/`, except for Tomli's
+`tomli/LICENSE` and the launchers' `launchers/DISTLIB-LICENSE.txt`. The latter
+is also the PSF-2.0 text governing typing_extensions. The launcher binaries
+are intentionally frozen with this repository; their SHA-256 digests are:
+
+| File | SHA-256 |
+| --- | --- |
+| `t32.exe` | `6b4195e273829081ff4d7791bbd0b017225419137e3e33f6d923b39686602851` |
+| `t64-arm.exe` | `ebc4c06eff219664a64398a5e00ec81e3a6638f280b4a90ccf8c841e7613893a` |
+| `t64.exe` | `81a618ca943182b187a3c32f4ae568b95cfbba8a8e0868947a27ee595d68c94b` |
+| `w32.exe` | `47872c86af0b7489d7fd68cd9a3db115b34d890e304f47df028205fbb5efd191` |
+| `w64-arm.exe` | `c5dc988aa16622c2526218b19cfd25fbd08e04ed93fb843ca5e2c85c09db3411` |
+| `w64.exe` | `7a319ffa0897977b424381955759ee774146360bffebae16f4253f17040248c2` |
+
+To refresh the Python stack, resolve each pinned release above for Python
+3.10, copy the package sources and license texts here, remove generated
+caches and native optional modules, then update this file and run the full
+test suite. The launcher snapshot is not part of that refresh process.
 
 ## Local patches
 
