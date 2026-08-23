@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from cpip.vcs.git import Git
-from cpip.vcs.versioncontrol import VersionControl, vcs
+from cpip.vcs.versioncontrol import BUILTIN_BACKENDS, VersionControl, vcs
 
 
 @pytest.fixture
@@ -94,3 +94,38 @@ def test_git_subdirectory_with_a_gitdir_file_still_asks_git(
 
     assert Git.get_subdirectory(str(worktree / "pkg")) == "pkg"
     assert commands == [["rev-parse", "--git-dir"]]
+
+
+def test_builtin_backend_table_matches_the_backend_classes() -> None:
+    """``BUILTIN_BACKENDS`` is what lets ``get_backend_for_dir`` find the
+    marker directory of a backend it has not imported. If a backend's name or
+    ``dirname`` ever moves, the table has to move with it -- otherwise
+    detection silently stops finding that VCS."""
+    vcs._ensure_builtin_backends_loaded()
+
+    table = {
+        name: (module_name, dirname) for module_name, name, dirname in BUILTIN_BACKENDS
+    }
+
+    assert set(table) == set(vcs.registry_internal)
+
+    for name, backend in vcs.registry_internal.items():
+        module_name, dirname = table[name]
+        assert dirname == backend.dirname
+        assert type(backend).__module__ == f"cpip.vcs.{module_name}"
+
+
+def test_marker_detection_imports_only_the_matching_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A checkout carrying one marker directory loads that backend's module
+    and leaves the other three unimported."""
+    monkeypatch.setattr(vcs, "_builtin_backends_loaded", False)
+    monkeypatch.setattr(
+        vcs,
+        "_ensure_builtin_backends_loaded",
+        lambda: pytest.fail("all four backends were loaded"),
+    )
+    (tmp_path / ".git").mkdir()
+
+    assert vcs.get_backend_for_dir(str(tmp_path)) is vcs.registry_internal["git"]

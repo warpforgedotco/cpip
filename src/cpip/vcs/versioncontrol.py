@@ -165,6 +165,16 @@ class RevOptions:
         return self.vc_class.make_rev_options(rev, extra_args=self.extra_args)
 
 
+BUILTIN_BACKENDS = (
+    # (module, registered name, marker directory), in the order
+    # ``_ensure_builtin_backends_loaded`` registers them.
+    ("bazaar", "bzr", ".bzr"),
+    ("git", "git", ".git"),
+    ("mercurial", "hg", ".hg"),
+    ("subversion", "svn", ".svn"),
+)
+
+
 class VcsSupport:
     registry_internal: dict[str, VersionControl] = {}
     schemes = ["ssh", "git", "hg", "bzr", "sftp", "svn"]
@@ -185,6 +195,12 @@ class VcsSupport:
         except BaseException:
             self._builtin_backends_loaded = False
             raise
+
+    def _load_builtin_backend(self, module_name: str) -> None:
+        """Load one builtin backend module, leaving the other three alone."""
+        import importlib
+
+        importlib.import_module(f".{module_name}", __package__)
 
     def __iter__(self) -> Iterator[str]:
         self._ensure_builtin_backends_loaded()
@@ -222,19 +238,31 @@ class VcsSupport:
         """Return a VersionControl object if a repository of that type is found
         at the given directory.
         """
-        self._ensure_builtin_backends_loaded()
         # The innermost root wins below, and no root can be deeper than
         # ``location`` itself: a backend whose marker directory sits right
         # in ``location`` is the answer without asking the others -- each
         # of which would otherwise spawn its command (``hg root``,
         # ``bzr root``, ``svn info``) just to learn it owns nothing here.
-        found = None
-        for vcs_backend in self.registry_internal.values():
-            if vcs_backend.is_repository_directory(location):
-                found = vcs_backend
-        if found is not None:
+        #
+        # That first pass reads nothing but each backend's marker directory
+        # name, which BUILTIN_BACKENDS states directly (and
+        # ``test_builtin_backend_table_matches_the_backend_classes`` pins it
+        # against the
+        # classes). So the module holding the winner is the only one that has
+        # to be imported -- worth avoiding, since between them the four drag
+        # in ``configparser`` and a second subprocess stack for repositories
+        # the caller does not have. Last match still wins, in the same
+        # registration order as loading all four and walking the registry.
+        found_backend = None
+        for module_name, backend_name, dirname in BUILTIN_BACKENDS:
+            if os.path.exists(os.path.join(location, dirname)):
+                found_backend = (module_name, backend_name)
+        if found_backend is not None:
+            self._load_builtin_backend(found_backend[0])
+            found = self.registry_internal[found_backend[1]]
             logger.debug("Determine that %s uses VCS: %s", location, found.name)
             return found
+        self._ensure_builtin_backends_loaded()
         vcs_backends = {}
         for vcs_backend in self.registry_internal.values():
             repo_path = vcs_backend.get_repository_root(location)
