@@ -293,6 +293,11 @@ class MultiDomainBasicAuth:
         self.keyring_provider = keyring_provider
         self.passwords: dict[str, AuthInfo] = {}
         self.credentials_to_save: Credentials | None = None
+        self.credential_cache: dict[str, tuple[str, str | None, str | None]] = {}
+        self.prepared_index_urls_internal: (
+            list[tuple[str, urllib.parse.SplitResult, urllib.parse.SplitResult]] | None
+        ) = None
+        self.index_urls_snapshot_internal: tuple[str, ...] = ()
 
     @property
     def keyring_provider(self) -> KeyRingBaseProvider:
@@ -330,6 +335,28 @@ class MultiDomainBasicAuth:
             get_keyring_provider.cache_clear()
             return None
 
+    def prepared_index_urls(
+        self,
+    ) -> list[tuple[str, urllib.parse.SplitResult, urllib.parse.SplitResult]]:
+        """Split the configured index URLs once, refreshing when they change."""
+        snapshot = tuple(self.index_urls) if self.index_urls else ()
+        prepared = self.prepared_index_urls_internal
+        if prepared is None or snapshot != self.index_urls_snapshot_internal:
+            self.credential_cache.clear()
+            prepared = []
+            for index in snapshot:
+                index = index.rstrip("/") + "/"
+                prepared.append(
+                    (
+                        index,
+                        urllib.parse.urlsplit(remove_auth_from_url(index)),
+                        urllib.parse.urlsplit(index),
+                    ),
+                )
+            self.prepared_index_urls_internal = prepared
+            self.index_urls_snapshot_internal = snapshot
+        return prepared
+
     def get_index_url(self, url: str) -> str | None:
         """Return the original index URL matching the requested URL.
 
@@ -346,22 +373,21 @@ class MultiDomainBasicAuth:
         if not url or not self.index_urls:
             return None
 
+        prepared = self.prepared_index_urls()
+
         url = remove_auth_from_url(url).rstrip("/") + "/"
         parsed_url = urllib.parse.urlsplit(url)
 
         candidates = []
 
-        for index in self.index_urls:
-            index = index.rstrip("/") + "/"
-            parsed_index = urllib.parse.urlsplit(remove_auth_from_url(index))
+        for index, parsed_index, parsed_with_auth in prepared:
             if parsed_url == parsed_index:
                 return index
 
             if parsed_url.netloc != parsed_index.netloc:
                 continue
 
-            candidate = urllib.parse.urlsplit(index)
-            candidates.append(candidate)
+            candidates.append(parsed_with_auth)
 
         if not candidates:
             return None
@@ -442,6 +468,11 @@ class MultiDomainBasicAuth:
         that even if the original URL contains credentials, this
         function may return a different username and password.
         """
+        self.prepared_index_urls()
+        cached = self.credential_cache.get(original_url)
+        if cached is not None:
+            return cached
+
         url, netloc, _ = split_auth_netloc_from_url(original_url)
 
         username, password = self.get_new_credentials(original_url)
@@ -455,13 +486,17 @@ class MultiDomainBasicAuth:
             username = username or ""
             password = password or ""
 
-            self.passwords[netloc] = (username, password)
+            if self.passwords.get(netloc) != (username, password):
+                self.passwords[netloc] = (username, password)
+                self.credential_cache.clear()
 
         assert (username is not None and password is not None) or (
             username is None and password is None
         ), f"Could not load credentials from url: {original_url}"
 
-        return url, username, password
+        result = url, username, password
+        self.credential_cache[original_url] = result
+        return result
 
     def prompt_for_password(self, netloc: str) -> tuple[str | None, str | None, bool]:
         username = ask_input(f"User for {netloc}: ") if self.prompting else None
@@ -502,6 +537,7 @@ class MultiDomainBasicAuth:
             return username, password, None
         netloc = urllib.parse.urlsplit(url).netloc
         self.passwords[netloc] = (username, password)
+        self.credential_cache.clear()
         credentials = None
         if save and self.should_save_password_to_keyring_internal():
             credentials = Credentials(url=netloc, username=username, password=password)
@@ -529,6 +565,7 @@ class MultiDomainBasicAuth:
         self.credentials_to_save = None
         if username is not None and password is not None:
             self.passwords[parsed.netloc] = (username, password)
+            self.credential_cache.clear()
 
             if save and self.should_save_password_to_keyring_internal():
                 self.credentials_to_save = Credentials(
