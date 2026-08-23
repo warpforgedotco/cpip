@@ -442,11 +442,15 @@ class NetworkSession:
                 return cached
 
             if cached_metadata is not None:
-                for name in ("etag", "last-modified"):
-                    value = cached_metadata.get(name)
+                etag = cached_metadata.get("etag")
 
-                    if value:
-                        request_headers[name.title()] = str(value)
+                if etag:
+                    request_headers["If-None-Match"] = str(etag)
+
+                last_modified = cached_metadata.get("last_modified")
+
+                if last_modified:
+                    request_headers["If-Modified-Since"] = str(last_modified)
 
                 request.headers = request_headers
 

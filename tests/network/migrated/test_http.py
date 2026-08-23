@@ -126,3 +126,60 @@ def test_session_coalesces_concurrent_gets() -> None:
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+def test_session_revalidates_stale_cache_with_conditional_headers(
+    tmp_path,
+) -> None:
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        conditional_headers: dict[str, str | None] = {}
+        full_responses = 0
+
+        def do_GET(self) -> None:
+            if self.headers.get("If-None-Match") or self.headers.get(
+                "If-Modified-Since",
+            ):
+                type(self).conditional_headers = {
+                    "If-None-Match": self.headers.get("If-None-Match"),
+                    "If-Modified-Since": self.headers.get("If-Modified-Since"),
+                }
+                self.send_response(304)
+                self.end_headers()
+                return
+            type(self).full_responses += 1
+            body = b"cached body"
+            self.send_response(200)
+            self.send_header("ETag", '"tag-1"')
+            self.send_header("Last-Modified", "Mon, 01 Jan 2024 00:00:00 GMT")
+            self.send_header("Cache-Control", "max-age=0")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        session = NetworkSession(cache=str(tmp_path / "http-cache"))
+        url = f"http://127.0.0.1:{server.server_port}/catalog"
+
+        first = session.get(url)
+        assert first.content == b"cached body"
+        assert not first.from_cache
+
+        second = session.get(url)
+        assert second.content == b"cached body"
+        assert second.from_cache
+        assert Handler.full_responses == 1
+        assert Handler.conditional_headers == {
+            "If-None-Match": '"tag-1"',
+            "If-Modified-Since": "Mon, 01 Jan 2024 00:00:00 GMT",
+        }
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
