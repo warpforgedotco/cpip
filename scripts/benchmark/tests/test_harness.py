@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ from cpip_benchmark.cli import (
     expand_workloads,
 )
 from cpip_benchmark.hyperfine import Command, Hyperfine
+from cpip_benchmark.runner import run_chain
 from cpip_benchmark.workloads import (
     OFFICIAL_WORKLOAD_NAMES,
     OFFICIAL_WORKLOADS,
@@ -89,17 +91,11 @@ def test_direct_launcher_uses_generated_wrapper(tmp_path: Path) -> None:
     )
 
 
-def test_hyperfine_dry_run_contains_prepare_and_names() -> None:
-    run = Hyperfine(
+def example_run(*commands: Command, setup: str | None = None) -> Hyperfine:
+    return Hyperfine(
         name="example",
-        commands=[
-            Command(
-                "cpip (example)",
-                "rm -rf target",
-                ["python", "-m", "cpip", "--help"],
-            ),
-        ],
-        setup=None,
+        commands=list(commands),
+        setup=setup,
         warmup=0,
         min_runs=None,
         runs=1,
@@ -108,10 +104,138 @@ def test_hyperfine_dry_run_contains_prepare_and_names() -> None:
         ignore_failure=False,
     )
 
+
+def test_hyperfine_dry_run_contains_prepare_and_names() -> None:
+    run = example_run(
+        Command(
+            "cpip (example)",
+            "python -m cpip_benchmark.runner cleanup --path target",
+            ["python", "-m", "cpip", "--help"],
+        ),
+    )
+
     args = run.args()
-    assert args[:3] == ["hyperfine", "--export-json", "example.json"]
+    assert args[:4] == ["hyperfine", "-N", "--export-json", "example.json"]
     assert "--prepare" in args
     assert "cpip (example)" in args
+
+
+def test_hyperfine_always_disables_the_shell() -> None:
+    # /bin/sh is SIP-protected on macOS and strips DYLD_* from every command it
+    # spawns, so an injected profiler never attaches to the measured process.
+    run = example_run(Command("cpip (example)", None, ["python", "--version"]))
+
+    assert "-N" in run.args()
+
+
+def test_hyperfine_omits_prepare_when_no_command_prepares() -> None:
+    # hyperfine rejects an empty --prepare under --shell=none.
+    run = example_run(Command("cpip (example)", None, ["python", "--version"]))
+
+    assert "--prepare" not in run.args()
+
+
+def test_hyperfine_pads_a_missing_prepare_with_a_no_op() -> None:
+    # --prepare is positional across commands, so a command without one still
+    # needs a slot -- and that slot has to be a command that runs and succeeds.
+    run = example_run(
+        Command("cpip (example)", "python -m cpip_benchmark.runner cleanup", ["a"]),
+        Command("uv (example)", None, ["b"]),
+    )
+
+    args = run.args()
+    prepares = [args[index + 1] for index, arg in enumerate(args) if arg == "--prepare"]
+    assert len(prepares) == 2
+    assert all("cpip_benchmark.runner" in prepare for prepare in prepares)
+
+
+def test_hyperfine_carries_env_on_its_own_process() -> None:
+    # Wrapping each command to set env would put a Python startup inside the
+    # timed region, so the vars ride on hyperfine and are inherited.
+    run = example_run(
+        Command("cpip (example)", None, ["a"], {"PYTHONPATH": "/src"}),
+        Command("uv (example)", None, ["b"]),
+    )
+
+    assert run.environment() == {"PYTHONPATH": "/src"}
+    assert not any("PYTHONPATH" in arg for arg in run.args())
+
+
+def test_hyperfine_rejects_commands_that_disagree_on_env() -> None:
+    run = example_run(
+        Command("cpip (example)", None, ["a"], {"PYTHONPATH": "/one"}),
+        Command("uv (example)", None, ["b"], {"PYTHONPATH": "/two"}),
+    )
+
+    try:
+        run.environment()
+    except ValueError as error:
+        assert "PYTHONPATH" in str(error)
+    else:
+        raise AssertionError("conflicting env accepted")
+
+
+def test_generated_preparation_never_needs_a_shell(tmp_path: Path) -> None:
+    for benchmark in BENCHMARKS:
+        commands = build_commands(
+            benchmark,
+            workload="offline",
+            workspace=tmp_path / benchmark,
+            cpip_python=sys.executable,
+            cpip_console=None,
+            cpip_launcher="module",
+            uv_path="uv",
+            python=sys.executable,
+        )
+        for command in commands:
+            prepare = command.prepare or ""
+            assert "&&" not in prepare
+            assert ";" not in prepare
+            if prepare:
+                assert "cpip_benchmark.runner" in prepare
+
+
+def test_warm_setup_chain_runs_every_step_in_order(tmp_path: Path) -> None:
+    target = tmp_path / "stale"
+    target.mkdir()
+    marker = tmp_path / "marker"
+    steps = [
+        {"kind": "cleanup", "path": [str(target)], "mkdir": []},
+        {
+            "kind": "run",
+            "command": [
+                sys.executable,
+                "-c",
+                (
+                    "import os,pathlib;"
+                    "pathlib.Path(os.environ['MARKER']).write_text('ran')"
+                ),
+            ],
+            "env": {"MARKER": str(marker)},
+        },
+    ]
+
+    assert run_chain(json.dumps(steps)) == 0
+    assert not target.exists()
+    assert marker.read_text(encoding="utf-8") == "ran"
+
+
+def test_chain_stops_at_the_first_failing_step(tmp_path: Path) -> None:
+    marker = tmp_path / "marker"
+    steps = [
+        {"kind": "run", "command": [sys.executable, "-c", "raise SystemExit(3)"]},
+        {
+            "kind": "run",
+            "command": [
+                sys.executable,
+                "-c",
+                f"open({str(marker)!r}, 'w').write('ran')",
+            ],
+        },
+    ]
+
+    assert run_chain(json.dumps(steps)) == 3
+    assert not marker.exists()
 
 
 def test_offline_workload_contains_installable_wheels(tmp_path: Path) -> None:
