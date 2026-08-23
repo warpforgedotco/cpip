@@ -14,7 +14,6 @@ Three entry points cover three target states, all guarded by
 from __future__ import annotations
 
 import atexit
-import hashlib
 import marshal
 import os
 import stat
@@ -28,20 +27,17 @@ from cpip.core.versions import Version
 from cpip.core.utils import CACHE_INTERPRETER_TAG, load_snapshot, save_snapshot
 from cpip.core.wheel import PureWheelCandidate, WheelCandidate
 from cpip.core.wheel import parse_wheel_filename as parse_wheel_filename_core
-from cpip.install.target import InstallTarget
-from cpip.install.wheel_archive import mode_from_external_attr
-from cpip.install.wheel_archive_cache import prepare_cached_wheel
-from cpip.install.wheel_archive_installer import install_wheels_from_archive_cache
-from cpip.install.wheel_install_plan_cache import (
-    REMOTE_EXACT_CONTEXT,
-    exact_install_plan_key_from_strings,
-    load_cached_install_plan,
-)
 from cpip.platform.clone import clone_path
-from cpip.resolution.archive import (
-    WheelArchive,
-    WheelhouseUnavailable,
-)
+
+# Everything the plan-hit route never touches is imported at its call site
+# instead. That route -- an empty target, a cached plan, a cloned tree -- is
+# the one this module exists for, and importing this module is the single
+# real cost `cli.fast` pays to reach it (see its dispatch comment). The
+# archive reader, the staged/archive-cache installers, the install target and
+# `hashlib` are all reached only when the plan misses, the wheelhouse has to
+# be read, or a tree is published, and each drags in a chain of its own:
+# `wheel_archive_cache` alone pulls `shutil`, `typing` and `csv`, and
+# `install.target` pulls `sysconfig` twice over.
 
 # Scoped to the interpreter: marshal's wire format is not guaranteed
 # compatible across Python versions/implementations. TREE_CACHE_BUCKET does
@@ -354,6 +350,11 @@ class FastInstallMetadataCache:
         value = self.plans.get(key)
         if value is None:
             return
+
+        # Deferred: publishing a tree happens once per wheelhouse, while
+        # every later install reads the published tree without hashing.
+        import hashlib
+
         tree_key = hashlib.sha256(
             marshal.dumps(
                 ("cpip-fast-install-tree", key, value[0]),
@@ -619,6 +620,18 @@ def run_cached_remote(args: list[str]) -> int | None:
     if index_url is None:
         return None
 
+    # Deferred: the whole archive-cache installer stack, reached only once an
+    # index URL and a cached remote plan are both in hand.
+    from cpip.install.target import InstallTarget
+    from cpip.install.wheel_archive_installer import (
+        install_wheels_from_archive_cache,
+    )
+    from cpip.install.wheel_install_plan_cache import (
+        REMOTE_EXACT_CONTEXT,
+        exact_install_plan_key_from_strings,
+        load_cached_install_plan,
+    )
+
     keyed = exact_install_plan_key_from_strings(
         tuple(options.requirements),
         (
@@ -833,6 +846,8 @@ def wheel_metadata(
             dependencies, pure = cached
 
             return list(dependencies), pure
+
+    from cpip.resolution.archive import WheelArchive, WheelhouseUnavailable
 
     try:
         with open(path, "rb") as wheel_file:
@@ -1052,6 +1067,10 @@ def install_resolved_pure_wheels(
     requested_roots: set[str],
 ) -> bool:
     """Install an already-resolved pure-wheel plan into an empty target."""
+
+    # Deferred: extraction only runs when no cached tree could be cloned.
+    from cpip.install.wheel_archive import mode_from_external_attr
+    from cpip.resolution.archive import WheelArchive, WheelhouseUnavailable
 
     target = os.path.abspath(target)
 
@@ -1457,6 +1476,15 @@ def run_local_fallback(args: list[str]) -> int | None:
                 or any(character in requirement for character in "[];@<>,!")
             ):
                 return None
+
+    # Deferred: this route installs into a populated target through the full
+    # archive-cache installer, so it pays for that stack; `run` above, which
+    # clones a cached tree into an empty one, never reaches this line.
+    from cpip.install.target import InstallTarget
+    from cpip.install.wheel_archive_cache import prepare_cached_wheel
+    from cpip.install.wheel_archive_installer import (
+        install_wheels_from_archive_cache,
+    )
 
     metadata_cache = None
 
