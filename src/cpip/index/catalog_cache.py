@@ -314,22 +314,28 @@ def valid_version_text(value: object) -> bool:
 
 
 def valid_group(value: object) -> bool:
-    return (
-        isinstance(value, tuple)
-        and len(value) == 4
-        and isinstance(value[0], str)
-        and valid_version_text(value[1])
-        and isinstance(value[2], list)
-        and isinstance(value[3], list)
-        and all(
-            isinstance(artifact, tuple)
-            and len(artifact) == 2
-            and isinstance(artifact[0], int)
-            and valid_record(artifact[1])
-            for artifact in value[2]
-        )
-        and all(valid_fact(fact) for fact in value[3])
-    )
+    if type(value) is not tuple or len(value) != 4:
+        return False
+    name, version, artifacts, facts = value
+    if (
+        type(name) is not str
+        or type(artifacts) is not list
+        or type(facts) is not list
+        or not valid_version_text(version)
+    ):
+        return False
+    for artifact in artifacts:
+        if (
+            type(artifact) is not tuple
+            or len(artifact) != 2
+            or type(artifact[0]) is not int
+            or not valid_record(artifact[1])
+        ):
+            return False
+    for fact in facts:
+        if not valid_fact(fact):
+            return False
+    return True
 
 
 def valid_summary_group(value: object) -> bool:
@@ -346,67 +352,73 @@ def valid_summary_group(value: object) -> bool:
 
 
 def valid_str_dict(value: object) -> bool:
-    return isinstance(value, dict) and all(
-        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
-    )
+    if type(value) is not dict:
+        return False
+    for key, item in value.items():
+        if type(key) is not str or type(item) is not str:
+            return False
+    return True
 
 
 def valid_record(value: object) -> bool:
-    """One full validation at load time: link_from_record trusts its input."""
-    if not isinstance(value, tuple) or len(value) != 9:
+    """One full validation at load time: link_from_record trusts its input.
+
+    Marshal only rebuilds exact built-in types, so ``type(...) is`` checks
+    are equivalent to ``isinstance`` here and keep this loop cheap.
+    """
+    if type(value) is not tuple or len(value) != 9:
         return False
     (url, text, hashes, requires_python, yanked, metadata, upload_time, _, parts) = (
         value
     )
-    if not isinstance(url, str) or not isinstance(text, str):
+    if type(url) is not str or type(text) is not str:
         return False
     if not valid_str_dict(hashes):
         return False
-    if requires_python is not None and not isinstance(requires_python, str):
+    if requires_python is not None and type(requires_python) is not str:
         return False
-    if yanked is not None and not isinstance(yanked, str):
+    if yanked is not None and type(yanked) is not str:
         return False
     if metadata is not None and not valid_str_dict(metadata):
         return False
-    if upload_time is not None and not isinstance(upload_time, str):
+    if upload_time is not None and type(upload_time) is not str:
         return False
-    if (
-        not isinstance(parts, tuple)
-        or len(parts) != 5
-        or not all(isinstance(part, str) for part in parts)
-    ):
+    if type(parts) is not tuple or len(parts) != 5:
         return False
+    for part in parts:
+        if type(part) is not str:
+            return False
     identity = value[RECORD_WHEEL_IDENTITY]
     if identity is None:
         return True
-    if not isinstance(identity, tuple) or len(identity) != 4:
+    if type(identity) is not tuple or len(identity) != 4:
         return False
     tags = identity[WHEEL_IDENTITY_TAGS]
-    if not isinstance(tags, tuple):
+    if (
+        type(tags) is not tuple
+        or type(identity[WHEEL_IDENTITY_NAME]) is not str
+        or type(identity[WHEEL_IDENTITY_VERSION]) is not str
+    ):
         return False
-    return (
-        isinstance(identity[WHEEL_IDENTITY_NAME], str)
-        and isinstance(identity[WHEEL_IDENTITY_VERSION], str)
-        and (
-            identity[WHEEL_IDENTITY_BUILD_TAG] is None
-            or isinstance(identity[WHEEL_IDENTITY_BUILD_TAG], str)
-        )
-        and all(
-            isinstance(tag, tuple)
-            and len(tag) == 3
-            and all(isinstance(part, str) for part in tag)
-            for tag in tags
-        )
-    )
+    build_tag = identity[WHEEL_IDENTITY_BUILD_TAG]
+    if build_tag is not None and type(build_tag) is not str:
+        return False
+    for tag in tags:
+        if type(tag) is not tuple or len(tag) != 3:
+            return False
+        for part in tag:
+            if type(part) is not str:
+                return False
+    return True
 
 
 def valid_fact(value: object) -> bool:
     return (
-        isinstance(value, tuple)
+        type(value) is tuple
         and len(value) == 3
-        and isinstance(value[0], int)
-        and (value[1] is None or isinstance(value[1], str))
-        and (value[2] is None or isinstance(value[2], str))
+        and type(value[0]) is int
+        and (value[1] is None or type(value[1]) is str)
+        and (value[2] is None or type(value[2]) is str)
     )
 
 
