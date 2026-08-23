@@ -29,8 +29,10 @@ from cpip.index.catalog_cache import (
     RECORD_YANKED,
     SDIST_RECORD,
     WHEEL_RECORD,
+    group_artifacts_by_version,
     link_from_record,
     load_catalog,
+    load_catalog_checked,
     load_choices,
     save_choices,
     wheel_file_from_record,
@@ -169,6 +171,11 @@ class CandidateProvider:
         self.catalog_artifact_group_cache: dict[
             tuple[str, str],
             dict[str, list[tuple[int, tuple[object, ...]]]],
+        ] = {}
+
+        self.catalog_checked_group_cache: dict[
+            tuple[str, str],
+            dict[str, list[tuple[int, tuple[object, ...]]]] | None,
         ] = {}
 
         self.catalog_choice_cache: dict[
@@ -585,22 +592,76 @@ class CandidateProvider:
         groups = self.catalog_artifact_group_cache.get(key)
 
         if groups is None:
-            groups = {}
-
             loaded = load_catalog(persistent_cache, source_url)
 
-            if loaded is not None:
-                for name, version_text, artifacts, _facts in loaded[0]:
-                    if name == catalog_key[0]:
-                        existing = groups.get(version_text)
-                        if existing is None:
-                            groups[version_text] = list(artifacts)
-                        else:
-                            existing.extend(artifacts)
+            groups = (
+                {}
+                if loaded is None
+                else group_artifacts_by_version(loaded, catalog_key[0])
+            )
 
             self.catalog_artifact_group_cache[key] = groups
 
         return groups.get(version.public, [])
+
+    def _checked_catalog_groups_for(
+        self,
+        name: str,
+        persistent_cache: Any,
+        source_url: str,
+        generation: str,
+    ) -> dict[str, list[tuple[int, tuple[object, ...]]]] | None:
+        """One project's artifacts per version, or None when no stored
+        catalog still matches ``generation`` (missing blob, eviction, or a
+        concurrent regeneration)."""
+
+        key = (source_url, generation)
+
+        if key in self.catalog_checked_group_cache:
+            return self.catalog_checked_group_cache[key]
+
+        loaded = load_catalog_checked(persistent_cache, source_url, generation)
+
+        groups = (
+            None if loaded is None else group_artifacts_by_version(loaded, name)
+        )
+
+        self.catalog_checked_group_cache[key] = groups
+
+        return groups
+
+    def _fill_catalog_choice(
+        self,
+        catalog_key: tuple[str, bool, bool],
+        supported_tags: tuple[Any, ...],
+        choices: dict[str, tuple[tuple[object, ...], int, int | None] | None],
+        persistent_cache: Any,
+        source_url: str,
+        generation: str,
+        version: Version,
+    ) -> bool:
+        """Compute and store one release's choice with the exact inputs the
+        full path would use; False declines (the persisted catalog cannot
+        back a generation-verified fill)."""
+
+        groups = self._checked_catalog_groups_for(
+            catalog_key[0],
+            persistent_cache,
+            source_url,
+            generation,
+        )
+
+        if groups is None:
+            return False
+
+        choices[version.public] = self._select_catalog_choice(
+            catalog_key,
+            supported_tags,
+            groups.get(version.public, []),
+            version,
+        )
+
+        return True
 
     @staticmethod
     def _eligible_catalog_records(
@@ -820,18 +881,16 @@ class CandidateProvider:
                         version_text = version.public
 
                         if version_text not in choices:
-                            choices[version_text] = self._select_catalog_choice(
+                            if not self._fill_catalog_choice(
                                 catalog_key,
                                 supported_tags,
-                                self._catalog_artifacts_for(
-                                    catalog_key,
-                                    persistent_cache,
-                                    source_url,
-                                    generation,
-                                    version,
-                                ),
+                                choices,
+                                persistent_cache,
+                                source_url,
+                                generation,
                                 version,
-                            )
+                            ):
+                                continue
 
                             dirty_choices.add(
                                 (
