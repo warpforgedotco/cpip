@@ -12,6 +12,7 @@ startup path.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 
@@ -22,8 +23,70 @@ if TYPE_CHECKING:
     from typing import Any, NoReturn
 
 
+_terminal_columns: int | None = None
+
+
+def terminal_columns() -> int:
+    """``shutil.get_terminal_size().columns``, once, and without ``shutil``.
+
+    ``HelpFormatter.__init__`` asks for the terminal width whenever it is
+    built without an explicit one, and ``add_argument`` builds one *per
+    argument* to validate the metavar against ``nargs``. So constructing a
+    single command parser imports ``shutil`` -- and ``zlib``, ``bz2`` and
+    ``lzma`` behind it, none of which argparse uses -- and issues one
+    terminal-size ``ioctl`` per option it declares.
+
+    The width cannot change inside one run, so it is read once here, by the
+    same rule ``shutil.get_terminal_size`` uses: ``COLUMNS`` wins when it
+    parses to a positive integer, otherwise the real terminal, otherwise 80.
+    """
+
+    global _terminal_columns
+
+    if _terminal_columns is None:
+        try:
+            columns = int(os.environ["COLUMNS"])
+        except (KeyError, ValueError):
+            columns = 0
+
+        if columns <= 0:
+            stream = sys.__stdout__
+            columns = 80
+
+            if stream is not None:
+                try:
+                    columns = os.get_terminal_size(stream.fileno()).columns
+                except (AttributeError, ValueError, OSError):
+                    columns = 80
+
+        _terminal_columns = columns
+
+    return _terminal_columns
+
+
 class HelpFormatter(argparse.HelpFormatter):
     """Keep option metavar placement stable across supported Python versions."""
+
+    def __init__(
+        self,
+        prog: str,
+        indent_increment: int = 2,
+        max_help_position: int = 24,
+        width: int | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        # Filling the width in here is what keeps `shutil` off the path; the
+        # remaining parameters are passed through positionally because 3.14
+        # adds more of them after `width`.
+        super().__init__(
+            prog,
+            indent_increment,
+            max_help_position,
+            terminal_columns() - 2 if width is None else width,
+            *args,
+            **kwargs,
+        )
 
     def _format_action_invocation(self, action: argparse.Action) -> str:
         if not action.option_strings:
