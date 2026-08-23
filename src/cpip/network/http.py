@@ -38,6 +38,17 @@ logger = logging.getLogger(__name__)
 
 RETRY_STATUS_CODES = frozenset((500, 502, 503, 520, 527))
 
+_NOT_UPDATED_BY_304 = frozenset(
+    (
+        "content-length",
+        "content-encoding",
+        "content-range",
+        "content-type",
+        "transfer-encoding",
+        "connection",
+    ),
+)
+
 
 class _MissingCacheExpiry(enum.Enum):
     """Single-member enum so ``is not`` narrowing keeps the ``float | None`` type."""
@@ -557,7 +568,11 @@ class NetworkSession:
             if response.status_code == 304 and cached_metadata is not None:
                 response.close()
 
-                return self.revalidated_response(request, cached_metadata)
+                return self.revalidated_response(
+                    request,
+                    cached_metadata,
+                    response.headers,
+                )
 
             if method == "GET" and not stream and response.status_code == 200:
                 self.cache_response(response)
@@ -765,6 +780,7 @@ class NetworkSession:
         self,
         request: HttpRequest,
         metadata: dict[str, Any],
+        response_headers: Any = None,
     ) -> HttpResponse:
         self.fresh_cached_response_cache.pop(request.url, None)
 
@@ -773,14 +789,42 @@ class NetworkSession:
         if not isinstance(headers, dict):
             headers = {}
 
-        expires_at = self.cache_expiry(headers)
+        if response_headers is not None:
+            headers = dict(headers)
+
+            lowered = {name.lower(): name for name in headers}
+
+            for name, value in response_headers.items():
+                key = name.lower()
+
+                if key in _NOT_UPDATED_BY_304:
+                    continue
+
+                existing = lowered.get(key)
+
+                if existing is not None and existing != name:
+                    del headers[existing]
+
+                headers[name] = str(value)
+
+                lowered[key] = name
+
+        merged = HeaderDict(headers)
+
+        expires_at = self.cache_expiry(merged)
 
         if expires_at is None:
             expires_at = time.time()
 
         updated = dict(metadata)
 
+        updated["headers"] = headers
+
         updated["expires_at"] = expires_at
+
+        updated["etag"] = merged.get("ETag")
+
+        updated["last_modified"] = merged.get("Last-Modified")
 
         self.cache.set(request.url, json.dumps(updated).encode("utf-8"))
 
@@ -795,7 +839,7 @@ class NetworkSession:
             status_code=int(metadata.get("status", 200)),
             reason=str(metadata.get("reason", "OK")),
             url=request.url,
-            headers=HeaderDict(headers),
+            headers=merged,
             raw=body,
             request=request,
             from_cache=True,

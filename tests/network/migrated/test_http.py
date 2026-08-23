@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -135,8 +136,10 @@ def test_session_revalidates_stale_cache_with_conditional_headers(
         protocol_version = "HTTP/1.1"
         conditional_headers: dict[str, str | None] = {}
         full_responses = 0
+        requests = 0
 
         def do_GET(self) -> None:
+            type(self).requests += 1
             if self.headers.get("If-None-Match") or self.headers.get(
                 "If-Modified-Since",
             ):
@@ -145,6 +148,8 @@ def test_session_revalidates_stale_cache_with_conditional_headers(
                     "If-Modified-Since": self.headers.get("If-Modified-Since"),
                 }
                 self.send_response(304)
+                self.send_header("ETag", '"tag-2"')
+                self.send_header("Cache-Control", "max-age=3600")
                 self.end_headers()
                 return
             type(self).full_responses += 1
@@ -174,11 +179,21 @@ def test_session_revalidates_stale_cache_with_conditional_headers(
         second = session.get(url)
         assert second.content == b"cached body"
         assert second.from_cache
+        assert second.headers.get("ETag") == '"tag-2"'
         assert Handler.full_responses == 1
         assert Handler.conditional_headers == {
             "If-None-Match": '"tag-1"',
             "If-Modified-Since": "Mon, 01 Jan 2024 00:00:00 GMT",
         }
+
+        third = session.get(url)
+        assert third.content == b"cached body"
+        assert third.from_cache
+        assert Handler.requests == 2
+
+        stored = json.loads(session.cache.get(url).decode("utf-8"))
+        assert stored["etag"] == '"tag-2"'
+        assert stored["headers"]["Cache-Control"] == "max-age=3600"
     finally:
         server.shutdown()
         thread.join()
