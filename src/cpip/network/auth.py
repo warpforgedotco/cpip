@@ -31,16 +31,23 @@ logger = logging.getLogger(__name__)
 KEYRING_DISABLED = False
 
 
+@cache
+def load_netrc(netrc_path: str | None) -> netrc.netrc | None:
+    try:
+        return netrc.netrc(netrc_path)
+    except (FileNotFoundError, OSError, netrc.NetrcParseError):
+        return None
+
+
 def get_netrc_auth(url: str) -> tuple[str, str] | None:
     """Return credentials from the user's netrc file for ``url``."""
     parsed = urllib.parse.urlsplit(url)
     if not parsed.hostname:
         return None
-    try:
-        netrc_path = os.environ.get("NETRC")
-        auth = netrc.netrc(netrc_path).authenticators(parsed.hostname)
-    except (FileNotFoundError, OSError, netrc.NetrcParseError):
+    netrc_file = load_netrc(os.environ.get("NETRC"))
+    if netrc_file is None:
         return None
+    auth = netrc_file.authenticators(parsed.hostname)
     if auth is None:
         return None
     login, _, password = auth
