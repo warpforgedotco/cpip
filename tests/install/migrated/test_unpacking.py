@@ -74,13 +74,8 @@ class TestUnpackArchives:
         return mode
 
     def confirm_files(self) -> None:
-        # expectations based on the unpack logic that writes non-executable
-        # files/dirs with local defaults and sets executables to chmod +x.
-        # Some environments (e.g. with default ACLs) can alter the effective
-        # default mode even with a fixed umask, so probe defaults in tempdir.
         for fname, expected_mode, test, expected_contents in [
             ("file.txt", self.default_file_mode, os.path.isfile, b"file\n"),
-            # We don't test the "symlink.txt" contents for now.
             ("symlink.txt", self.default_file_mode, os.path.isfile, None),
             ("script_owner.sh", self.executable_mode, os.path.isfile, b"file\n"),
             ("script_group.sh", self.executable_mode, os.path.isfile, b"file\n"),
@@ -95,7 +90,6 @@ class TestUnpackArchives:
         ]:
             path = os.path.join(self.tempdir, fname)
             if path.endswith("symlink.txt") and sys.platform == "win32":
-                # no symlinks created on windows
                 continue
             assert test(path), path
             if expected_contents is not None:
@@ -103,8 +97,6 @@ class TestUnpackArchives:
                     contents = f.read()
                 assert contents == expected_contents, f"fname: {fname}"
             if sys.platform == "win32":
-                # the permissions tests below don't apply in windows
-                # because os.chmod() ignores the execute bit
                 continue
             mode = self.mode(path)
             assert mode == expected_mode, (
@@ -144,7 +136,6 @@ class TestUnpackArchives:
         test_file = data.packages.joinpath("test_tar.tgz")
         untar_file(os.fspath(test_file), self.tempdir)
         self.confirm_files()
-        # Check the timestamp of an extracted file
         file_txt_path = os.path.join(self.tempdir, "file.txt")
         mtime = time.gmtime(os.stat(file_txt_path).st_mtime)
         assert mtime[0:6] == (2013, 8, 16, 5, 13, 37), mtime
@@ -187,8 +178,6 @@ class TestUnpackArchives:
         with pytest.raises(InstallationError) as e:
             untar_file(test_tar, self.tempdir)
 
-        # The error message comes from tarfile.data_filter when it is available,
-        # otherwise from cpip's own check.
         if hasattr(tarfile, "data_filter"):
             assert "is outside the destination" in str(e.value)
         else:
@@ -272,8 +261,8 @@ class TestUnpackArchives:
         "input_prefix, unpack_prefix",
         [
             ("", ""),
-            ("dir/", ""),  # cpip ignores a common leading directory
-            ("dir/sub/", "sub/"),  # cpip ignores *one* common leading directory
+            ("dir/", ""),
+            ("dir/sub/", "sub/"),
         ],
     )
     def test_unpack_tar_links(self, input_prefix: str, unpack_prefix: str) -> None:
@@ -518,7 +507,6 @@ class TestUnpackArchives:
 
 def test_unpack_tar_unicode(tmp_path: Path) -> None:
     test_tar = tmp_path / "test.tar"
-    # tarfile tries to decode incoming
     with tarfile.open(test_tar, "w", format=tarfile.PAX_FORMAT, encoding="utf-8") as f:
         metadata = tarfile.TarInfo("dir/åäö_日本語.py")
         f.addfile(metadata, io.BytesIO(b"hello world"))
@@ -536,25 +524,15 @@ def test_unpack_tar_unicode(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "args, expected",
     [
-        # Test the second containing the first.
         (("parent/sub", "parent/"), False),
-        # Test the first not ending in a trailing slash.
         (("parent", "parent/foo"), True),
-        # Test target containing `..` but still inside the parent.
         (("parent/", "parent/foo/../bar"), True),
-        # Test target within the parent
         (("parent/", "parent/sub"), True),
-        # Test target outside parent
         (("parent/", "parent/../sub"), False),
-        # Test target sub-string of parent
         (("parent/child", "parent/childfoo"), False),
-        # Test target equal to the directory
         (("/srv/env/bin", "/srv/env/bin"), True),
-        # Test target within a doubled-slash directory
         (("//srv/env/bin", "//srv/env/bin/cpip"), True),
-        # Test target outside a doubled-slash directory
         (("//srv/env/bin", "//srv/env/outside"), False),
-        # Test target on a different drive
         (("C:\\env\\bin", "D:\\outside"), False),
     ],
 )
@@ -566,13 +544,9 @@ def test_is_within_directory(args: tuple[str, str], expected: bool) -> None:
 @pytest.mark.parametrize(
     "is_zip, is_tar, unzip, untar, exception",
     [
-        # zip file
         (True, False, True, False, False),
-        # tar file
         (False, True, False, True, False),
-        # neither zip nor tar
         (False, False, False, False, True),
-        # ambiguous (both zip and tar)
         (True, True, False, False, True),
     ],
 )
@@ -613,10 +587,8 @@ def test_magic_signature_check_logic(
 @pytest.mark.parametrize(
     "filename, content_type, unzip, untar",
     [
-        # content_type check
         ("noname", "application/zip", True, False),
         ("noname", "application/x-gzip", False, True),
-        # filename check
         ("ok.zip", None, True, False),
         ("ok.tar.gz", None, False, True),
     ],

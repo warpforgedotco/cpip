@@ -105,9 +105,6 @@ class KeyRingPythonProvider(KeyRingBaseProvider):
         self.keyring = keyring
 
     def get_auth_info(self, url: str, username: str | None) -> AuthInfo | None:
-        # Support keyring's get_credential interface which supports getting
-        # credentials without a username. This is only available for
-        # keyring>=15.2.0.
         if hasattr(self.keyring, "get_credential"):
             logger.debug("Getting credentials from keyring for %s", url)
             cred = self.keyring.get_credential(url, username)
@@ -151,8 +148,6 @@ class KeyRingCliProvider(KeyRingBaseProvider):
         if self.keyring is None:
             return None
 
-        # Only the keyring-CLI auth backend needs subprocess; keep it off
-        # every other network request.
         import subprocess
 
         cmd = [self.keyring, "--mode=creds", "--output=json", "get", service_name]
@@ -169,8 +164,6 @@ class KeyRingCliProvider(KeyRingBaseProvider):
             env=env,
         )
 
-        # Detect if the user is running an outdated version of keyring without support
-        # for querying credentials without username
         errs = res.stderr.decode("utf-8")
         if (
             res.returncode == 2
@@ -213,7 +206,6 @@ class KeyRingCliProvider(KeyRingBaseProvider):
 def get_keyring_provider(provider: str) -> KeyRingBaseProvider:
     logger.debug("Keyring provider requested: %s", provider)
 
-    # keyring has previously failed and been disabled
     if KEYRING_DISABLED:
         provider = "disabled"
     cli = shutil.which("keyring")
@@ -242,15 +234,13 @@ def get_keyring_provider(provider: str) -> KeyRingBaseProvider:
         except ImportError:
             pass
         except Exception as exc:
-            # In the event of an unexpected exception
-            # we should warn the user
             msg = "Installed copy of keyring fails with exception %s"
             if provider == "auto":
                 msg = msg + ", trying to find a keyring executable as a fallback"
             logger.warning(msg, exc, exc_info=logger.isEnabledFor(logging.DEBUG))
     if provider in ["subprocess", "auto"]:
         if cli and cli.startswith(sysconfig.get_path("scripts")):
-            # all code within this function is stolen from shutil.which implementation
+
             @typing.no_type_check
             def PATH_as_shutil_which_determines_it() -> str:
                 path = os.environ.get("PATH", None)
@@ -258,10 +248,7 @@ def get_keyring_provider(provider: str) -> KeyRingBaseProvider:
                     try:
                         path = os.confstr("CS_PATH")
                     except (AttributeError, ValueError):
-                        # os.confstr() or CS_PATH is not available
                         path = os.defpath
-                # bpo-35755: Don't use os.defpath if the PATH environment variable is
-                # set to an empty string
 
                 return path
 
@@ -298,11 +285,6 @@ class MultiDomainBasicAuth:
         self.index_urls = index_urls
         self.keyring_provider = keyring_provider
         self.passwords: dict[str, AuthInfo] = {}
-        # When the user is prompted to enter credentials and keyring is
-        # available, we will offer to save them. If the user accepts,
-        # this value is set to the credentials they entered. After the
-        # request authenticates, the caller should call
-        # ``save_credentials`` to save these.
         self.credentials_to_save: Credentials | None = None
 
     @property
@@ -311,17 +293,10 @@ class MultiDomainBasicAuth:
 
     @keyring_provider.setter
     def keyring_provider(self, provider: str) -> None:
-        # The free function get_keyring_provider has been decorated with
-        # functools.cache. If an exception occurs in get_keyring_auth that
-        # cache will be cleared and keyring disabled, take that into account
-        # if you want to remove this indirection.
         self.keyring_provider_internal = provider
 
     @property
     def use_keyring(self) -> bool:
-        # We won't use keyring when --no-input is passed unless
-        # a specific provider is requested because it might require
-        # user interaction
         return self.prompting or self.keyring_provider_internal not in [
             "auto",
             "disabled",
@@ -333,16 +308,12 @@ class MultiDomainBasicAuth:
         username: str | None,
     ) -> AuthInfo | None:
         """Return the tuple auth for a given url from keyring."""
-        # Do nothing if no url was provided
         if not url:
             return None
         try:
             return self.keyring_provider.get_auth_info(url, username)
         except Exception as exc:
-            # Log the full exception (with stacktrace) at debug, so it'll only
-            # show up when running in verbose mode.
             logger.debug("Keyring is skipped due to an exception", exc_info=True)
-            # Always log a shortened version of the exception.
             logger.warning(
                 "Keyring is skipped due to an exception: %s",
                 str(exc),
@@ -410,43 +381,35 @@ class MultiDomainBasicAuth:
         allow_keyring: bool = False,
     ) -> AuthInfo:
         """Find and return credentials for the specified URL."""
-        # Split the credentials and netloc from the url.
         url, netloc, url_user_password = split_auth_netloc_from_url(
             original_url,
         )
 
-        # Start with the credentials embedded in the url
         username, password = url_user_password
         if username is not None and password is not None:
             logger.debug("Found credentials in url for %s", netloc)
             return url_user_password
 
-        # Find a matching index url for this request
         index_url = self.get_index_url(url)
         if index_url:
-            # Split the credentials from the url.
             index_info = split_auth_netloc_from_url(index_url)
             if index_info:
                 index_url, _, index_url_user_password = index_info
                 logger.debug("Found index url %s", index_url)
 
-        # If an index URL was found, try its embedded credentials
         if index_url and index_url_user_password[0] is not None:
             username, password = index_url_user_password
             if username is not None and password is not None:
                 logger.debug("Found credentials in index url for %s", netloc)
                 return index_url_user_password
 
-        # Get creds from netrc if we still don't have them
         if allow_netrc:
             netrc_auth = get_netrc_auth(original_url)
             if netrc_auth:
                 logger.debug("Found credentials in netrc for %s", netloc)
                 return netrc_auth
 
-        # If we don't have a password and keyring is available, use it.
         if allow_keyring:
-            # The index url is more specific than the netloc, so try it first
             # fmt: off
             kr_auth = (
                 self.get_keyring_auth(index_url, username) or
@@ -474,41 +437,25 @@ class MultiDomainBasicAuth:
         """
         url, netloc, _ = split_auth_netloc_from_url(original_url)
 
-        # Try to get credentials from original url
         username, password = self.get_new_credentials(original_url)
 
-        # If credentials not found, use any stored credentials for this netloc.
-        # Do this if either the username or the password is missing.
-        # This accounts for the situation in which the user has specified
-        # the username in the index url, but the password comes from keyring.
         if (username is None or password is None) and netloc in self.passwords:
             un, pw = self.passwords[netloc]
-            # It is possible that the cached credentials are for a different username,
-            # in which case the cache should be ignored.
             if username is None or username == un:
                 username, password = un, pw
 
         if username is not None or password is not None:
-            # Convert the username and password if they're None, so that
-            # this netloc will show up as "cached" in the conditional above.
-            # Further, HTTPBasicAuth doesn't accept None, so it makes sense to
-            # cache the value that is going to be used.
             username = username or ""
             password = password or ""
 
-            # Store any acquired credentials.
             self.passwords[netloc] = (username, password)
 
-        assert (
-            # Credentials were found
-            (username is not None and password is not None)
-            # Credentials were not found
-            or (username is None and password is None)
+        assert (username is not None and password is not None) or (
+            username is None and password is None
         ), f"Could not load credentials from url: {original_url}"
 
         return url, username, password
 
-    # Factored out to allow for easy patching in tests
     def prompt_for_password(self, netloc: str) -> tuple[str | None, str | None, bool]:
         username = ask_input(f"User for {netloc}: ") if self.prompting else None
         if not username:
@@ -520,7 +467,6 @@ class MultiDomainBasicAuth:
         password = ask_password("Password: ")
         return username, password, True
 
-    # Factored out to allow for easy patching in tests
     def should_save_password_to_keyring_internal(self) -> bool:
         if (
             not self.prompting
@@ -555,40 +501,28 @@ class MultiDomainBasicAuth:
         return username, password, credentials
 
     def handle_401(self, resp: Any, **kwargs: Any) -> Any:
-        # We only care about 401 responses, anything else we want to just
-        #   pass through the actual response
         if resp.status_code != 401:
             return resp
 
-        # Look for credentials for the (possibly redirected) URL. Credentials
-        # embedded in the URL -- e.g. carried in the ``Location`` of a
-        # cross-origin redirect, whose ``Authorization`` header requests strips
-        # -- are always honoured, since recovering them needs no user
-        # interaction. Keyring is only consulted when it is enabled, because it
-        # may require interaction and is therefore disabled under --no-input.
         username, password = self.get_new_credentials(
             resp.url,
             allow_netrc=False,
             allow_keyring=self.use_keyring,
         )
 
-        # We are not able to prompt the user so simply return the response
         if not self.prompting and not username and not password:
             return resp
 
         parsed = urllib.parse.urlparse(resp.url)
 
-        # Prompt the user for a new username and password
         save = False
         if not username and not password:
             username, password, save = self.prompt_for_password(parsed.netloc)
 
-        # Store the new username and password to use for future requests
         self.credentials_to_save = None
         if username is not None and password is not None:
             self.passwords[parsed.netloc] = (username, password)
 
-            # Prompt to save the password to keyring
             if save and self.should_save_password_to_keyring_internal():
                 self.credentials_to_save = Credentials(
                     url=parsed.netloc,
@@ -596,10 +530,6 @@ class MultiDomainBasicAuth:
                     password=password,
                 )
 
-        # Consume content and release the original connection to allow our new
-        #   request to reuse the same one.
-        # The result of the assignment isn't used, it's just needed to consume
-        # the content.
         _ = resp.content
         resp.raw.release_conn()
 

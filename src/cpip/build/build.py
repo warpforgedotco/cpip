@@ -15,10 +15,6 @@ def build_wheel_from_source(
     build_constraints: list[str] | None = None,
     build_isolation: bool = True,
 ) -> str:
-    # unpack_source()/unpack_source_internal() callers (e.g. cli/lock.py)
-    # never need a real build, so keep build_backend's much heavier import
-    # chain (configparser/email.parser/subprocess/tarfile/zipfile/csv/
-    # hashlib) off that path.
     from .build_backend import ProjectBuilder
 
     source_text = os.fspath(source)
@@ -80,8 +76,6 @@ def build_editable_from_source(
             )
             builder.prepare_metadata(editable=editable_metadata)
         except BuildError as exc:
-            # Let build_editable translate a missing PEP 660 hook into the
-            # standard actionable error. Other metadata failures remain fatal.
             if "build_editable" not in str(exc):
                 raise
             if os.path.isfile(os.path.join(source_text, "setup.py")) and os.path.isfile(
@@ -107,9 +101,6 @@ def build_editable_from_source(
 
 
 def default_wheel_dir() -> str:
-    # Each process and build invocation gets its own directory.  A shared
-    # predictable directory lets one process' atexit cleanup delete another
-    # process' in-flight wheel.
     return default_wheel_dir_internal()
 
 
@@ -124,8 +115,6 @@ def unpack_source(source: str, destination: str) -> str:
 
 
 def unpack_source_internal(source: str, destination: str) -> str:
-    # Only sdist/archive sources reach this -- an already-unpacked directory
-    # source never calls it, so keep archive machinery off the common path.
     from cpip.core.errors import InstallationError
     from cpip.platform.unpacking import ArchiveExtractor
 

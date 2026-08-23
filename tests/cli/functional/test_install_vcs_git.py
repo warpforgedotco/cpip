@@ -234,7 +234,6 @@ def test_git_with_short_sha1_revisions(script: CpipTestEnvironment) -> None:
         script,
         version_pkg_path,
         rev=sha1,
-        # WARNING: Did not find branch or tag ..., assuming revision or ref.
         allow_stderr_warning=True,
     )
     assert version == "0.1"
@@ -274,7 +273,6 @@ def test_git_install_ref(script: CpipTestEnvironment) -> None:
         script,
         version_pkg_path,
         rev="refs/foo/bar",
-        # WARNING: Did not find branch or tag ..., assuming revision or ref.
         allow_stderr_warning=True,
     )
     assert version == "0.1"
@@ -291,12 +289,10 @@ def test_git_install_then_install_ref(script: CpipTestEnvironment) -> None:
     version = install_version_pkg(script, version_pkg_path)
     assert version == "some different version"
 
-    # Now install the ref.
     version = install_version_pkg(
         script,
         version_pkg_path,
         rev="refs/foo/bar",
-        # WARNING: Did not find branch or tag ..., assuming revision or ref.
         allow_stderr_warning=True,
     )
     assert version == "0.1"
@@ -306,11 +302,8 @@ def test_git_install_then_install_ref(script: CpipTestEnvironment) -> None:
 @pytest.mark.parametrize(
     "rev, expected_sha",
     [
-        # Clone the default branch
         ("", "96d6d72ac54132aecbdd5adac88bc8d1f8fb986b"),
-        # Clone a specific tag
         ("@0.1.1", "7d654e66c8fa7149c165ddeffa5b56bc06619458"),
-        # Clone a specific commit
         (
             "@65cf0a5bdd906ecf48a0ac241c17d656d2071d56",
             "65cf0a5bdd906ecf48a0ac241c17d656d2071d56",
@@ -328,7 +321,6 @@ def test_install_git_logs_commit_sha(
     base_local_url = github_checkout(url_path, tmpdir)
     local_url = f"{base_local_url}{rev}#egg=pip-test-package"
     result = script.cpip("install", local_url)
-    # `[4:]` removes a 'git+' prefix
     assert f"Resolved {base_local_url[4:]} to commit {expected_sha}" in result.stdout
 
 
@@ -414,8 +406,6 @@ def test_git_with_ambiguous_revs(script: CpipTestEnvironment) -> None:
     script.run("git", "tag", "0.1", cwd=version_pkg_path)
     result = script.cpip("install", "--no-build-isolation", "-e", version_pkg_url)
     assert "Could not find a tag or branch" not in result.stdout
-    # it is 'version-pkg' instead of 'version_pkg' because
-    # egg-link name is version-pkg.egg-link because it is a single .py module
     result.assert_installed("version_pkg", with_files=[".git"])
 
 
@@ -436,7 +426,6 @@ def test_editable__branch_with_sha_same_as_default(script: CpipTestEnvironment) 
     of the default branch, but is different from the default branch.
     """
     version_pkg_path = create_test_package(script.scratch_path)
-    # Create a second branch with the same SHA.
     script.run("git", "branch", "develop", cwd=version_pkg_path)
     install_version_pkg_only(script, version_pkg_path, rev="develop")
 
@@ -454,9 +443,7 @@ def test_editable__branch_with_sha_different_from_default(
     the sha of the default branch.
     """
     version_pkg_path = create_test_package(script.scratch_path)
-    # Create a second branch.
     script.run("git", "branch", "develop", cwd=version_pkg_path)
-    # Add another commit to the master branch to give it a different sha.
     change_test_package_version(script, version_pkg_path)
 
     version = install_version_pkg(script, version_pkg_path, rev="develop")
@@ -474,8 +461,6 @@ def test_editable__non_master_default_branch(script: CpipTestEnvironment) -> Non
     with a non-master default branch.
     """
     version_pkg_path = create_test_package(script.scratch_path)
-    # Change the default branch of the remote repo to a name that is
-    # alphabetically after "master".
     script.run("git", "checkout", "-b", "release", cwd=version_pkg_path)
     install_version_pkg_only(script, version_pkg_path)
 
@@ -491,7 +476,6 @@ def test_reinstalling_works_with_editable_non_master_branch(
     """
     version_pkg_path = create_test_package(script.scratch_path)
 
-    # Switch the default branch to something other than 'master'
     script.run("git", "branch", "-m", "foobar", cwd=version_pkg_path)
 
     version = install_version_pkg(script, version_pkg_path)
@@ -502,7 +486,6 @@ def test_reinstalling_works_with_editable_non_master_branch(
     assert version == "some different version"
 
 
-# TODO(pnasrat) fix all helpers to do right things with paths on windows.
 @pytest.mark.skipif("sys.platform == 'win32'")
 @pytest.mark.xfail(
     condition=True,
@@ -530,7 +513,6 @@ def test_check_submodule_addition(script: CpipTestEnvironment) -> None:
         rel_path="testpkg/static",
     )
 
-    # expect error because git may write to stderr
     update_result = script.cpip(
         "install",
         "-e",
@@ -549,7 +531,6 @@ def test_install_git_branch_not_cached(script: CpipTestEnvironment) -> None:
     result = script.cpip("install", "--no-build-isolation", url, "--only-binary=:all:")
     assert f"Successfully built {PKG}" in result.stdout, result.stdout
     script.cpip("uninstall", "-y", PKG)
-    # build occurs on the second install too because it is not cached
     result = script.cpip("install", "--no-build-isolation", url)
     assert f"Successfully built {PKG}" in result.stdout, result.stdout
 
@@ -563,6 +544,5 @@ def test_install_git_sha_cached(script: CpipTestEnvironment) -> None:
     result = script.cpip("install", "--no-build-isolation", url)
     assert f"Successfully built {PKG}" in result.stdout, result.stdout
     script.cpip("uninstall", "-y", PKG)
-    # build does not occur on the second install because it is cached
     result = script.cpip("install", "--no-build-isolation", url)
     assert f"Successfully built {PKG}" not in result.stdout, result.stdout

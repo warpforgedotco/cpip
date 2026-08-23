@@ -43,7 +43,7 @@ def call_subprocess(
     *,
     command_desc: str,
 ) -> str:
-    import subprocess as subprocess_internal
+    import subprocess
 
     env = os.environ.copy()
     if extra_environ:
@@ -56,13 +56,11 @@ def call_subprocess(
         command_desc,
     )
     try:
-        process = subprocess_internal.Popen(
+        process = subprocess.Popen(
             command_args_to_argv(cmd),
-            stdin=subprocess_internal.PIPE,
-            stdout=subprocess_internal.PIPE,
-            stderr=subprocess_internal.PIPE
-            if stdout_only
-            else subprocess_internal.STDOUT,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE if stdout_only else subprocess.STDOUT,
             cwd=cwd,
             env=env,
             encoding="locale",

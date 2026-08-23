@@ -274,8 +274,6 @@ class TestFastUntarDeclines:
     ) -> None:
         archive_path = tmp_path / "longname.tar.gz"
 
-        # Long enough that GNU format must use a longname (@LongLink)
-        # extension header rather than the plain prefix mechanism.
         very_long_name = "pkg/" + "x" * 40 + "/" + "y" * 40 + "/" + "z" * 40 + "/f.txt"
 
         members = {
@@ -350,10 +348,6 @@ class TestFastUntarDeclines:
 
         raw = bytearray(archive_path.read_bytes())
 
-        # The second header starts one block (the first header) plus the
-        # first member's data, padded up to the next 512-byte boundary --
-        # flip a byte in the second header's name field to break its
-        # checksum.
         first_size = len(b"extracted before corruption is discovered")
 
         padded_first_size = -(-first_size // 512) * 512
@@ -383,7 +377,6 @@ class TestFastUntarDeclines:
 
         raw = archive_path.read_bytes()
 
-        # Cut off well before any end-of-archive marker.
         archive_path.write_bytes(raw[:600])
 
         dest = tmp_path / "dest"
@@ -493,7 +486,7 @@ class TestFastUntarEmptyArchive:
         archive_path = tmp_path / "empty.tar.gz"
 
         with tarfile.open(archive_path, "w:gz"):
-            pass  # no members added
+            pass
 
         dest = tmp_path / "dest"
 
@@ -577,8 +570,6 @@ class TestChecksumHelpers:
 
         buf[156:157] = b"0"
 
-        # A byte with the high bit set makes the unsigned and signed sums
-        # diverge -- put one in a field _checksum_ok sums over.
         buf[5] = 0xFF
 
         unsigned_ref, signed_ref = tarfile.calc_chksums(  # ty:ignore[unresolved-attribute]
@@ -594,8 +585,6 @@ class TestChecksumHelpers:
         assert not tar_reader._checksum_ok(bytes(buf), unsigned_ref + 1)
 
     def test_gnu_binary_size_encoding(self) -> None:
-        # A GNU binary-encoded field (high bit set on the first byte) for a
-        # value too large for a 12-byte octal field.
         field = (0o200).to_bytes(1, "big") + (12_345_678_901).to_bytes(11, "big")
 
         assert tar_reader._nti(field) == 12_345_678_901
@@ -698,7 +687,6 @@ def test_parse_header_matches_tarfile_frombuf() -> None:
         assert parsed is not None
         expected = tarfile.TarInfo.frombuf(buf, "utf-8", "surrogateescape")
         parsed_name, typeflag, mode, size, mtime = parsed
-        # frombuf already strips a directory's trailing slash, as _parse_header does.
         assert parsed_name == expected.name
         assert typeflag == expected.type
         assert (mode, size, mtime) == (expected.mode, expected.size, expected.mtime)

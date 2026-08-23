@@ -439,14 +439,6 @@ class InstallRequirement:
             self.name,
         )
 
-        # Keep the source URL and the user's requirement constraints when the
-
-        # project name is discovered from metadata.  Re-parsing only the name
-
-        # turns a directory requirement into an unconstrained requirement and
-
-        # loses the link used to associate it with its source candidate.
-
         self.req = ParsedRequirement(
             name=canonicalize_name(metadata_name),
             specifier=self.req.specifier,
@@ -470,10 +462,10 @@ class InstallRequirement:
 
     def load_pyproject_toml(self) -> dict[str, object]:
         try:
-            import tomllib
+            from tomllib import loads
 
         except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
-            from cpip._vendor import tomli as tomllib
+            from cpip._vendor.tomli import loads
 
         if self.source_dir is None:
             raise InstallationError("Install requirement has no source directory")
@@ -488,7 +480,7 @@ class InstallRequirement:
 
         try:
             with open(pyproject, encoding="utf-8") as file:
-                data = tomllib.loads(file.read())
+                data = loads(file.read())
 
         except OSError:
             try:
@@ -503,8 +495,6 @@ class InstallRequirement:
 
             data = {
                 "build-system": {
-                    # setuptools 82 removed pkg_resources, which is still
-                    # imported by many legacy setup.py files.
                     "requires": ["setuptools>=40.8.0,<82"],
                     "build-backend": "setuptools.build_meta:__legacy__",
                 },
@@ -581,12 +571,6 @@ class InstallRequirement:
                 for parsed in parsed_requires
             )
         ):
-            # setuptools 82 removed pkg_resources, which is still imported by
-
-            # many setup.py files. Keep compatible projects on the last line
-
-            # that provides that API while preserving explicit >=82 requests.
-
             self.pyproject_requires.append("setuptools<82")
 
         self.requirements_to_check = []

@@ -184,7 +184,6 @@ def test_relative_requirements_file(
     dist_info_folder = script.site_packages / "fspkg-0.1.dev0.dist-info"
     package_folder = script.site_packages / "fspkg"
 
-    # Compute relative install path to FSPkg from scratch path.
     full_rel_path = os.path.relpath(
         data.packages.joinpath("FSPkg"),
         script.scratch_path,
@@ -199,7 +198,6 @@ def test_relative_requirements_file(
     }[test_type]
 
     req_path = req_path.replace(os.path.sep, "/")
-    # Install as either editable or not.
     if not editable:
         with requirements_file(req_path + "\n", script.scratch_path) as reqs_file:
             result = script.cpip(
@@ -320,7 +318,6 @@ def test_multiple_constraints_files(
     assert "installed Upper-1.0" in result.stdout
 
 
-# FIXME: Unclear what this guarantee is for.
 def test_respect_order_in_requirements_file(
     script: CpipTestEnvironment,
     data: TestData,
@@ -432,7 +429,6 @@ def test_wheel_user_with_prefix_in_pydistutils_cfg(
         data.find_links,
         "requiresupper",
     )
-    # Check that we are really installing a wheel
     assert "installed requiresupper" in result.stdout
 
 
@@ -489,7 +485,6 @@ def test_constraints_local_editable_install_causes_error(
         to_install,
         expect_error=True,
     )
-    # Because singlemodule only has 0.0.1 available.
     assert "Cannot install singlemodule 0.0.1" in result.stderr, str(result)
 
 
@@ -521,7 +516,6 @@ def test_constraints_local_install_causes_error(
         to_install,
         expect_error=True,
     )
-    # Because singlemodule only has 0.0.1 available.
     assert "No matching distribution found for singlemodule" in result.stderr, str(
         result
     )
@@ -606,13 +600,11 @@ def test_double_install_spurious_hash_mismatch(
     causes spurious mismatch errors.
 
     """
-    # Install wheel package, otherwise, it won't try to build wheels.
     with requirements_file(
         "simple==1.0 --hash=sha256:393043e672415891885c9a2a"
         "0929b1af95fb866d6ca016b42d2e6ce53619b653",
         tmpdir,
     ) as reqs_file:
-        # Install a package (and build its wheel):
         result = script.cpip_install_local(
             "--find-links",
             data.find_links,
@@ -621,11 +613,8 @@ def test_double_install_spurious_hash_mismatch(
         )
         assert "Successfully installed simple-1.0" in str(result)
 
-        # Uninstall it:
         script.cpip("uninstall", "-y", "simple")
 
-        # Then install it again. We should not hit a hash mismatch, and the
-        # package should install happily.
         result = script.cpip_install_local(
             "--find-links",
             data.find_links,
@@ -639,7 +628,6 @@ def test_install_with_extras_from_constraints(
     script: CpipTestEnvironment,
     data: TestData,
 ) -> None:
-    # Make sure CpipDeprecationWarnings don't turn into errors
     script.environ["_CPIP_TEST_ENV"] = ""
     to_install = data.packages.joinpath("LocalExtras")
     file = script.temporary_file(
@@ -707,7 +695,6 @@ def test_install_with_extras_joined(
     script: CpipTestEnvironment,
     data: TestData,
 ) -> None:
-    # Make sure CpipDeprecationWarnings don't turn into errors
     script.environ["_CPIP_TEST_ENV"] = ""
     to_install = data.packages.joinpath("LocalExtras")
     file = script.temporary_file(
@@ -773,7 +760,6 @@ def test_install_distribution_union_with_constraints(
     script: CpipTestEnvironment,
     data: TestData,
 ) -> None:
-    # Make sure CpipDeprecationWarnings don't turn into errors
     script.environ["_CPIP_TEST_ENV"] = ""
     to_install = data.packages.joinpath("LocalExtras")
     script.scratch_path.joinpath("constraints.txt").write_text(f"{to_install}[bar]")
@@ -808,10 +794,6 @@ def test_install_distribution_union_conflicting_extras(
     script: CpipTestEnvironment,
     data: TestData,
 ) -> None:
-    # LocalExtras requires simple==1.0, LocalExtras[bar] requires simple==2.0;
-    # without a resolver, cpip does not detect the conflict between simple==1.0
-    # and simple==2.0. Once a resolver is added, this conflict should be
-    # detected.
     to_install = data.packages.joinpath("LocalExtras-0.0.2")
     result = script.cpip_install_local(
         to_install,
@@ -845,8 +827,6 @@ def test_install_unsupported_wheel_file(
     script: CpipTestEnvironment,
     data: TestData,
 ) -> None:
-    # Trying to install a local wheel with an incompatible version/type
-    # should fail.
     path = data.packages.joinpath("simple.dist-0.1-py1-none-invalid.whl")
     script.scratch_path.joinpath("wheel-file.txt").write_text(f"{path}\n")
     result = script.cpip(

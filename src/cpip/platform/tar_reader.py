@@ -50,7 +50,6 @@ if TYPE_CHECKING:
 
 BLOCKSIZE = 512
 
-# Matches shutil's own default copy buffer size (not exposed in typeshed).
 _COPY_BUFSIZE = 1024 * 1024 if sys.platform == "win32" else 64 * 1024
 
 _REGTYPE = b"0"
@@ -60,9 +59,6 @@ _SUPPORTED_TYPES = frozenset((_REGTYPE, _AREGTYPE, _DIRTYPE))
 
 _FAST_MODES = frozenset(("r:gz", "r"))
 
-# The ustar header's fixed-width fields, unpacked in one call instead of a
-# slice per field: name, mode, uid, gid, size, mtime, chksum, typeflag,
-# linkname, magic, version, uname, gname, devmajor, devminor, prefix.
 _HEADER = struct.Struct("100s8s8s8s12s12s8s1s100s6s2s32s32s8s8s155s")
 
 
@@ -71,10 +67,6 @@ class _NotFastCompatible(Exception):
 
 
 def _nti(field: bytes) -> int:
-    # Mirrors tarfile.nti(): a zero/space-padded octal ASCII field, or --
-    # when the first byte has its high bit set -- a GNU binary big-endian
-    # encoding used for values too large for the octal field (e.g. a
-    # multi-gigabyte member's size).
     first = field[0]
 
     if first in (0o200, 0o377):
@@ -85,9 +77,6 @@ def _nti(field: bytes) -> int:
 
         return n
 
-    # Up to the first NUL, as tarfile.nts() does; int() itself tolerates
-    # the surrounding spaces some writers pad with, so the common field
-    # costs one find, one slice and one conversion.
     end = field.find(b"\x00")
 
     text = field if end < 0 else field[:end]
@@ -103,22 +92,12 @@ def _nti(field: bytes) -> int:
 
 
 def _nts(field: bytes) -> str:
-    # Mirrors tarfile.nts() with this codebase's own tarfile.open(...,
-    # encoding="utf-8") call -- errors="surrogateescape" is tarfile's
-    # default and is never overridden there, so this never raises.
     end = field.find(b"\x00")
 
     return (field if end < 0 else field[:end]).decode("utf-8", "surrogateescape")
 
 
 def _checksum_ok(buf: bytes, expected: int) -> bool:
-    # Mirrors tarfile.calc_chksums(): sum every byte except the 8-byte
-    # chksum field itself (treated as if filled with ASCII spaces), in both
-    # unsigned and signed interpretations -- some tar writers (Sun, NeXT)
-    # compute it with signed chars. bytes iterates as unsigned ints, so the
-    # signed sum subtracts 256 from any byte with its high bit set.
-    # One C-level pass over the whole block, minus the chksum field, instead
-    # of two slice copies summed separately.
     unsigned = 256 + sum(buf) - sum(buf[148:156])
 
     if unsigned == expected:
@@ -181,8 +160,6 @@ def _parse_header(buf: bytes) -> tuple[str, bytes, int, int, int] | None:
 
     prefix = _nts(prefix_field)
 
-    # Old V7 tar represents a directory as a regular file with a trailing
-    # slash.
     if typeflag == _AREGTYPE and name.endswith("/"):
         typeflag = _DIRTYPE
 
@@ -190,23 +167,12 @@ def _parse_header(buf: bytes) -> tuple[str, bytes, int, int, int] | None:
         name = name.rstrip("/")
 
         if size:
-            # A directory shouldn't carry a data payload. The extraction
-            # loop doesn't consume one for _DIRTYPE, so a crafted header
-            # claiming one here would otherwise desync the stream and parse
-            # that payload as the next header.
             raise _NotFastCompatible("directory member has data")
 
-    # Reconstruct a ustar longname.
     if prefix:
         name = f"{prefix}/{name}"
 
     if not name or size < 0 or "\\" in name:
-        # A backslash in the name is either a literal POSIX filename
-        # character or (per split_leading_dir()) a directory separator on
-        # Windows-authored archives -- ambiguous in a way this reader can't
-        # resolve without unpacking.py's own leading-dir-stripping logic,
-        # so it declines rather than risk writing it as a literal filename
-        # when the caller would have treated it as a path.
         raise _NotFastCompatible("malformed header field")
 
     return name, typeflag, mode, size, mtime
@@ -275,9 +241,6 @@ def _open_stream(filename: str, mode: str) -> _ReadableStream:
 
 
 def _discard_destination_contents(location: str) -> None:
-    # The caller only reaches here after verifying `location` was empty, so
-    # anything inside it now was written by this attempt -- safe to nuke
-    # outright rather than track individual paths to undo.
     try:
         with os.scandir(location) as entries:
             children = list(entries)
@@ -333,11 +296,6 @@ def fast_untar(filename: str, location: str, mode: str) -> list[str] | None:
 
     created_directories = {absolute_location}
 
-    # Members are overwhelmingly siblings, so the join, abspath, containment
-    # check and dirname are done once per archive directory and the bare
-    # name appended per member; a name whose last component is empty, "."
-    # or ".." keeps the original per-member path so nothing about its
-    # handling changes.
     directories: dict[str, tuple[str, str]] = {}
 
     extracted_names: list[str] = []
@@ -364,10 +322,6 @@ def fast_untar(filename: str, location: str, mode: str) -> list[str] | None:
 
             directory, _, base = name.rpartition("/")
 
-            # An absolute name must keep the per-member handling: joined
-            # onto the location it *replaces* it, which is what the
-            # containment check below rejects, whereas the directory cache
-            # would read "/foo" as a top-level "foo".
             if base and base != "." and base != ".." and name[0] != "/":
                 entry = directories.get(directory)
 

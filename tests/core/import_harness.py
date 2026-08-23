@@ -32,7 +32,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 
-# Everything else is dropped so the child cannot inherit a CPIP_* override.
 PASSTHROUGH_ENV = (
     "APPDATA",
     "COMSPEC",
@@ -64,7 +63,6 @@ def _argv():
     return ["cpip", *(raw.split("\\n") if raw else [])]
 """
 
-# ``python -m cpip``: the shape a user gets from an interpreter invocation.
 _RUNPY_SCRIPT = f"""{_PROLOGUE}
 import runpy
 
@@ -77,7 +75,6 @@ finally:
     _dump()
 """
 
-# The console script: ``cpip = "cpip.cli.entrypoint:main"`` in pyproject.toml.
 _DIRECT_SCRIPT = f"""{_PROLOGUE}
 sys.argv = _argv()
 from cpip.cli.entrypoint import main
@@ -90,8 +87,6 @@ finally:
     _dump()
 """
 
-# The same scaffolding with the cpip call removed, so subtracting it leaves
-# exactly what cpip was responsible for importing.
 _BASELINE_SCRIPTS = {
     False: f"{_PROLOGUE}\nimport runpy\n\n_dump()\n",
     True: f"{_PROLOGUE}\n_dump()\n",

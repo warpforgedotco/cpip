@@ -229,15 +229,9 @@ def open_wheel_archive(
         if raw is not None:
             return raw
 
-        # A layout this reader cannot serve (an unsupported compression
-        # method, a member over the streaming limit, or an older layout
-        # shape without mode bits): zipfile keeps the original modes.
         return zipfile.ZipFile(path)
 
     try:
-        # Unbuffered on purpose -- see candidate_materialization's
-        # _open_resolver_wheel_archive: WheelArchive reads with exact sizes
-        # and seeks, so buffering only adds per-open cost.
         file = open(path, "rb", buffering=0)  # noqa: SIM115
 
         archive = WheelArchive(file)

@@ -30,9 +30,6 @@ from benchmark_support import reset_caches  # noqa: E402
 
 MODULES = (versions, packaging, wheel, names, light_metadata, target_python)
 
-# Memos of process-constant derivations: their inputs cannot change while
-# the interpreter runs, so resetting them between benchmark iterations would
-# measure the derivation, not cpip.
 PROCESS_CONSTANTS = frozenset(
     {
         "cpip.core.wheel.supported_wheel_tags",
@@ -44,17 +41,17 @@ PROCESS_CONSTANTS = frozenset(
 def _caches(module: types.ModuleType) -> Iterator[tuple[str, Any]]:
     for name, value in vars(module).items():
         if name.startswith("__") or name.isupper():
-            continue  # dunders and constants
+            continue
         if hasattr(value, "cache_info"):
             if getattr(value, "__module__", module.__name__) != module.__name__:
-                continue  # re-exported from the module that owns it
+                continue
             yield f"{module.__name__}.{name}", value
         elif isinstance(value, (dict, set)):
             yield f"{module.__name__}.{name}", value
         elif isinstance(value, type) and value.__module__ == module.__name__:
             for attribute, member in vars(value).items():
                 if attribute.startswith("__"):
-                    continue  # __annotations__, __dict__ and friends
+                    continue
                 inner = getattr(member, "__func__", member)
                 if hasattr(inner, "cache_info"):
                     yield f"{module.__name__}.{name}.{attribute}", inner

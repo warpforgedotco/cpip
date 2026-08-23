@@ -26,8 +26,6 @@ def test_already_installed_names_are_reported_once(
     ), result.stdout
     assert not result.files_created
 
-    # The normal path (an option the recognizer does not take) prints the
-    # same lines, once each.
     result = script.cpip(
         "install",
         "--no-index",

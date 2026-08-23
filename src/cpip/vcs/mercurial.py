@@ -147,7 +147,6 @@ class Mercurial(VersionControl):
         """Return the path to Python project root, relative to the repo root.
         Return None if the project root is in the repo root.
         """
-        # find the repo root
         repo_root = cls.run_command(
             ["root"],
             show_stdout=False,

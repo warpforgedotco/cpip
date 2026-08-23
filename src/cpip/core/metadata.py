@@ -259,8 +259,6 @@ class InstalledDistribution:
 
 
 def default_lib_path() -> str:
-    # Deferred: the installed-distribution scan below reaches this only when a
-    # caller asks for the default search path, not to list a given one.
     import sysconfig
 
     return sysconfig.get_paths()["purelib"]
@@ -331,12 +329,6 @@ def _iter_raw_distributions(
                 yield PathDistribution(pathlib.Path(root, child))
 
 
-# The persistent store for parsed METADATA headers, if the command wired
-# one (cli/install does, with the wheel metadata cache): a default install
-# otherwise reads and parses every installed distribution's METADATA on
-# every run, ~0.1 ms each, just to learn names and versions that have not
-# changed since the last run. Keyed by the file's path, size and mtime, so a
-# replaced dist-info directory is always a miss.
 _header_cache: HeaderCache | None = None
 
 
@@ -410,11 +402,6 @@ def _iter_installed_distributions(
             if text is None:
                 continue
 
-            # Reading through parse_metadata_headers instead of dist.metadata
-            # avoids the full RFC822 email-parser cost for every installed
-            # distribution -- paid on every default (no --ignore-installed)
-            # resolve, for every package already in the environment, just to
-            # learn its name.
             headers = parse_metadata_headers(text)
 
         name = headers.get("name", [None])[0]
@@ -439,18 +426,12 @@ def _iter_installed_distributions(
 
         distribution = InstalledDistribution(
             name=name,
-            # Keep the metadata spelling intact.  Installed distributions
-            # may contain legacy versions that are not PEP 440 versions;
-            # presentation commands must still be able to inspect and
-            # remove them.
             version=str(version),
             location=location,
             metadata_location=(str(metadata_location) if metadata_location else None),
             raw=dist,
         )
 
-        # Already parsed above; seed the cache so dependencies() doesn't
-        # read and parse the same file a second time.
         distribution._fast_headers = headers
 
         yield distribution
@@ -467,27 +448,7 @@ def iter_installed_distributions(
     )
 
 
-# One environment scan per run instead of one per lookup.
-#
-# find_installed is asked once per package during a default (no
-# --ignore-installed) resolve, once per root requirement beforehand, and
-# again per candidate while reporting; each call used to re-walk every
-# sys.path entry through importlib.metadata and re-read every installed
-# distribution's METADATA just to filter by one name -- a 300-distribution
-# environment paid ~20ms a call, so a 60-package resolve spent over a
-# second re-reading the same files. The index below is built once per
-# search-path tuple and revalidated by the mtime of each search-path entry:
-# installing or removing a distribution creates or deletes a dist-info
-# directory, which bumps its parent's mtime, so cpip's own installs in the
-# same process (and most external ones) invalidate it for the price of a
-# stat per entry. Rewriting a METADATA file in place without touching its
-# dist-info directory is the one change this does not see; no installer does
-# that (an upgrade replaces the whole dist-info directory), and
-# clear_installed_index covers anything that does.
 _InstalledIndex = dict[str, InstalledDistribution]
-# Keyed by (default scan?, search paths): the default scan consults every
-# metadata finder on sys.meta_path, an explicit path list only the path
-# finder, so an explicit tuple equal to sys.path is a different scan.
 _installed_index_cache: dict[
     tuple[bool, tuple[str, ...]], tuple[tuple[int | None, ...], _InstalledIndex]
 ] = {}
@@ -528,10 +489,6 @@ def installed_index(paths: Iterable[str] | None = None) -> _InstalledIndex:
 
     index: _InstalledIndex = {}
 
-    # The materialized tuple, not ``paths``: a generator argument was
-    # already consumed computing the key, and None must stay None so the
-    # default scan keeps consulting every metadata finder, not just
-    # sys.path.
     for dist in _iter_installed_distributions(None if paths is None else search_paths):
         index.setdefault(dist.canonical_name, dist)
 

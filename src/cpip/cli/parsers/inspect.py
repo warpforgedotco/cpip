@@ -15,8 +15,6 @@ def create_check_parser() -> ArgumentParser:
 
 
 def create_hash_parser() -> ArgumentParser:
-    # Only this parser enumerates digest algorithms, so the other three do not
-    # pay for hashlib.
     import hashlib
 
     parser = ArgumentParser(prog="cpip hash")

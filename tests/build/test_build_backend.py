@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from cpip.build import build as build_module
+from cpip.build import build
 from cpip.build.build_backend import (
     BackendSpec,
     ProjectBuilder,
@@ -309,8 +309,8 @@ def test_build_backend_rejects_invalid_package_version(tmp_path: Path) -> None:
 
 
 def test_default_wheel_directories_are_isolated() -> None:
-    first = build_module.default_wheel_dir()
-    second = build_module.default_wheel_dir()
+    first = build.default_wheel_dir()
+    second = build.default_wheel_dir()
 
     assert first != second
     assert os.path.isdir(first)

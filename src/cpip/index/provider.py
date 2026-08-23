@@ -74,8 +74,6 @@ _CATALOG_WORKERS = 32
 _CATALOG_METADATA_PREFETCH = 2
 
 
-# Orders CandidateSummary records by (version, is_yanked) without a Python
-# frame per comparison key.
 _SUMMARY_ORDER = operator.attrgetter("version", "is_yanked")
 
 CatalogSummaryGroup = tuple[
@@ -305,10 +303,6 @@ class CandidateProvider:
                 if link.kind is ArtifactKind.UNKNOWN and url.startswith(
                     ("http://", "https://")
                 ):
-                    # Some archive endpoints (notably GitHub's /tarball/
-                    # URLs) omit the archive suffix.  The downloader can
-                    # determine the real filename from the response, but
-                    # the link must be admitted as a source artifact first.
                     link.kind = ArtifactKind.SDIST
                 return [link]
 
@@ -497,12 +491,6 @@ class CandidateProvider:
                         profile_key[2],
                     )
                 ] = choices
-
-            # Keep the source metadata at the source boundary. Flattening the
-
-            # groups would allocate one new tuple per release just to repeat
-
-            # these two values tens of thousands of times.
 
             result.append((groups, source_url, generation))
 
@@ -1363,12 +1351,6 @@ class CandidateProvider:
                 continue
 
             if self.uploaded_prior_to is not None:
-                # Upload timestamps describe index-hosted artifacts. Local
-
-                # files, directories, and VCS checkouts are already under the
-
-                # user's control and must not be rejected by this filter.
-
                 if link.is_file or link.is_existing_dir or link.is_vcs:
                     pass
 
@@ -1696,7 +1678,6 @@ class CandidateProvider:
             while low < high:
                 middle = (low + high) // 2
 
-                # A validated wire record: (public, release, key).
                 candidate_key: Any = groups[middle][2][2]
 
                 if candidate_key < key or (right and candidate_key == key):
@@ -2199,14 +2180,6 @@ class CandidateProvider:
                     if stable:
                         descriptor_list = stable
 
-        # The target-choice cache contributes at most one winning artifact for
-
-        # each unique release.  ``versions`` is already de-duplicated using PEP
-
-        # 440 equality, so a second filename/hash identity pass cannot remove
-
-        # anything and only reparses every release URL.
-
         deduplicated = descriptor_list
 
         preferred_indexes: list[int] = []
@@ -2538,9 +2511,6 @@ class CandidateProvider:
                     )
                     continue
 
-            # A dict get is atomic under the GIL; only the insert takes the
-            # lock. This runs once per link of every package listed, and a
-            # wheelhouse directory can hold thousands.
             parsed = parsed_link_cache.get(link)
 
             if parsed is None:
@@ -2592,8 +2562,6 @@ class CandidateProvider:
             tuple(ordered_summaries)
             if ordered_summaries is not None
             else tuple(
-                # attrgetter: a C-level key for a sort over every release of a
-                # package, where a lambda pays a frame per element.
                 sorted(versions.values(), key=_SUMMARY_ORDER),
             )
         )
@@ -2766,8 +2734,6 @@ class CandidateProvider:
         links = self.link_cache.get(key)
 
         if links is None:
-            # Never turn a scheduling decision into a network request.
-
             return 1
 
         cost = 1

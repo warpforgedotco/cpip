@@ -15,7 +15,7 @@ from cpip.core.errors import InstallationError
 from cpip.core.urls import url_to_path
 from cpip.index.artifact_cache import ArtifactCache, materialize_cached_artifact
 from cpip.index.vcs import materialize_vcs
-from cpip.index.vcs import vcs_scheme as parse_vcs_scheme
+from cpip.index.vcs import vcs_scheme
 
 TYPE_CHECKING = False
 
@@ -28,10 +28,6 @@ logger = logging.getLogger(__name__)
 
 
 DOWNLOAD_DIR: str | None = None
-
-
-def vcs_scheme(url: str) -> str | None:
-    return parse_vcs_scheme(url)
 
 
 def download_dir_internal() -> str:
@@ -117,12 +113,6 @@ class ArtifactLocator:
             return local
 
         filename = self.filename(url_or_path)
-
-        # Keep downloads from separate processes and distinct URLs isolated.
-
-        # The URL digest preserves the original filename while preventing
-
-        # same-basename artifacts from overwriting one another.
 
         target = os.path.join(
             download_dir_internal(),
@@ -274,12 +264,6 @@ class ArtifactLocator:
                     )
 
                 except OSError:
-                    # A failed cache write can consume part of the streaming
-
-                    # response. Retry without persistence rather than turning
-
-                    # an optional cache failure into an install failure.
-
                     response.close()
 
                     response = request()

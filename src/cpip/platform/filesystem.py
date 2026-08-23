@@ -9,7 +9,6 @@ from tempfile import NamedTemporaryFile
 from time import perf_counter, sleep
 from typing import Any, BinaryIO, Callable, ParamSpec, TypeVar, cast
 
-from cpip.platform.clone import clone_path as clone_path
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -77,11 +76,7 @@ replace = retry(stop_after_delay=1, wait=0.25)(os.replace)
 
 
 def copy_directory_permissions(directory: str, target_file: BinaryIO) -> None:
-    mode = (
-        os.stat(directory).st_mode & 0o666  # select read/write permissions of directory
-        | 0o600  # set owner read/write permissions
-    )
-    # Change permissions only if there is no risk of following a symlink.
+    mode = os.stat(directory).st_mode & 0o666 | 0o600
     if os.chmod in os.supports_fd:
         os.chmod(target_file.fileno(), mode)
     elif os.chmod in os.supports_follow_symlinks:

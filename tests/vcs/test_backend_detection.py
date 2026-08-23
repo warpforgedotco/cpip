@@ -178,9 +178,6 @@ def test_registered_backend_outstays_a_builtin_marker(tmp_path: Path) -> None:
 
     (tmp_path / ".git").mkdir()
     customized = vcs.registry_customized_internal
-    # Load the builtins first, so ``Custom`` is unambiguously the last
-    # registration and the expected winner does not depend on what earlier
-    # tests in the session happened to load.
     vcs._ensure_builtin_backends_loaded()
     vcs.register(Custom)
 

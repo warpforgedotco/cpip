@@ -70,7 +70,6 @@ def test_git_dir_ignored(tmpdir: pathlib.Path) -> None:
     repo_dir = str(repo_path)
 
     env = {"GIT_DIR": "foo"}
-    # If GIT_DIR is not ignored, then os.listdir() will return ['foo'].
     Git.run_command(["init", repo_dir], cwd=repo_dir, extra_environ=env)
     assert os.listdir(repo_dir) == [".git"]
 
@@ -82,9 +81,6 @@ def test_git_work_tree_ignored(tmpdir: pathlib.Path) -> None:
     repo_dir = str(repo_path)
 
     Git.run_command(["init", repo_dir], cwd=repo_dir)
-    # Choose a directory relative to the cwd that does not exist.
-    # If GIT_WORK_TREE is not ignored, then the command will error out
-    # with: "fatal: This operation must be run in a work tree".
     env = {"GIT_WORK_TREE": "foo"}
     Git.run_command(["status", repo_dir], extra_environ=env, cwd=repo_dir)
 
@@ -128,12 +124,9 @@ def test_get_current_branch(script: CpipTestEnvironment) -> None:
 
     assert Git.get_current_branch(repo_dir) == "master"
 
-    # Switch to a branch with the same SHA as "master" but whose name
-    # is alphabetically after.
     checkout_new_branch(script, repo_dir, "release")
     assert Git.get_current_branch(repo_dir) == "release"
 
-    # Also test the detached HEAD case.
     checkout_ref(script, repo_dir, sha)
     assert Git.get_current_branch(repo_dir) is None
 
@@ -149,12 +142,10 @@ def test_get_current_branch__branch_and_tag_same_name(
     script.run("git", "init", cwd=repo_dir)
     do_commit(script, repo_dir)
     checkout_new_branch(script, repo_dir, "dev")
-    # Create a tag with the same name as the branch.
     script.run("git", "tag", "dev", cwd=repo_dir)
 
     assert Git.get_current_branch(repo_dir) == "dev"
 
-    # Now try with the tag checked out.
     checkout_ref(script, repo_dir, "refs/tags/dev")
     assert Git.get_current_branch(repo_dir) is None
 
@@ -185,10 +176,7 @@ def test_get_revision_sha(script: CpipTestEnvironment) -> None:
     )
     script.run("git", "update-ref", generic_ref, head_sha, cwd=repo_dir)
 
-    # Test two tags pointing to the same sha.
     script.run("git", "tag", "v2.0", tag_sha, cwd=repo_dir)
-    # Test tags sharing the same suffix as another tag, both before and
-    # after the suffix alphabetically.
     script.run("git", "tag", "aaa/v1.0", head_sha, cwd=repo_dir)
     script.run("git", "tag", "zzz/v1.0", head_sha, cwd=repo_dir)
 
@@ -197,18 +185,12 @@ def test_get_revision_sha(script: CpipTestEnvironment) -> None:
     check_rev(repo_dir, "origin-branch", (origin_sha, True))
 
     ignored_names = [
-        # Local branches should be ignored.
         "local-branch",
-        # Non-origin remote branches should be ignored.
         "upstream-branch",
-        # Generic refs should be ignored.
         "generic-ref",
-        # Fully spelled-out refs should be ignored.
         origin_ref,
         generic_ref,
-        # Test passing a valid commit hash.
         tag_sha,
-        # Test passing a non-existent name.
         "does-not-exist",
     ]
     for name in ignored_names:
@@ -225,7 +207,6 @@ def test_is_commit_id_equal(script: CpipTestEnvironment) -> None:
     assert not Git.is_commit_id_equal(version_pkg_path, commit[:7])
     assert not Git.is_commit_id_equal(version_pkg_path, "branch0.1")
     assert not Git.is_commit_id_equal(version_pkg_path, "abc123")
-    # Also check passing a None value.
     assert not Git.is_commit_id_equal(version_pkg_path, None)
 
 
@@ -272,20 +253,16 @@ def test_resolve_commit_not_on_branch(
     script.run("git", "commit", "-m", "initial commit", cwd=str(repo_path))
     script.run("git", "checkout", "-b", "abranch", cwd=str(repo_path))
 
-    # create a commit
     repo_file.write_text("..")
     script.run("git", "commit", "-a", "-m", "commit 1", cwd=str(repo_path))
     commit = script.run("git", "rev-parse", "HEAD", cwd=str(repo_path)).stdout.strip()
 
-    # make sure our commit is not on a branch
     script.run("git", "checkout", "master", cwd=str(repo_path))
     script.run("git", "branch", "-D", "abranch", cwd=str(repo_path))
 
-    # create a ref that points to our commit
     (repo_path / ".git" / "refs" / "myrefs").mkdir(parents=True)
     (repo_path / ".git" / "refs" / "myrefs" / "myref").write_text(commit)
 
-    # check we can fetch our commit
     rev_options = Git.make_rev_options(commit)
     Git().fetch_new(
         str(clone_path),
@@ -307,7 +284,6 @@ def initialize_clonetest_server(
     script.run("git", "add", "file.txt", cwd=str(repo_path))
     script.run("git", "commit", "-m", "initial commit", cwd=str(repo_path))
 
-    # Enable filtering support on server
     if enable_partial_clone:
         script.run("git", "config", "uploadpack.allowFilter", "true", cwd=repo_path)
         script.run(
@@ -342,10 +318,8 @@ def test_git_parse_fail_warning(
     caplog.set_level(logging.WARNING)
 
     git_tuple = Git().get_git_version()
-    # Returns an empty tuple if it is an invalid git version
     assert git_tuple == ()
 
-    # Check for warning log
     assert expected_message in caplog.text.strip()
 
 
@@ -363,14 +337,12 @@ def test_partial_clone(script: CpipTestEnvironment, tmp_path: pathlib.Path) -> N
 
     commit = script.run("git", "rev-parse", "HEAD", cwd=str(repo_path)).stdout.strip()
 
-    # Check that we can clone at HEAD
     Git().fetch_new(
         str(clone_path1),
         HiddenText(repo_path.as_uri(), redacted="*"),
         Git.make_rev_options(),
         verbosity=0,
     )
-    # Check that we can clone to commit
     Git().fetch_new(
         str(clone_path2),
         HiddenText(repo_path.as_uri(), redacted="*"),
@@ -378,11 +350,9 @@ def test_partial_clone(script: CpipTestEnvironment, tmp_path: pathlib.Path) -> N
         verbosity=0,
     )
 
-    # Write some additional stuff to git pull
     repo_file.write_text("..")
     script.run("git", "commit", "-am", "second commit", cwd=str(repo_path))
 
-    # Make sure git pull works - with server supporting filtering
     assert (
         "warning: filtering not recognized by server, ignoring"
         not in script.run("git", "pull", cwd=clone_path1).stderr
@@ -410,14 +380,12 @@ def test_partial_clone_without_server_support(
 
     commit = script.run("git", "rev-parse", "HEAD", cwd=str(repo_path)).stdout.strip()
 
-    # Check that we can clone at HEAD
     Git().fetch_new(
         str(clone_path1),
         HiddenText(repo_path.as_uri(), redacted="*"),
         Git.make_rev_options(),
         verbosity=0,
     )
-    # Check that we can clone to commit
     Git().fetch_new(
         str(clone_path2),
         HiddenText(repo_path.as_uri(), redacted="*"),
@@ -425,11 +393,9 @@ def test_partial_clone_without_server_support(
         verbosity=0,
     )
 
-    # Write some additional stuff to git pull
     repo_file.write_text("..")
     script.run("git", "commit", "-am", "second commit", cwd=str(repo_path))
 
-    # Make sure git pull works - even though server doesn't support filtering
     assert (
         "warning: filtering not recognized by server, ignoring"
         in script.run("git", "pull", cwd=clone_path1).stderr
@@ -453,7 +419,6 @@ def test_clone_without_partial_clone_support(
     )
     clone_path = repo_path / "clone1"
 
-    # Check that we can clone w/ old version of git w/o --filter
     with patch("cpip.vcs.git.Git.get_git_version", return_value=(2, 16)):
         Git().fetch_new(
             str(clone_path),
@@ -465,7 +430,6 @@ def test_clone_without_partial_clone_support(
     repo_file.write_text("...")
     script.run("git", "commit", "-am", "third commit", cwd=str(repo_path))
 
-    # Should work fine w/o attempting to use `--filter` args
     assert (
         "warning: filtering not recognized by server, ignoring"
         not in script.run("git", "pull", cwd=clone_path).stderr

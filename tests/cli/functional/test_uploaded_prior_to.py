@@ -76,7 +76,6 @@ class TestUploadedPriorTo:
         script: CpipTestEnvironment,
     ) -> None:
         """Test filtering against real PyPI with upload-time metadata."""
-        # Test with old cutoff date - should find no matching versions
         result = script.cpip(
             "install",
             "--dry-run",
@@ -87,7 +86,6 @@ class TestUploadedPriorTo:
         )
         assert "because no versions of requests 2.0.0 are available" in result.stderr
 
-        # Test with future cutoff date - should find the package
         result = script.cpip(
             "install",
             "--dry-run",

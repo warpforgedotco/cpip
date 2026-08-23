@@ -82,8 +82,6 @@ def test_retry_wait(wait_duration: float) -> None:
     with pytest.raises(RuntimeError):
         wrapped()
     assert len(timestamps) >= 2
-    # Just check the first retry, with a margin of 10% to permit for
-    # unavoidable variation.
     assert timestamps[1] - start_time >= (wait_duration * 0.9)
 
 
@@ -104,7 +102,6 @@ def test_retry_time_limit(call_duration: float, max_allowed_calls: int) -> None:
     with pytest.raises(RuntimeError):
         wrapped()
     assert len(timestamps) <= max_allowed_calls
-    # Add a margin of 10% to permit for unavoidable variation.
     assert all(t - start_time <= (0.1 * 1.1) for t in timestamps)
 
 

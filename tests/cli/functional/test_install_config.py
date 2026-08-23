@@ -25,7 +25,6 @@ def test_options_from_env_vars(script: CpipTestEnvironment) -> None:
     result = script.cpip("install", "-vvv", "INITools", expect_error=True)
     assert "Ignoring indexes:" in result.stdout, str(result)
     msg = "DistributionNotFound: No matching distribution found for INITools"
-    # Case insensitive as the new resolver canonicalizes the project name
     assert msg.lower() in result.stdout.lower(), str(result)
 
 
@@ -57,12 +56,7 @@ def test_env_vars_override_config_file(
 ) -> None:
     """Test that environmental variables override settings in config files."""
     config_file = script.scratch_path / "test-cpip.cfg"
-    # set this to make cpip load it
     script.environ["CPIP_CONFIG_FILE"] = str(config_file)
-    # It's important that we test this particular config value ('no-index')
-    # because there is/was a bug which only shows up in cases in which
-    # 'config-item' and 'config_item' hash to the same value modulo the size
-    # of the config dictionary.
     config_file.write_text(
         textwrap.dedent("""\
         [global]
@@ -71,7 +65,6 @@ def test_env_vars_override_config_file(
     )
     result = script.cpip("install", "-vvv", "INITools", expect_error=True)
     msg = "DistributionNotFound: No matching distribution found for INITools"
-    # Case insensitive as the new resolver canonicalizes the project name
     assert msg.lower() in result.stdout.lower(), str(result)
     script.environ["CPIP_NO_INDEX"] = "0"
     virtualenv.clear()
@@ -184,7 +177,6 @@ def test_config_file_override_stack(
 
     config_file = script.scratch_path / "test-cpip.cfg"
 
-    # set this to make cpip load it
     script.environ["CPIP_CONFIG_FILE"] = str(config_file)
 
     config_file.write_text(
@@ -237,7 +229,6 @@ def test_options_from_venv_config(
     result = script.cpip("install", "-vvv", "INITools", expect_error=True)
     assert "Ignoring indexes:" in result.stdout, str(result)
     msg = "DistributionNotFound: No matching distribution found for INITools"
-    # Case insensitive as the new resolver canonicalizes the project name
     assert msg.lower() in result.stdout.lower(), str(result)
 
 
@@ -267,7 +258,6 @@ def test_install_no_binary_via_config_disables_cached_wheels(
     finally:
         os.unlink(config_file.name)
     assert "Successfully installed upper-2.0" in str(res), str(res)
-    # upper is built and not obtained from cache
     assert "Building wheel for upper" in str(res), str(res)
 
 
@@ -364,10 +354,8 @@ def test_do_not_prompt_for_authentication_git(
     from a git http url requiring authentication
     """
     server = make_mock_server()
-    # Disable vscode user/password prompt, will make tests fail inside vscode
     script.environ["GIT_ASKPASS"] = ""
 
-    # Return 401 on all URLs
     server.mock.side_effect = lambda _, __: authorization_response(
         data.packages / "simple-3.0.tar.gz",
     )
@@ -451,7 +439,6 @@ def test_prompt_for_keyring_if_needed(
     virtualenv = virtualenv_factory(workspace.joinpath("venv"))
 
     if keyring_provider_implementation == "subprocess":
-        # Install keyring into its own venv.
         keyring_virtualenv = virtualenv_factory(workspace.joinpath("keyring"))
         keyring_script = script_factory(
             workspace.joinpath("keyring"),
@@ -471,8 +458,6 @@ def test_prompt_for_keyring_if_needed(
             data.common_wheels,
         )
 
-        # Set up this venv with a PATH that can see the keyring installed in a
-        # separate venv.
         virtualenv_script = script_factory(
             workspace.joinpath("venv"),
             virtualenv,
@@ -482,7 +467,6 @@ def test_prompt_for_keyring_if_needed(
             },
         )
     elif keyring_provider_implementation == "import":
-        # Set up a venv with keyring installed.
         virtualenv_script = script_factory(workspace.joinpath("venv"), virtualenv)
         virtualenv_script.cpip_install_local(
             "keyring",
@@ -499,8 +483,6 @@ def test_prompt_for_keyring_if_needed(
         )
         keyring_script = virtualenv_script
     elif keyring_provider_implementation == "disabled":
-        # Set up an venv that does not have keyring installed, nor is able to
-        # find keyring anywhere on the PATH.
         virtualenv_script = script_factory(workspace.joinpath("venv"), virtualenv)
         keyring_script = None
     else:

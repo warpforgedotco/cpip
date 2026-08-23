@@ -27,7 +27,6 @@ def test_inspect_basic(simple_script: CpipTestEnvironment) -> None:
     result = simple_script.cpip("inspect")
     report = json.loads(result.stdout)
     installed_by_name = {i["metadata"]["name"]: i for i in report["installed"]}
-    # Coverage is only installed if test coverage is being collected.
     installed_by_name.pop("coverage", None)
     assert len(installed_by_name) == 3
     assert installed_by_name.keys() == {

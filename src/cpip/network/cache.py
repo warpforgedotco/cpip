@@ -58,15 +58,10 @@ class SafeFileCache:
         self.directory = directory
 
     def get_cache_path(self, name: str) -> str:
-        # Called on every cache lookup/store. Unpacking the digest's first 5
-        # characters directly (a str is iterable) gets the same one-char-per
-        # path-segment fan-out as list(hashed[:5]) + [hashed] without
-        # building either intermediate list.
         hashed = hashlib.sha224(name.encode()).hexdigest()
         return os.path.join(self.directory, *hashed[:5], hashed)
 
     def get(self, key: str) -> bytes | None:
-        # The cache entry is only valid if both metadata and body exist.
         metadata_path = self.get_cache_path(key)
         body_path = metadata_path + ".body"
         metadata: bytes | None = None
@@ -93,8 +88,6 @@ class SafeFileCache:
 
             with adjacent_tmp_file(path) as f:
                 writer_func(f)
-                # Inherit the read/write permissions of the cache directory
-                # to enable multi-user cache use-cases.
                 copy_directory_permissions(self.directory, f)
 
             replace(f.name, path)
@@ -123,7 +116,6 @@ class SafeFileCache:
             os.remove(path + ".atomic")
 
     def get_body(self, key: str) -> BinaryIO | None:
-        # The cache entry is only valid if both metadata and body exist.
         metadata_path = self.get_cache_path(key)
         body_path = metadata_path + ".body"
         with suppressed_cache_errors():

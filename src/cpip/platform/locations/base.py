@@ -7,7 +7,6 @@ from cpip.core.appdirs import user_cache_dir
 from cpip.core.errors import InstallationError
 from cpip.core.utils import CURRENT_PYTHON_VERSION
 
-# Application Directories
 USER_CACHE_DIR = user_cache_dir("cpip")
 
 

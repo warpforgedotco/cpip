@@ -26,7 +26,6 @@ def test_check_install_canonicalization(script: CpipTestEnvironment) -> None:
         version="0.1",
     )
 
-    # Let's install pkgA without its dependency
     result = script.cpip(
         "install",
         "--no-build-isolation",
@@ -36,8 +35,6 @@ def test_check_install_canonicalization(script: CpipTestEnvironment) -> None:
     )
     assert "Successfully installed pkgA-1.0" in result.stdout, str(result)
 
-    # Install the first missing dependency. Only an error for the
-    # second dependency should remain.
     result = script.cpip(
         "install",
         "--no-build-isolation",
@@ -49,13 +46,9 @@ def test_check_install_canonicalization(script: CpipTestEnvironment) -> None:
     expected_lines = [
         "pkga 1.0 requires SPECIAL.missing, which is not installed.",
     ]
-    # Deprecated python versions produce an extra warning on stderr
     assert_contains_expected_lines(result.stderr, expected_lines)
     assert result.returncode == 0
 
-    # Install the second missing package and expect that there is no warning
-    # during the installation. This is special as the package name requires
-    # name normalization (as in https://github.com/pypa/cpip/issues/5134)
     result = script.cpip(
         "install",
         "--no-build-isolation",
@@ -66,7 +59,6 @@ def test_check_install_canonicalization(script: CpipTestEnvironment) -> None:
     assert "requires" not in result.stderr
     assert result.returncode == 0
 
-    # Double check that all errors are resolved in the end
     result = script.cpip("check")
     expected_lines = [
         "No broken requirements found.",
@@ -95,7 +87,6 @@ def test_check_install_does_not_warn_for_out_of_graph_issues(
         version="1.0",
     )
 
-    # Install a package without it's dependencies
     result = script.cpip(
         "install",
         "--no-build-isolation",
@@ -105,7 +96,6 @@ def test_check_install_does_not_warn_for_out_of_graph_issues(
     )
     assert "requires" not in result.stderr
 
-    # Install conflict package
     result = script.cpip(
         "install",
         "--no-build-isolation",
@@ -122,7 +112,6 @@ def test_check_install_does_not_warn_for_out_of_graph_issues(
         ],
     )
 
-    # Install unrelated package
     result = script.cpip(
         "install",
         "--no-build-isolation",
@@ -130,7 +119,6 @@ def test_check_install_does_not_warn_for_out_of_graph_issues(
         pkg_unrelated_path,
         "--quiet",
     )
-    # should not warn about broken's deps when installing unrelated package
     assert "requires" not in result.stderr
 
     result = script.cpip("check", expect_error=True)

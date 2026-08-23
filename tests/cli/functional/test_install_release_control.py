@@ -97,12 +97,9 @@ def test_pre_with_only_final_fails(script: CpipTestEnvironment) -> None:
 
 def test_all_releases_none(script: CpipTestEnvironment) -> None:
     """Test that --all-releases :none: empties the set."""
-    # Create both a prerelease and a final version
     pre_pkg = create_basic_wheel_for_package(script, "simple", "1.0a1")
     create_basic_wheel_for_package(script, "simple", "1.0")
 
-    # Without specifying exact version, it should install the final version
-    # because :none: cleared the :all: setting
     script.cpip_install_local(
         "--all-releases=:all:",
         "--all-releases=:none:",
@@ -116,10 +113,9 @@ def test_package_specific_overrides_all(script: CpipTestEnvironment) -> None:
     """Test that package-specific --only-final overrides :all: --all-releases."""
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
-    # Allow pre-releases for all packages
     result = script.cpip_install_local(
         "--all-releases=:all:",
-        "--only-final=simple",  # But not for 'simple'
+        "--only-final=simple",
         "simple==1.0a1",
         find_links=[pkg_path.parent],
         expect_error=True,
@@ -144,15 +140,12 @@ def test_requirements_file_all_releases(script: CpipTestEnvironment) -> None:
 
 def test_requirements_file_only_final(script: CpipTestEnvironment) -> None:
     """Test --only-final in requirements file."""
-    # Create both a prerelease and a final version
     pre_pkg = create_basic_wheel_for_package(script, "simple", "1.0a1")
     create_basic_wheel_for_package(script, "simple", "1.0")
 
-    # No specific version
     req_file = script.temporary_file("reqs.txt", "--only-final :all:\nsimple\n")
 
     script.cpip_install_local("-r", req_file, find_links=[pre_pkg.parent])
-    # Should install final version, not prerelease
     script.assert_installed(simple="1.0")
 
 
@@ -165,7 +158,6 @@ def test_order_only_final_then_all_releases(script: CpipTestEnvironment) -> None
     """
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
-    # This should allow prereleases for 'simple' because --all-releases comes after
     result = script.cpip_install_local(
         "--only-final=:all:",
         "--all-releases=simple",
@@ -183,7 +175,6 @@ def test_order_all_releases_then_only_final(script: CpipTestEnvironment) -> None
     """
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
-    # This should block prereleases for 'simple' because --only-final comes after
     result = script.cpip_install_local(
         "--all-releases=:all:",
         "--only-final=simple",
@@ -206,14 +197,12 @@ def test_no_matching_version_without_release_control(
     """
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0")
 
-    # Request a version that doesn't exist, without any release control flags
     result = script.cpip_install_local(
         "simple==2.0",
         find_links=[pkg_path.parent],
         expect_error=True,
     )
     assert "Could not find a version that satisfies the requirement" in result.stderr
-    # Ensure it's NOT saying "final version"
     assert "Could not find a final version" not in result.stderr
 
 
@@ -227,7 +216,6 @@ def test_no_matching_version_with_all_releases(
     """
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0")
 
-    # Request a version that doesn't exist, with --all-releases
     result = script.cpip_install_local(
         "--all-releases=:all:",
         "simple==2.0",

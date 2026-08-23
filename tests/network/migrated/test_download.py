@@ -121,8 +121,6 @@ def test_log_download(
         ("36", 36),
         ("", None),
         ("not-a-number", None),
-        # A negative length must not be passed through: it would make
-        # _FileDownload.is_incomplete() treat a truncated download as complete.
         ("-1", None),
     ],
 )
@@ -190,30 +188,24 @@ def test_parse_content_disposition(
 @pytest.mark.parametrize(
     "resume_retries,mock_responses,expected_resume_args,expected_bytes",
     [
-        # If content-length is not provided, the download will
-        # always "succeed" since we don't have a way to check if
-        # the download is complete.
         (
             0,
             [({}, 200, b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89")],
             [],
             b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89",
         ),
-        # Complete download (content-length matches body)
         (
             0,
             [({"content-length": "36"}, 200, b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89")],
             [],
             b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89",
         ),
-        # Incomplete download without resume retries
         (
             0,
             [({"content-length": "36"}, 200, b"0cfa7e9d-1868-4dd7-9fb3-")],
             [],
             None,
         ),
-        # Incomplete download with resume retries
         (
             5,
             [
@@ -223,9 +215,6 @@ def test_parse_content_disposition(
             [(24, None)],
             b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89",
         ),
-        # If the server responds with 200 (e.g. no range header support or the file
-        # has changed between the requests) the downloader should restart instead of
-        # attempting to resume. The downloaded file should not be affected.
         (
             5,
             [
@@ -240,7 +229,6 @@ def test_parse_content_disposition(
             [(24, None), (14, None)],
             b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89",
         ),
-        # File size could change between requests. Make sure this is handled correctly.
         (
             5,
             [
@@ -255,9 +243,6 @@ def test_parse_content_disposition(
             [(24, None), (36, None)],
             b"new-0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89",
         ),
-        # The downloader should fail after N resume_retries attempts.
-        # This prevents the downloader from getting stuck if the connection
-        # is unstable and the server does NOT support range requests.
         (
             1,
             [
@@ -267,9 +252,6 @@ def test_parse_content_disposition(
             [(24, None)],
             None,
         ),
-        # The downloader should use the If-Range header to make the range
-        # request conditional if it is possible to check for modifications
-        # (e.g. if we know the creation time of the initial response).
         (
             5,
             [
@@ -304,7 +286,6 @@ def test_parse_content_disposition(
             ],
             b"f2561d5dfd89",
         ),
-        # ETag is preferred over Last-Modified for the If-Range condition.
         (
             5,
             [
@@ -335,9 +316,7 @@ def test_parse_content_disposition(
 def test_downloader(
     resume_retries: int,
     mock_responses: list[tuple[dict[str, str], int, bytes]],
-    # list of (range_start, if_range)
     expected_resume_args: list[tuple[int | None, str | None]],
-    # expected_bytes is None means the download should fail
     expected_bytes: bytes | None,
     tmp_path: Path,
 ) -> None:
@@ -359,7 +338,6 @@ def test_downloader(
             with patch("os.remove", remove):
                 with pytest.raises(IncompleteDownloadError):
                     downloader(link, str(tmp_path))
-            # Make sure the incomplete file is removed
             remove.assert_called_once()
         else:
             filepath, _ = downloader(link, str(tmp_path))
@@ -367,14 +345,13 @@ def test_downloader(
                 downloaded_bytes = downloaded_file.read()
                 assert downloaded_bytes == expected_bytes
 
-    calls = [call(link)]  # the initial GET request
+    calls = [call(link)]
     for range_start, if_range in expected_resume_args:
         headers = {**HEADERS, "Range": f"bytes={range_start}-"}
         if if_range:
             headers["If-Range"] = if_range
         calls.append(call(link, headers))
 
-    # Make sure that the downloader makes additional requests for resumption
     http_get_mock.assert_has_calls(calls)
 
 
@@ -384,13 +361,11 @@ def test_downloader_resumes_on_protocol_error(tmp_path: Path) -> None:
     link = Link("http://example.com/foo.tgz")
     downloader = Downloader(session)
 
-    # First response: raises ProtocolError after partial read
     broken_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")
     broken_resp.headers.update({"content-length": "36"})
     broken_resp.status_code = 200
     broken_resp.raw = BrokenStream(b"0cfa7e9d-1868-4dd7-9fb3-")
 
-    # Second response: successful resume
     resume_resp = MockResponse(b"f2561d5dfd89")
     resume_resp.headers.update({"content-length": "12"})
     resume_resp.status_code = 206
@@ -420,13 +395,11 @@ def test_downloader_retries_low_level_errors_during_resume(
     link = Link("http://example.com/foo.tgz")
     downloader = Downloader(session)
 
-    # Initial response: raises ProtocolError after a partial read
     broken_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")
     broken_resp.headers.update({"content-length": "36"})
     broken_resp.status_code = 200
     broken_resp.raw = BrokenStream(b"0cfa7e9d-1868-4dd7-9fb3-")
 
-    # Final resume that completes the file
     resume_resp = MockResponse(b"f2561d5dfd89")
     resume_resp.headers.update({"content-length": "12"})
     resume_resp.status_code = 206
@@ -517,7 +490,6 @@ def test_downloader_resumes_on_truncated_http_stream(
     body = b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89"
 
     def truncated(environ: WSGIEnvironment, start_response: StartResponse) -> Body:
-        # Advertise the full length but send only part of the body
         start_response("200 OK", [("Content-Length", str(len(body)))])
         return [body[:10]]
 
@@ -553,13 +525,10 @@ def test_downloader_crashes_on_mismatched_resume_offset(tmp_path: Path) -> None:
     link = Link("http://example.com/foo.tgz")
     downloader = Downloader(session)
 
-    # Incomplete first response (24 of 36 bytes).
     first = MockResponse(body[:24])
     first.headers.update({"content-length": "36"})
     first.status_code = 200
 
-    # The resume asks for bytes=24- but the server answers with content that
-    # (per its Content-Range) starts at offset 0.
     mismatched = MockResponse(b"XXXXXXXXXXXX")
     mismatched.headers.update(
         {"content-length": "12", "content-range": "bytes 0-11/36"},
@@ -602,7 +571,6 @@ def test_resumed_download_caching(tmp_path: Path) -> None:
     link = Link("https://example.com/foo.tgz")
     downloader = Downloader(session)
 
-    # Mock an incomplete download followed by a successful resume
     incomplete_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")
     incomplete_resp.headers.update({"content-length": "36"})
     incomplete_resp.status_code = 200
@@ -615,18 +583,13 @@ def test_resumed_download_caching(tmp_path: Path) -> None:
     http_get_mock = MagicMock(side_effect=responses)
 
     with patch.object(Downloader, "http_get", http_get_mock):
-        # Perform the download (incomplete then resumed)
         filepath, _ = downloader(link, str(tmp_path))
 
-        # Verify the file was downloaded correctly
         with open(filepath, "rb") as downloaded_file:
             downloaded_bytes = downloaded_file.read()
             expected_bytes = b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89"
             assert downloaded_bytes == expected_bytes
 
-        # Verify that the cache directory was created and contains cache files
-        # The resumed download should have been cached for future use
         assert cache_dir.exists()
         cache_files = list(cache_dir.rglob("*"))
-        # Should have cache files (both metadata and body files)
         assert len([f for f in cache_files if f.is_file()]) == 2

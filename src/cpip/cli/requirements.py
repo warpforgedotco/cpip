@@ -165,9 +165,6 @@ class DeferredNetworkSession:
             if self.session is not None:
                 return self.session
 
-            # Deferred: network.http (and the auth, cache and platform
-            # modules under it) only when a session is actually built --
-            # never on a warm or local resolve that makes no request.
             from cpip.network.http import NetworkSession
 
             session = NetworkSession(
@@ -504,7 +501,6 @@ def collect_requirements(
     for filename in requirement_files or []:
         assert session is not None
 
-        # Deferred: the requirements-file parser only when a file is given.
         from cpip.resolution.files import parse_requirements
 
         for item in parse_requirements(
@@ -563,7 +559,6 @@ def collect_requirements(
     for filename in constraint_files or []:
         assert session is not None
 
-        # Deferred: the requirements-file parser only when a file is given.
         from cpip.resolution.files import parse_requirements
 
         for item in parse_requirements(
@@ -672,7 +667,6 @@ def bundle_install_requirements(
             source_path = os.path.realpath(raw_path)
 
             try:
-                # Deferred: only a source requirement builds metadata.
                 from cpip.build.build_backend import prepare_project_metadata
 
                 metadata = prepare_project_metadata(

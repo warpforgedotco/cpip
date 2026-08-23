@@ -167,9 +167,6 @@ def run_lock(args: list[str]) -> int:
         local_directory = os.path.abspath(value)
 
         if os.path.isdir(local_directory):
-            # Only local-directory, editable, and non-VCS archive-URL
-            # requirements reach build_backend; plain name==version
-            # specifiers never need it.
             from cpip.build.build_backend import prepare_project_metadata
 
             metadata = prepare_project_metadata(

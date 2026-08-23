@@ -173,9 +173,6 @@ def load_summary(cache: Any, url: str) -> CatalogSummary | None:
         summary = decode_summary(raw)
         if summary is not None:
             return summary
-    # No summary under the current key (a first run, or one written by
-    # another cpip version under its own key): compile it from the catalog,
-    # which is text-only and stable.
     pending = _pending_catalogs(cache)
     catalog = pending.pop(url, None) if pending is not None else None
     catalog_raw: bytes | None = None

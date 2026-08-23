@@ -9,7 +9,7 @@ import sys
 from collections.abc import Iterable
 
 from cpip.core.versions import ZERO_VERSION
-from cpip.core.errors import ResolutionError as CpipResolutionError
+from cpip.core import errors
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.inputs import (
     coerce_requirements,
@@ -105,12 +105,10 @@ class ResolutionEngine:
         try:
             selected = resolver.resolve(roots)
         except Exception as error:
-            from cpip._vendor.nab_resolver.errors import (
-                ResolutionError as NabResolutionError,
-            )
+            from cpip._vendor.nab_resolver.errors import ResolutionError
             from cpip._vendor.nab_resolver.report import format_error
 
-            if isinstance(error, NabResolutionError):
+            if isinstance(error, ResolutionError):
                 message = (
                     format_error(
                         error.incompatibility,
@@ -120,10 +118,6 @@ class ResolutionEngine:
                     else str(error)
                 )
 
-                # The provider represents dependency ranges as the finite set
-                # of available versions.  When that set is empty, the report
-                # loses the user's original specifier and prints ``<empty>``.
-                # Restore it for actionable CLI diagnostics.
                 def restore_requirement(match: re.Match[str]) -> str:
                     name = match.group(1)
                     requirement = adapter.display_requirements.get(
@@ -138,7 +132,7 @@ class ResolutionEngine:
                     restore_requirement,
                     message,
                 )
-                raise CpipResolutionError(message) from error
+                raise errors.ResolutionError(message) from error
             raise
         selected_records = tuple(
             (package, adapter.records[(package, version)])

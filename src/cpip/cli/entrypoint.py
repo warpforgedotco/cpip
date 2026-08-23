@@ -145,7 +145,6 @@ def print_help() -> None:
 
 def print_version(version: str | None, location: str | None) -> None:
     if version is None:
-        # Already imported: cpip.__init__ is what loaded this module.
         from cpip import __version__
 
         version = __version__
@@ -325,8 +324,6 @@ def main(
 
         quiet_fast_command = fast.suppresses_logging(argv, log_file=log_file)
 
-        # handle_global_commands rejected empty argv and unknown names, so the
-        # command always resolves from here on.
         spec = get_command(argv[0])
 
         if spec is None:

@@ -33,8 +33,6 @@ LOCAL_WHEELHOUSE_OPTIONS = (
 LOCAL_UPGRADE_OPTIONS = ("--no-index", "--upgrade", "--no-compile", "--target")
 LOCAL_INSTALL_OPTIONS = ("--no-index", "--no-compile", "--target")
 
-# The already-satisfied shape: plain requirement names, every one of them
-# installed in a version its specifier accepts, nothing to install.
 SATISFIED_FLAGS = frozenset(
     (
         "--no-index",
@@ -223,8 +221,6 @@ class InstalledEntry:
         self.info_path = os.path.join(root, child)
         self.headers = headers
         self.name = canonicalize_name(headers["name"])
-        # What ``Distribution.locate_file("")`` answers: the parent of the
-        # entry as pathlib renders it.
         self.location = os.path.normpath(root) if root else "."
 
 
@@ -380,8 +376,6 @@ def run_list(args: list[str]) -> int | None:
     ]
     entries.sort(key=lambda entry: entry.name)
 
-    # Only a direct_url.json can make an entry editable here; an egg-info
-    # entry's egg-link lookup is the normal path's.
     if any(entry.info_path.lower().endswith(".egg-info") for entry in entries):
         return None
     editable: dict[int, str | None] = {}
@@ -391,8 +385,6 @@ def run_list(args: list[str]) -> int | None:
 
     verbose = options.verbose > 0
     if options.format in ("json", "freeze"):
-        # These formats print the parsed version, which for any other
-        # spelling is the full parser's rendering.
         if not all(canonical_release(entry.headers["version"]) for entry in entries):
             return None
 
@@ -537,9 +529,6 @@ def run_freeze(args: list[str]) -> int | None:
     entries = scan_installed(roots)
     if entries is None:
         return None
-    # light_metadata lists each directory in sorted entry order, and reads
-    # a dist-info directory's METADATA, then PKG-INFO, taking the first with
-    # a name and version.
     ordered: list[InstalledEntry] = []
     for root in roots:
         here = sorted(
@@ -792,9 +781,6 @@ def run_lock(args: list[str]) -> int | None:
                 with open(candidate.path, "rb") as wheel_file:
                     digest = hashlib.sha256(wheel_file.read()).hexdigest()
             except OSError:
-                # A wheel that vanished or became unreadable after resolution
-                # is a fast-path miss, not a reason to fail the command:
-                # normal lock handling still gets its turn.
                 return None
         packages.append(
             (
@@ -855,34 +841,31 @@ def run_before_startup(args: list[str]) -> tuple[int | None, bool]:
     if command != "install":
         return None, False
 
-    # Decide from the tokens alone which shape, if any, applies before
-    # importing cli.fast_install: that import is the one real cost here, and
-    # an install that matches no shape must not pay it.
     if (
         "--quiet" in options
         and "--no-index" not in options
         and _has_all(options, REMOTE_EXACT_OPTIONS)
     ):
-        import cpip.cli.fast_install as install
+        from cpip.cli import fast_install
 
-        return install.run_cached_remote(options), False
+        return fast_install.run_cached_remote(options), False
 
     if (
         "--quiet" in options
         and "--ignore-installed" not in options
         and _has_all(options, LOCAL_UPGRADE_OPTIONS)
     ):
-        import cpip.cli.fast_install as install
+        from cpip.cli import fast_install
 
-        return install.run_local_fallback(options), True
+        return fast_install.run_local_fallback(options), True
 
     if _has_all(options, LOCAL_WHEELHOUSE_OPTIONS):
-        import cpip.cli.fast_install as install
+        from cpip.cli import fast_install
 
-        status = install.run(options)
+        status = fast_install.run(options)
         if status is not None:
             return status, True
-        return install.run_local_fallback(options), True
+        return fast_install.run_local_fallback(options), True
 
     return run_satisfied_install(options), False
 
@@ -993,8 +976,6 @@ def run_satisfied_install(args: list[str]) -> int | None:
     options = parse_satisfied_arguments(args)
     if options is None:
         return None
-    # A redirected target interpreter or resolver debugging changes what the
-    # normal path does and prints.
     if os.environ.get("CPIP_TARGET_PREFIX") or os.environ.get("CPIP_RESOLVER_DEBUG"):
         return None
     versions = installed_versions({item[1] for item in options.requirements})
@@ -1017,8 +998,6 @@ def run_satisfied_install(args: list[str]) -> int | None:
             or (operator == "<" and key < wanted)
         ):
             return None
-    # Configured find-links join the "Looking in links" line; leave that
-    # rendering to the normal path.
     from cpip.cli.config import load_source_config
 
     if load_source_config("install").find_links:
@@ -1038,14 +1017,12 @@ def run_install_after_startup(args: list[str]) -> int | None:
 
     options = args[1:]
 
-    # install.run accepts exactly this shape; an install outside it must not
-    # pay for importing cli.fast_install.
     if not _has_all(options, LOCAL_WHEELHOUSE_OPTIONS):
         return None
 
-    import cpip.cli.fast_install as install
+    from cpip.cli import fast_install
 
-    return install.run(options)
+    return fast_install.run(options)
 
 
 def run_lock_after_startup(args: list[str]) -> int | None:

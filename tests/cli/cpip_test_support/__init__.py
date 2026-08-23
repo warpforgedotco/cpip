@@ -22,7 +22,7 @@ from urllib.request import pathname2url
 from zipfile import ZipFile
 
 import pytest
-from cpip.cli.main import main as cpip_entry_point
+from cpip.cli import main
 from cpip.core.direct_url import DIRECT_URL_METADATA_NAME, DirectUrl
 from cpip.platform.locations.base import get_major_minor_version
 from cpip_test_support.filesystem import create_file
@@ -71,8 +71,6 @@ class TestData:
         return obj
 
     def reset(self) -> None:
-        # Check explicitly for the target directory to avoid overly-broad
-        # try/except.
         if self.root.exists():
             shutil.rmtree(self.root)
         shutil.copytree(self.source, self.root, symlinks=True)
@@ -134,8 +132,6 @@ class TestData:
 
     @property
     def common_wheels(self) -> pathlib.Path:
-        # This is logically separate from the rest of the test data, but
-        # it's convenient to include here.
         return DATA_DIR.joinpath("common_wheels")
 
 
@@ -201,7 +197,6 @@ class TestCpipResult:
             return str(self.impl_internal).replace("\r\n", "\n")
 
     else:
-        # Python doesn't automatically forward __str__ through __getattr__
 
         def __str__(self) -> str:
             return str(self.impl_internal)
@@ -255,7 +250,6 @@ class TestCpipResult:
 
         if editable and editable_vcs:
             pkg_dir = e.venv / "src" / canonicalize_name(dist_name)
-            # If package was installed in a sub directory
             if sub_dir:
                 pkg_dir = pkg_dir / sub_dir
         elif editable and not editable_vcs:
@@ -353,13 +347,6 @@ def check_stderr(
     lines = stderr.splitlines()
     for line in lines:
         line = line.lstrip()
-        # First check for logging errors, which we don't allow during
-        # tests even if allow_stderr_error=True (since a logging error
-        # would signal a bug in cpip's code).
-        #    Unlike errors logged with logger.error(), these errors are
-        # sent directly to stderr and so bypass any configured log formatter.
-        # The "--- Logging error ---" string is used in Python 3.4+, and
-        # "Logged from file " is used in Python 2.
         if line.startswith(("--- Logging error ---", "Logged from file ")):
             reason = "stderr has a logging error, which is never allowed"
             msg = make_check_stderr_message(stderr, line=line, reason=reason)
@@ -389,13 +376,6 @@ def check_stderr(
 class CpipTestEnvironment(TestFileEnvironment):
     """A specialized TestFileEnvironment for testing cpip"""
 
-    # Attribute naming convention:
-    #
-    # Instances of this class have many attributes representing paths
-    # in the filesystem.  To keep things straight, absolute paths have
-    # a name of the form xxxx_path and relative paths have a name that
-    # does not end in '_path'.
-
     exe = (sys.platform == "win32" and ".exe") or ""
     verbose = False
 
@@ -408,7 +388,6 @@ class CpipTestEnvironment(TestFileEnvironment):
         zipapp: str | None = None,
         **kwargs: Any,
     ) -> None:
-        # Store paths related to the virtual environment
         self.venv_path = virtualenv.location
         self.lib_path = virtualenv.lib
         self.site_packages_path = virtualenv.site
@@ -430,14 +409,11 @@ class CpipTestEnvironment(TestFileEnvironment):
                 os.path.relpath(self.bin_path, self.venv_path),
             )
 
-        # Create a Directory to use as a scratch pad
         self.scratch_path = base_path.joinpath("scratch")
         self.scratch_path.mkdir()
 
-        # Set our default working directory
         kwargs.setdefault("cwd", self.scratch_path)
 
-        # Setup our environment
         environ = kwargs.setdefault("environ", os.environ.copy())
         parent_scripts = os.path.normcase(sysconfig.get_path("scripts"))
         inherited_path = [
@@ -450,24 +426,16 @@ class CpipTestEnvironment(TestFileEnvironment):
         environ.pop("PYTHONHOME", None)
         environ.pop("PYTHONPATH", None)
         environ["PYTHONUSERBASE"] = self.user_base_path
-        # Writing bytecode can mess up updated file detection
         environ["PYTHONDONTWRITEBYTECODE"] = "1"
-        # Make sure we get UTF-8 on output, even on Windows...
         environ["PYTHONIOENCODING"] = "UTF-8"
-        # Custom env flag so cpip knows it's running in test environment
         environ["_CPIP_TEST_ENV"] = "1"
 
-        # Whether all cpip invocations should expect stderr
-        # (useful for Python version deprecation)
         self.cpip_expect_warning = cpip_expect_warning
 
-        # The name of an (optional) zipapp to use when running cpip
         self.zipapp = zipapp
 
-        # Call the TestFileEnvironment __init__
         super().__init__(base_path, *args, **kwargs)
 
-        # Expand our absolute path directories into relative
         for name in [
             "base",
             "venv",
@@ -485,13 +453,9 @@ class CpipTestEnvironment(TestFileEnvironment):
             )
             setattr(self, name, relative_path)
 
-        # Make sure temp_path is a Path object
         self.temp_path: pathlib.Path = pathlib.Path(self.temp_path)
-        # Ensure the tmp dir exists, things break horribly if it doesn't
         self.temp_path.mkdir()
 
-        # create easy-install.pth in user_site, so we always have it updated
-        #   instead of created
         self.user_site_path.mkdir(parents=True)
         self.user_site_path.joinpath("easy-install.pth").touch()
 
@@ -499,16 +463,12 @@ class CpipTestEnvironment(TestFileEnvironment):
         if fn.endswith(("__pycache__", ".pyc")):
             result = True
         elif self.zipapp and fn.endswith("cacert.pem"):
-            # Temporary copies of cacert.pem are extracted
-            # when running from a zipapp
             result = True
         else:
             result = super().ignore_file(fn)
         return result
 
     def find_traverse(self, path: str, result: dict[str, FoundDir]) -> None:
-        # Ignore symlinked directories to avoid duplicates in `run()`
-        # results because of venv `lib64 -> lib/` symlink on Linux.
         full = os.path.join(self.base_path, path)
         if os.path.isdir(full) and os.path.islink(full):
             if not self.temp_path or path != "tmp":
@@ -548,16 +508,13 @@ class CpipTestEnvironment(TestFileEnvironment):
 
         cwd = cwd or self.cwd
         if sys.platform == "win32":
-            # Partial fix for ScriptTest.run using `shell=True` on Windows.
             args = tuple(re.sub("([&|<>^])", r"^\1", str(a)) for a in args)
 
         if allow_error:
             kw["expect_error"] = True
 
-        # Propagate default values.
         expect_error = kw.get("expect_error")
         if expect_error:
-            # Then default to allowing logged errors.
             if allow_stderr_error is not None and not allow_stderr_error:
                 raise RuntimeError(
                     "cannot pass allow_stderr_error=False with expect_error=True",
@@ -565,7 +522,6 @@ class CpipTestEnvironment(TestFileEnvironment):
             allow_stderr_error = True
 
         elif kw.get("expect_stderr"):
-            # Then default to allowing logged warnings.
             if allow_stderr_warning is not None and not allow_stderr_warning:
                 raise RuntimeError(
                     "cannot pass allow_stderr_warning=False with expect_stderr=True",
@@ -581,17 +537,12 @@ class CpipTestEnvironment(TestFileEnvironment):
                 "cannot pass allow_stderr_warning=False with allow_stderr_error=True",
             )
 
-        # Default values if not set.
         if allow_stderr_error is None:
             allow_stderr_error = False
         if allow_stderr_warning is None:
             allow_stderr_warning = allow_stderr_error
 
-        # Pass expect_stderr=True to allow any stderr.  We do this because
-        # we do our checking of stderr further on in check_stderr().
         kw["expect_stderr"] = True
-        # Ignore linter check
-        # B026 Star-arg unpacking after a keyword argument is strongly discouraged
         result = super().run(cwd=cwd, *args, **kw)  # noqa: B026
 
         if expect_error and not allow_error and result.returncode == 0:
@@ -635,12 +586,10 @@ class CpipTestEnvironment(TestFileEnvironment):
         """Invoke cpip install without PyPI access. By default, only local
         packages are included via --find-links.
         """
-        # Convert find links paths to absolute file: URIs
         if not isinstance(find_links, list):
             find_links = [find_links]
         find_links_args: list[StrPath] = []
         for folder in find_links:
-            # Don't rewrite paths that are already file URIs
             if isinstance(folder, str) and folder.startswith("file:"):
                 find_links_args.extend(("--find-links", folder))
             else:
@@ -688,8 +637,6 @@ class CpipTestEnvironment(TestFileEnvironment):
     def assert_not_installed(self, *args: str) -> None:
         ret = self.cpip("list", "--format=json")
         installed = {canonicalize_name(val["name"]) for val in json.loads(ret.stdout)}
-        # None of the given names should be listed as installed, i.e. their
-        # intersection should be empty.
         expected = {canonicalize_name(k) for k in args}
         assert not (expected & installed), f"{expected!r} contained in {installed!r}"
 
@@ -723,9 +670,6 @@ class CpipTestEnvironment(TestFileEnvironment):
         return self.temporary_file(filename, textwrap.dedent(contents))
 
 
-# FIXME ScriptTest does something similar, but only within a single
-# ProcResult; this generalizes it so states can be compared across
-# multiple commands.  Maybe should be rolled into ScriptTest?
 def diff_states(
     start: FilesState,
     end: FilesState,
@@ -806,7 +750,6 @@ def assert_all_changes(
             + "\n".join([k + ": " + ", ".join(v.keys()) for k, v in diff.items()]),
         )
 
-    # Don't throw away this potentially useful information
     return diff
 
 
@@ -1050,7 +993,6 @@ def change_test_package_version(
         name="version_pkg",
         output="some different version",
     )
-    # Pass -a to stage the change to the main file.
     git_commit(version_pkg_path, message="messed version", stage_modified=True)
 
 
@@ -1140,8 +1082,6 @@ def create_basic_wheel_for_package(
     if extra_files is None:
         extra_files = {}
 
-    # Fix wheel distribution name by replacing runs of non-alphanumeric
-    # characters with an underscore _ as per PEP 491
     name = re.sub(r"[^\w\d.]+", "_", name)
     archive_name = f"{name}-{version}-py2.py3-none-any.whl"
     archive_path = script.scratch_path / archive_name
@@ -1176,7 +1116,6 @@ def create_basic_wheel_for_package(
         metadata_updates=metadata_updates,
         extra_metadata_files={"top_level.txt": name},
         extra_files=extra_files,
-        # Have an empty RECORD because we don't want to be checking hashes.
         record="",
     )
     wheel_builder.save_to(archive_path)
@@ -1217,10 +1156,8 @@ def create_basic_sdist_for_package(
         ),
     }
 
-    # Some useful shorthands
     archive_name = f"{name}-{version}.tar.gz"
 
-    # Add new files after formatting
     if extra_files:
         files.update(extra_files)
 
@@ -1299,7 +1236,7 @@ class InMemoryCpip:
         stdout = StringIO()
         sys.stdout = stdout
         try:
-            returncode = cpip_entry_point([os.fspath(a) for a in args])
+            returncode = main.main([os.fspath(a) for a in args])
         except SystemExit as e:
             if isinstance(e.code, int):
                 returncode = e.code
@@ -1323,9 +1260,6 @@ class ScriptFactory(Protocol):
 
 CertFactory = Callable[[], str]
 
-# Accommodations for Windows path and URL changes in recent Python releases.
-# Trailing slashes are now preserved on Windows, matching POSIX behaviour.
-# BPO: https://github.com/python/cpython/issues/126212
 does_pathname2url_preserve_trailing_slash = pathname2url("C:\\foo\\").endswith("/")
 skip_needs_new_pathname2url_trailing_slash_behavior_win = pytest.mark.skipif(
     sys.platform != "win32" or not does_pathname2url_preserve_trailing_slash,

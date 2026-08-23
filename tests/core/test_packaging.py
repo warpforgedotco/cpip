@@ -104,7 +104,7 @@ def test_version_wire_roundtrip_is_interned(raw: str) -> None:
     original = Version(raw)
     state = original.to_wire()
     assert is_version_wire(state)
-    assert type(state[2]) is tuple  # marshal-safe: the plain key, not the subclass
+    assert type(state[2]) is tuple
     assert state == (original.public, original.release, tuple(original))
 
     restored = Version.from_wire(state)
@@ -127,7 +127,6 @@ def test_is_version_wire_rejects_malformed() -> None:
     assert not is_version_wire(("1.2", (1, 2, 0), (0, (1, 2, 0), good[2][2], ())))
     assert not is_version_wire(("1.2", (1, 2), (0, (1, 2), (3, 0, 0, 0, 1), ())))
     assert not is_version_wire((1, (1, 2), good[2]))
-    # The pre-wire eight-field record.
     assert not is_version_wire((0, (1, 2), None, None, None, None, "1.2", good[2]))
 
 
@@ -294,7 +293,6 @@ class TestVersionIsItsOwnKey:
 
     def test_is_interned_by_text(self) -> None:
         assert Version("1.2.3") is Version("1.2.3")
-        # Equal texts that differ in spelling are equal, not identical.
         assert Version("1.2.3") == Version("1.2.3.0")
         assert Version("1.2.3") is not Version("1.2.3.0")
 
@@ -369,13 +367,10 @@ class TestSplitMarker:
             ("pkg ; python_version >= '3.8'", ("pkg", "python_version >= '3.8'")),
             ('pkg ; python_version >= "3.8"', ("pkg", 'python_version >= "3.8"')),
             ("pkg;extra == 'feature'", ("pkg", "extra == 'feature'")),
-            # A quoted ";" before the real separator must not split early --
-            # the quote-aware walk's whole reason to exist.
             (
                 "pkg @ https://x/y?q=';' ; python_version >= '3.8'",
                 ("pkg @ https://x/y?q=';'", "python_version >= '3.8'"),
             ),
-            # A ";" inside quotes with no separator after it: no split.
             ("pkg=='a;b'", ("pkg=='a;b'", None)),
         ],
     )
@@ -385,29 +380,24 @@ class TestSplitMarker:
         assert split_marker(value) == expected
 
 
-# The intern tables behind parse_requirement are an implementation detail;
-# the tests below observe them only through these two helpers so that a
-# relocation of the tables touches one place.
-
-
 def _table_sizes() -> dict[str, int]:
-    from cpip.core import packaging as packaging_module
-    from cpip.core import versions as versions_module
+    from cpip.core import packaging
+    from cpip.core import versions
 
     return {
-        "specifier_sets": len(packaging_module._specifier_sets),
-        "versions": len(versions_module._versions),
+        "specifier_sets": len(packaging._specifier_sets),
+        "versions": len(versions._versions),
     }
 
 
 def _table_limits() -> dict[str, int]:
-    from cpip.core import packaging as packaging_module
-    from cpip.core import versions as versions_module
+    from cpip.core import packaging
+    from cpip.core import versions
 
     return {
-        "specifier_sets": packaging_module._SPECIFIER_SET_CACHE_SIZE,
-        "versions": versions_module._VERSIONS_LIMIT,
-        "contains": packaging_module._CONTAINS_CACHE_SIZE,
+        "specifier_sets": packaging._SPECIFIER_SET_CACHE_SIZE,
+        "versions": versions._VERSIONS_LIMIT,
+        "contains": packaging._CONTAINS_CACHE_SIZE,
     }
 
 
@@ -429,7 +419,6 @@ def test_parse_requirement_shares_specifier_sets_by_text() -> None:
         parse_requirement("bare-a").specifier is parse_requirement("bare-b").specifier
     )
     assert not parse_requirement("bare-a").specifier.specifiers
-    # Sharing changes nothing about the answers.
     assert first.specifier.contains(Version("1.5"))
     assert not second.specifier.contains(Version("2.0"))
     assert str(first.specifier) == str(second.specifier)
@@ -440,8 +429,6 @@ def test_specifier_set_intern_table_is_bounded() -> None:
     for index in range(limit + 5):
         parse_requirement(f"pkg-{index}>={index}")
     assert _table_sizes()["specifier_sets"] <= limit
-    # Entries evicted by the sweep are simply rebuilt; requirements already
-    # parsed keep the instances they were given.
     assert parse_requirement("pkg-0>=0").specifier == SpecifierSet(">=0")
 
 
@@ -453,7 +440,6 @@ def test_shared_specifier_set_contains_cache_is_bounded() -> None:
         assert shared.contains(Version(f"1.{index}"))
         assert not shared.contains(Version(f"0.{index}"))
     assert _contains_cache_size(shared) <= limit
-    # Answers survive the sweep.
     assert shared.contains(Version("1.0"))
     assert not shared.contains(Version("0.1"))
 
@@ -463,7 +449,6 @@ def test_specifier_clauses_share_one_version_per_text() -> None:
     floor = parse_requirement("b>=1.1.0").specifier.specifiers[0]
     assert pinned.parsed_version is floor.parsed_version
     assert pinned.parsed_version == Version("1.1.0")
-    # A wildcard validates its prefix and answers by prefix.
     wildcard = parse_requirement("c==1.1.*").specifier
     assert wildcard.contains(Version("1.1.5"))
     assert not wildcard.contains(Version("1.2"))
@@ -529,10 +514,10 @@ class TestFrozenInternedSpecifiers:
             SpecifierSet("==1.0.")
 
     def test_contains_caches_are_bounded_per_mode(self) -> None:
-        from cpip.core import packaging as packaging_module
+        from cpip.core import packaging
 
         shared = SpecifierSet(">=1")
-        limit = packaging_module._CONTAINS_CACHE_SIZE
+        limit = packaging._CONTAINS_CACHE_SIZE
         for index in range(limit + 10):
             shared.contains(Version(f"1.{index}"))
             shared.contains(Version(f"1.{index}a1"), allow_prereleases=True)
@@ -547,12 +532,10 @@ class TestPep440ContainmentRules:
     @pytest.mark.parametrize(
         "specifier, version, expected",
         [
-            # == / != ignore the candidate's local label unless the clause has one
             ("==1.0", "1.0+local", True),
             ("!=1.0", "1.0+local", False),
             ("==1.0+local", "1.0", False),
             ("==1.0+local", "1.0+local", True),
-            # wildcards match release segments, zero-padded, not text
             ("==005.3.1.0.*", "5.3.1.0", True),
             ("==0.*", "0b2", True),
             ("==1.0.*", "1", True),
@@ -560,21 +543,18 @@ class TestPep440ContainmentRules:
             ("==1.1.*", "1.10", False),
             ("!=1.*", "1.5.post1", False),
             ("==1!1.*", "1.0", False),
-            # <V excludes prereleases of V itself, from V.dev0 up
             ("<1.0", "1.0rc1", False),
             ("<1.0", "1.0.dev0", False),
             ("<1.0", "0.9rc1", True),
             ("<1.0rc2", "1.0rc1", True),
             ("<1.0.post1", "1.0rc1", True),
             ("<1.0.post1", "1.0.post1.dev0", False),
-            # >V excludes post-releases and local versions of V itself
             (">0.3", "0.3.post1", False),
             (">0.3", "0.3.post1.dev0", False),
             (">0.3.post1", "0.3.post2", True),
             (">0.3a1", "0.3.post1", True),
             (">0.3", "0.3+local", False),
             (">0.3", "0.4", True),
-            # ~= is >=V plus ==prefix.*, epoch kept, no prereleases of the bound
             ("~=2.1", "3a1", False),
             ("~=2.1", "2.9.dev0", True),
             ("~=1!1.3", "1!1.3", True),
@@ -619,7 +599,6 @@ def test_version_of_parses_text_and_passes_versions_through() -> None:
     assert version_of("2.0.0") == Version("2.0")
     assert version_of(Version("2.0")) is Version("2.0")
     assert version_of("not a version") is None
-    # The check installed-distribution comparisons rely on.
     assert version_of("2.0.0") == Version("2.0.0")
     assert (Version("2.0.0") == "2.0.0") is False
 
@@ -628,8 +607,6 @@ class TestSpecifierClauseGrammar:
     """The string-based clause parser accepts and rejects exactly what the
     regex grammar it replaced did, clause for clause."""
 
-    # The grammar it replaced, verbatim: one regex to find clauses and a
-    # substitution to check it had consumed the whole text.
     SPEC_RE = re.compile(r"(===|==|!=|~=|<=|>=|<|>)\s*([^,]+)")
 
     @classmethod
@@ -642,13 +619,8 @@ class TestSpecifierClauseGrammar:
         clauses = [(op, ver.strip()) for op, ver in cls.SPEC_RE.findall(spec)]
         if spec and not clauses:
             return None
-        # The grammar only split clauses; Specifier then validated each
-        # operand exactly as it does today.
         for operator, version in clauses:
             if not version:
-                # The one deliberate tightening: the regex grammar let "==="
-                # through with an empty operand (arbitrary equality never
-                # parsed its operand); the clause parser rejects it.
                 return None
             if operator == "===":
                 continue
@@ -713,5 +685,5 @@ class TestSpecifierClauseGrammar:
             texts.append(rng.choice(("", " ")) + rng.choice(seps).join(clauses))
         for text in texts:
             if "[" in text or "]" in text:
-                continue  # brackets are rejected earlier, by parse_requirement
+                continue
             assert self._candidate(text) == self._reference(text), repr(text)

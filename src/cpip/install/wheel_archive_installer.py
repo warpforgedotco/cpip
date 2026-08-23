@@ -227,9 +227,6 @@ def _build_plans(
 
             _reserve_destination(trie, mapped, owner, candidate)
 
-            # A generated .pyc shares the trie so a wheel that also ships it
-            # as a member, or a second wheel producing the same path, is
-            # rejected here rather than overwritten during finalization.
             if pycompile and (compiled := _compiled_parts(mapped)) is not None:
                 _reserve_destination(trie, compiled, owner, candidate)
 
@@ -390,7 +387,6 @@ def _compile_members(
     Scripts under ``bin``/``Scripts`` are not modules and are left alone.
     """
 
-    # Deferred: compileall (and importlib.util) are needed only here.
     import compileall
     import importlib.util
 
@@ -438,8 +434,6 @@ def _finalize_wheel(
     script_members: set[str] = set()
 
     for relative, _, _, _ in archive.entries:
-        # Only a ``<name>.data/scripts/...`` member can be a script; every
-        # entry was validated when the archive was extracted.
         if "/scripts/" not in relative:
             continue
 
@@ -508,7 +502,6 @@ def _finalize_wheel(
     generated_paths: list[str] = []
 
     if plan.scripts:
-        # Deferred: tempfile only when this route installs.
         import tempfile
 
         with tempfile.TemporaryDirectory(prefix=".cpip-scripts-", dir=stage) as temp:
@@ -612,9 +605,6 @@ def _plan_destinations(
 
         destinations.add(os.path.join(root, "/".join(mapped)))
 
-        # The preflight must see the generated .pyc too, so an unowned file
-        # already at that path declines this route rather than being
-        # overwritten in the clone after the check has passed.
         if pycompile and (compiled := _compiled_parts(mapped)) is not None:
             destinations.add(os.path.join(root, "/".join(compiled)))
 
@@ -723,7 +713,6 @@ def install_wheels_from_archive_cache(
 
     os.makedirs(parent, exist_ok=True)
 
-    # Deferred: tempfile only when this route installs.
     import tempfile
 
     staging_parent = tempfile.mkdtemp(prefix=".cpip-install-", dir=parent)
@@ -848,8 +837,6 @@ def install_wheels_from_archive_cache(
         active_archives = tuple(plan.archive for plan in active_plans)
 
         if len(archives) >= 4 or len(plans) >= 4:
-            # Deferred: concurrent.futures drags in logging and more, and the pure-wheel
-            # fast path imports this module without ever starting a pool.
             from concurrent.futures import ThreadPoolExecutor
 
             pool = ThreadPoolExecutor(

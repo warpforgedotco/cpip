@@ -190,10 +190,6 @@ def clone_path(source: str, destination: str) -> None:
             if destination_exists:
                 return clone_path(source_text, destination_text)
 
-            # Deferred, with the copy fallback below: on a filesystem that
-            # can clone, this module hands back a whole tree without ever
-            # touching `shutil` -- which drags in `zlib`, `bz2` and `lzma`
-            # for archive helpers nothing here calls.
             import shutil
 
             try:

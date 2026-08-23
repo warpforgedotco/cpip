@@ -18,10 +18,6 @@ def test_python_interpreter(
     result = script.cpip("--python", env_path, "list", "--format=json")
     before = json.loads(result.stdout)
 
-    # Ideally we would assert that before==[], but there's a problem in CI
-    # that means this isn't true. See https://github.com/pypa/cpip/pull/11326
-    # for details.
-
     script.cpip(
         "--python",
         env_path,

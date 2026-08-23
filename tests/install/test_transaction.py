@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-import cpip.install.transaction as transaction_module
+from cpip.install import transaction
 import pytest
 from cpip.core.errors import InstallationError
 from cpip.install.transaction import InstallTransaction
@@ -74,9 +74,9 @@ def test_transaction_commits_and_replaces_owned_file(tmp_path: Path) -> None:
     source = tmp_path / "stage.py"
     source.write_text("new", encoding="utf-8")
 
-    with InstallTransaction(owned_paths=[destination]) as transaction:
-        transaction.add(source, destination)
-        transaction.commit()
+    with InstallTransaction(owned_paths=[destination]) as install_transaction:
+        install_transaction.add(source, destination)
+        install_transaction.commit()
 
     assert destination.read_text(encoding="utf-8") == "new"
 
@@ -84,9 +84,9 @@ def test_transaction_commits_and_replaces_owned_file(tmp_path: Path) -> None:
 def test_transaction_commits_staged_contents(tmp_path: Path) -> None:
     destination = tmp_path / "site" / "demo.py"
 
-    with InstallTransaction() as transaction:
-        transaction.add_contents(destination, b"new")
-        transaction.commit()
+    with InstallTransaction() as install_transaction:
+        install_transaction.add_contents(destination, b"new")
+        install_transaction.commit()
 
     assert destination.read_bytes() == b"new"
 
@@ -97,9 +97,9 @@ def test_transaction_clones_without_consuming_cache_source(tmp_path: Path) -> No
     source.write_text("immutable")
     destination = tmp_path / "target" / "destination.txt"
 
-    with InstallTransaction() as transaction:
-        transaction.add_clone(str(source), str(destination))
-        transaction.commit()
+    with InstallTransaction() as install_transaction:
+        install_transaction.add_clone(str(source), str(destination))
+        install_transaction.commit()
 
     assert source.read_text() == "immutable"
     assert destination.read_text() == "immutable"
@@ -113,10 +113,10 @@ def test_transaction_rejects_unowned_collision(tmp_path: Path) -> None:
     source = tmp_path / "stage.py"
     source.write_text("new", encoding="utf-8")
 
-    transaction = InstallTransaction()
-    transaction.add(source, destination)
+    install_transaction = InstallTransaction()
+    install_transaction.add(source, destination)
     with pytest.raises(InstallationError, match="unrelated file"):
-        transaction.commit()
+        install_transaction.commit()
 
     assert destination.read_text(encoding="utf-8") == "unrelated"
 
@@ -129,19 +129,19 @@ def test_transaction_validation_does_not_recheck_destination_file_type(
     destination.write_text("unrelated", encoding="utf-8")
     source = tmp_path / "stage.py"
     source.write_text("new", encoding="utf-8")
-    original_isfile = transaction_module.os.path.isfile
+    original_isfile = transaction.os.path.isfile
     checked: list[str] = []
 
     def counting_isfile(path: str | os.PathLike[str]) -> bool:
         checked.append(os.fspath(path))
         return original_isfile(path)
 
-    monkeypatch.setattr(transaction_module.os.path, "isfile", counting_isfile)
-    transaction = InstallTransaction()
-    transaction.add(source, destination)
+    monkeypatch.setattr(transaction.os.path, "isfile", counting_isfile)
+    install_transaction = InstallTransaction()
+    install_transaction.add(source, destination)
 
     with pytest.raises(InstallationError, match="unrelated file"):
-        transaction.commit()
+        install_transaction.commit()
 
     assert os.fspath(source) in checked
     assert os.fspath(destination) not in checked
@@ -154,20 +154,20 @@ def test_transaction_replaces_broken_symlink(tmp_path: Path) -> None:
     source = tmp_path / "stage.py"
     source.write_text("new", encoding="utf-8")
 
-    transaction = InstallTransaction()
-    transaction.add(source, destination)
-    transaction.commit()
+    install_transaction = InstallTransaction()
+    install_transaction.add(source, destination)
+    install_transaction.commit()
 
     assert destination.read_text(encoding="utf-8") == "new"
 
 
 def test_transaction_rejects_duplicate_destination(tmp_path: Path) -> None:
-    transaction = InstallTransaction()
+    install_transaction = InstallTransaction()
     destination = tmp_path / "demo.py"
 
-    transaction.add(tmp_path / "first.py", destination)
+    install_transaction.add(tmp_path / "first.py", destination)
     with pytest.raises(InstallationError, match="duplicate installation destination"):
-        transaction.add(tmp_path / "second.py", destination)
+        install_transaction.add(tmp_path / "second.py", destination)
 
 
 def test_transaction_rolls_back_previous_changes_on_failure(tmp_path: Path) -> None:
@@ -176,12 +176,12 @@ def test_transaction_rolls_back_previous_changes_on_failure(tmp_path: Path) -> N
     source = tmp_path / "source.py"
     source.write_text("new", encoding="utf-8")
 
-    transaction = InstallTransaction(owned_paths=[first])
-    transaction.add(source, first)
-    transaction.add(tmp_path / "missing.py", tmp_path / "second.py")
+    install_transaction = InstallTransaction(owned_paths=[first])
+    install_transaction.add(source, first)
+    install_transaction.add(tmp_path / "missing.py", tmp_path / "second.py")
 
     with pytest.raises(InstallationError, match="staged file"):
-        transaction.commit()
+        install_transaction.commit()
 
     assert first.read_text(encoding="utf-8") == "old"
 
@@ -190,12 +190,12 @@ def test_transaction_rolls_back_staged_contents_on_failure(tmp_path: Path) -> No
     first = tmp_path / "first.py"
     first.write_text("old", encoding="utf-8")
 
-    transaction = InstallTransaction(owned_paths=[first])
-    transaction.add_contents(first, b"new")
-    transaction.add(tmp_path / "missing.py", tmp_path / "second.py")
+    install_transaction = InstallTransaction(owned_paths=[first])
+    install_transaction.add_contents(first, b"new")
+    install_transaction.add(tmp_path / "missing.py", tmp_path / "second.py")
 
     with pytest.raises(InstallationError, match="staged file"):
-        transaction.commit()
+        install_transaction.commit()
 
     assert first.read_text(encoding="utf-8") == "old"
 
@@ -213,9 +213,9 @@ def test_staged_contents_mode_exact_under_permissive_umask(
     destination = tmp_path / "demo.py"
     old_umask = os.umask(0o022)
     try:
-        with InstallTransaction() as transaction:
-            transaction.add_contents(str(destination), b"payload", mode=mode)
-            transaction.commit()
+        with InstallTransaction() as install_transaction:
+            install_transaction.add_contents(str(destination), b"payload", mode=mode)
+            install_transaction.commit()
     finally:
         os.umask(old_umask)
 
@@ -230,9 +230,11 @@ def test_staged_contents_mode_exact_under_stripping_umask(tmp_path: Path) -> Non
     destination = tmp_path / "demo.sh"
     old_umask = os.umask(0o077)
     try:
-        with InstallTransaction() as transaction:
-            transaction.add_contents(str(destination), b"#!/bin/sh\n", mode=0o755)
-            transaction.commit()
+        with InstallTransaction() as install_transaction:
+            install_transaction.add_contents(
+                str(destination), b"#!/bin/sh\n", mode=0o755
+            )
+            install_transaction.commit()
     finally:
         os.umask(old_umask)
 
@@ -247,9 +249,9 @@ def test_staged_contents_default_mode_matches_open_builtin(tmp_path: Path) -> No
     destination = tmp_path / "demo.txt"
     old_umask = os.umask(0o022)
     try:
-        with InstallTransaction() as transaction:
-            transaction.add_contents(str(destination), b"payload")
-            transaction.commit()
+        with InstallTransaction() as install_transaction:
+            install_transaction.add_contents(str(destination), b"payload")
+            install_transaction.commit()
     finally:
         os.umask(old_umask)
 
@@ -265,13 +267,13 @@ def test_staged_contents_short_os_write_calls_are_all_retried(
     def short_write(fd: int, data) -> int:  # noqa: ANN001
         return original_write(fd, bytes(data)[:3])
 
-    monkeypatch.setattr(transaction_module.os, "write", short_write)
+    monkeypatch.setattr(transaction.os, "write", short_write)
     destination = tmp_path / "demo.bin"
     payload = bytes(range(256)) * 40
 
-    with InstallTransaction() as transaction:
-        transaction.add_contents(str(destination), payload)
-        transaction.commit()
+    with InstallTransaction() as install_transaction:
+        install_transaction.add_contents(str(destination), payload)
+        install_transaction.commit()
 
     assert destination.read_bytes() == payload
 
@@ -283,13 +285,13 @@ def test_staged_contents_zero_write_raises_and_rolls_back(
     def zero_write(fd: int, data) -> int:  # noqa: ANN001
         return 0
 
-    monkeypatch.setattr(transaction_module.os, "write", zero_write)
+    monkeypatch.setattr(transaction.os, "write", zero_write)
     destination = tmp_path / "demo.bin"
 
-    transaction = InstallTransaction()
-    transaction.add_contents(str(destination), b"payload")
+    install_transaction = InstallTransaction()
+    install_transaction.add_contents(str(destination), b"payload")
     with pytest.raises(OSError, match="could not write staged file contents"):
-        transaction.commit()
+        install_transaction.commit()
 
     assert not destination.exists()
 
@@ -304,9 +306,9 @@ def test_validate_live_symlink_to_identical_file_is_tolerated(tmp_path: Path) ->
     destination = tmp_path / "demo.py"
     destination.symlink_to(real)
 
-    transaction = InstallTransaction()
-    transaction.add_contents(str(destination), b"same contents")
-    transaction.validate()
+    install_transaction = InstallTransaction()
+    install_transaction.add_contents(str(destination), b"same contents")
+    install_transaction.validate()
 
 
 def test_validate_live_symlink_to_different_file_is_rejected(tmp_path: Path) -> None:
@@ -315,10 +317,10 @@ def test_validate_live_symlink_to_different_file_is_rejected(tmp_path: Path) -> 
     destination = tmp_path / "demo.py"
     destination.symlink_to(real)
 
-    transaction = InstallTransaction()
-    transaction.add_contents(str(destination), b"new contents")
+    install_transaction = InstallTransaction()
+    install_transaction.add_contents(str(destination), b"new contents")
     with pytest.raises(InstallationError, match="an unrelated file already exists"):
-        transaction.validate()
+        install_transaction.validate()
 
 
 def test_validate_fresh_destination_uses_a_single_syscall(
@@ -341,11 +343,11 @@ def test_validate_fresh_destination_uses_a_single_syscall(
         return original_stat(path, *args, **kwargs)
 
     destination = str(tmp_path / "absent.py")
-    transaction = InstallTransaction()
-    transaction.add_contents(str(destination), b"payload")
-    monkeypatch.setattr(transaction_module.os, "lstat", counting_lstat)
-    monkeypatch.setattr(transaction_module.os, "stat", counting_stat)
-    transaction.validate()
+    install_transaction = InstallTransaction()
+    install_transaction.add_contents(str(destination), b"payload")
+    monkeypatch.setattr(transaction.os, "lstat", counting_lstat)
+    monkeypatch.setattr(transaction.os, "stat", counting_stat)
+    install_transaction.validate()
     monkeypatch.undo()
 
     assert calls == {"lstat": 1, "stat": 0}
@@ -363,11 +365,11 @@ def test_validate_propagates_permission_errors(
     def denied_lstat(path, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
         raise PermissionError(13, "Permission denied", path)
 
-    transaction = InstallTransaction()
-    transaction.add_contents(str(tmp_path / "demo.py"), b"payload")
-    monkeypatch.setattr(transaction_module.os, "lstat", denied_lstat)
+    install_transaction = InstallTransaction()
+    install_transaction.add_contents(str(tmp_path / "demo.py"), b"payload")
+    monkeypatch.setattr(transaction.os, "lstat", denied_lstat)
     with pytest.raises(PermissionError):
-        transaction.validate()
+        install_transaction.validate()
 
 
 def test_validate_treats_file_parent_component_as_absent(tmp_path: Path) -> None:
@@ -380,11 +382,11 @@ def test_validate_treats_file_parent_component_as_absent(tmp_path: Path) -> None
     blocker.write_bytes(b"a file where a directory is expected")
     destination = blocker / "demo.py"
 
-    transaction = InstallTransaction()
-    transaction.add_contents(str(destination), b"payload")
-    transaction.validate()
+    install_transaction = InstallTransaction()
+    install_transaction.add_contents(str(destination), b"payload")
+    install_transaction.validate()
 
-    assert transaction.destination_presence[str(destination)] is False
+    assert install_transaction.destination_presence[str(destination)] is False
 
 
 def test_chmod_failure_after_replace_rolls_back_a_fresh_destination(
@@ -403,11 +405,11 @@ def test_chmod_failure_after_replace_rolls_back_a_fresh_destination(
     def failing_chmod(path, mode, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
         raise PermissionError(13, "Operation not permitted", path)
 
-    transaction = InstallTransaction()
-    transaction.add(str(source), str(destination), mode=0o755)
-    monkeypatch.setattr(transaction_module.os, "chmod", failing_chmod)
+    install_transaction = InstallTransaction()
+    install_transaction.add(str(source), str(destination), mode=0o755)
+    monkeypatch.setattr(transaction.os, "chmod", failing_chmod)
     with pytest.raises(PermissionError):
-        transaction.commit()
+        install_transaction.commit()
 
     assert not destination.exists()
 

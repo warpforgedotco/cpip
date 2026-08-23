@@ -125,8 +125,6 @@ def test_lazy_catalog_records_returns_none_when_choice_not_persisted(
     records_by_version = {version: ((source_url, generation),)}
 
     provider = _provider(cache)
-    # Seed the package-catalog cache directly without warming the choice
-    # cache first, so ``lazy_catalog_records`` sees a cache miss.
     provider.package_catalog_cache[("demo", True, True)] = SimpleNamespace(
         records_by_version=records_by_version,
     )

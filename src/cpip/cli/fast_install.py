@@ -26,24 +26,10 @@ from cpip.core.packaging import EMPTY_FROZENSET
 from cpip.core.versions import Version
 from cpip.core.utils import CACHE_INTERPRETER_TAG, load_snapshot, save_snapshot
 from cpip.core.wheel import PureWheelCandidate, WheelCandidate
-from cpip.core.wheel import parse_wheel_filename as parse_wheel_filename_core
+from cpip.core.wheel import parse_wheel_filename
 from cpip.platform.clone import clone_path
 
-# Everything the plan-hit route never touches is imported at its call site
-# instead. That route -- an empty target, a cached plan, a cloned tree -- is
-# the one this module exists for, and importing this module is the single
-# real cost `cli.fast` pays to reach it (see its dispatch comment). The
-# archive reader, the staged/archive-cache installers, the install target and
-# `hashlib` are all reached only when the plan misses, the wheelhouse has to
-# be read, or a tree is published, and each drags in a chain of its own:
-# `wheel_archive_cache` alone pulls `shutil`, `typing` and `csv`, and
-# `install.target` pulls `sysconfig` twice over.
 
-# Scoped to the interpreter: marshal's wire format is not guaranteed
-# compatible across Python versions/implementations. TREE_CACHE_BUCKET does
-# not need the same treatment -- it is only ever reached through a plan
-# entry recorded in this file, so a tagged (and therefore missing, for a
-# different interpreter) snapshot already makes tree lookups miss cleanly.
 NAME = f"fast-install-{CACHE_INTERPRETER_TAG}.marshal"
 MAX_ENTRIES = 8_192
 MAX_PLANS = 256
@@ -351,8 +337,6 @@ class FastInstallMetadataCache:
         if value is None:
             return
 
-        # Deferred: publishing a tree happens once per wheelhouse, while
-        # every later install reads the published tree without hashing.
         import hashlib
 
         tree_key = hashlib.sha256(
@@ -366,7 +350,6 @@ class FastInstallMetadataCache:
             shard = os.path.dirname(entry)
             try:
                 os.makedirs(shard, exist_ok=True)
-                # Deferred: tempfile (and shutil behind it) only when a tree is published.
                 import tempfile
 
                 temporary = tempfile.mkdtemp(prefix=f".{tree_key[:12]}-", dir=shard)
@@ -538,14 +521,6 @@ def parse_arguments(args: list[str]) -> InstallOptions | None:
             elif token == "--upgrade":
                 options.upgrade = True
 
-            # An empty target has no installed versions to upgrade.  The local
-
-            # resolver already selects the newest compatible wheel, so this
-
-            # flag is safe to accept here.  A non-empty target still falls back
-
-            # from install_resolved_pure_wheels before changing any files.
-
             index += 1
 
             continue
@@ -562,7 +537,6 @@ def parse_arguments(args: list[str]) -> InstallOptions | None:
             elif name == "--target":
                 options.target = value
             elif name == "--cache-dir":
-                # The versioned directory every other writer uses.
                 options.cache_dir = versioned_cache_dir(value)
             else:
                 if not extend_requirements(options.requirements, value):
@@ -583,8 +557,6 @@ def parse_arguments(args: list[str]) -> InstallOptions | None:
 def _remote_index_url() -> str | None:
     """Return the effective sole index, or decline non-default source shapes."""
 
-    # Only the remote-exact-pin fast path reaches here; local/--no-index
-    # installs never need config parsing, so keep it off their import cost.
     from cpip.cli.config import load_source_config
 
     config = load_source_config("install")
@@ -620,8 +592,6 @@ def run_cached_remote(args: list[str]) -> int | None:
     if index_url is None:
         return None
 
-    # Deferred: the whole archive-cache installer stack, reached only once an
-    # index URL and a cached remote plan are both in hand.
     from cpip.install.target import InstallTarget
     from cpip.install.wheel_archive_installer import (
         install_wheels_from_archive_cache,
@@ -772,8 +742,8 @@ def version_key(value: str) -> tuple[int, ...] | None:
     return tuple(result)
 
 
-def parse_wheel_filename(path: str) -> tuple[str, str] | None:
-    parsed = parse_wheel_filename_core(path)
+def parse_installable_wheel_filename(path: str) -> tuple[str, str] | None:
+    parsed = parse_wheel_filename(path)
     if parsed is None or version_key(parsed[1]) is None:
         return None
     return parsed
@@ -904,12 +874,6 @@ def iter_wheel_paths(find_links: list[str]) -> list[str] | None:
 
             continue
 
-        # One absolute directory, then plain joins: `abspath` on each entry
-        # would re-derive the same prefix per wheel, and for a relative
-        # `--find-links` that is a `getcwd` syscall per entry -- on a
-        # wheelhouse of a few thousand, the scan's largest single cost.
-        # Entry names carry no separator and are never "." or "..", so the
-        # join is already normalized, exactly as `abspath` left it.
         directory = os.path.abspath(value)
 
         try:
@@ -958,7 +922,7 @@ def resolve_simple_wheelhouse(
     candidates_by_name: dict[str, list[FastCandidate]] = {}
 
     for path in paths:
-        parsed = parse_wheel_filename(path)
+        parsed = parse_installable_wheel_filename(path)
 
         if parsed is None:
             return None
@@ -1076,7 +1040,6 @@ def install_resolved_pure_wheels(
 ) -> bool:
     """Install an already-resolved pure-wheel plan into an empty target."""
 
-    # Deferred: extraction only runs when no cached tree could be cloned.
     from cpip.install.wheel_archive import mode_from_external_attr
     from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
 
@@ -1084,9 +1047,6 @@ def install_resolved_pure_wheels(
 
     separator = os.sep
 
-    # Load-bearing for member safety, not just for correctness: an empty target
-    # is what lets this path use the lexical `is_safe_member` check instead of
-    # resolving each destination. See that function's docstring.
     if not target_is_empty(target):
         return False
 
@@ -1099,9 +1059,6 @@ def install_resolved_pure_wheels(
     for candidate in candidates:
         try:
             with open(os.fspath(candidate.path), "rb") as wheel_file:
-                # Members pre-read by the resolver come with their modes;
-                # a member table without modes would leave archive.modes
-                # empty, so read the directory again instead.
                 members = getattr(candidate, "archive_members", None)
 
                 modes = getattr(candidate, "archive_modes", None)
@@ -1166,21 +1123,10 @@ def install_resolved_pure_wheels(
 
                 dist_info = wheel_members[0].rsplit("/", 1)[0]
 
-                # archive.modes is a plain dict, safe to read after the
-                # archive's file handle closes -- unlike zipfile, this
-                # low-level reader never restores permission bits itself,
-                # so an executable regular file bundled directly in the
-                # package tree (outside .data/entry_points, which are
-                # rejected above) needs its mode carried through explicitly.
                 modes_for_wheel = [
                     mode_from_external_attr(archive.modes[name]) for name in names
                 ]
 
-                # `name` rides along because it already *is* the RECORD path:
-                # `destination` was built as `join(target, name)`, so the
-                # `relpath(destination, target)` the row used to be written
-                # from could only ever reproduce it -- once per installed
-                # file, at the cost of splitting both paths apart again.
                 members = [
                     (
                         destination,
@@ -1225,10 +1171,6 @@ def install_resolved_pure_wheels(
 
             record_rows: dict[str, tuple[str, str, str]] = {}
 
-            # A wheel may ship its own RECORD, in which case extraction below
-            # already added it to the rollback list.  Noting it here keeps the
-            # duplicate check off ``created_files``, which grows to one entry
-            # per installed file and so made the check cost O(wheels x files).
             record_is_member = False
 
             if not reuse_record:
@@ -1396,12 +1338,6 @@ def run(args: list[str]) -> int | None:
     ):
         return None
 
-    # A non-empty target cannot use the specialized installer.  Check this
-
-    # before resolving so the normal fallback does not resolve the same local
-
-    # wheelhouse a second time just to reject the plan.
-
     if not target_is_empty(options.target):
         return None
 
@@ -1486,9 +1422,6 @@ def run_local_fallback(args: list[str]) -> int | None:
             ):
                 return None
 
-    # Deferred: this route installs into a populated target through the full
-    # archive-cache installer, so it pays for that stack; `run` above, which
-    # clones a cached tree into an empty one, never reaches this line.
     from cpip.install.target import InstallTarget
     from cpip.install.wheel_archive_cache import prepare_cached_wheel
     from cpip.install.wheel_archive_installer import (

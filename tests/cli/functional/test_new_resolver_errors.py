@@ -88,7 +88,6 @@ def test_new_resolver_requires_python_error(script: CpipTestEnvironment) -> None
         python_requires=incompatible_python,
     )
 
-    # This always fails because pkgb can never be satisfied.
     result = script.cpip(
         "install",
         "--no-build-isolation",
@@ -116,8 +115,6 @@ def test_new_resolver_checks_requires_python_before_dependencies(
         script,
         name="pkg-root",
         version="1",
-        # Refer the dependency by URL to prioritise it as much as possible,
-        # to test that Requires-Python is *still* inspected first.
         depends=[f"pkg-dep@{pathlib.Path(pkg_dep).as_uri()}"],
         requires_python=incompatible_python,
     )
@@ -133,7 +130,6 @@ def test_new_resolver_checks_requires_python_before_dependencies(
     )
 
     assert "pkg-root" in result.stderr, str(result)
-    # Setuptools produces wheels with normalized names.
     assert "pkg_dep" not in result.stderr, str(result)
     assert "pkg_dep" not in result.stdout, str(result)
 
@@ -154,7 +150,6 @@ def test_new_resolver_no_versions_available_hint(script: CpipTestEnvironment) ->
         wheel_house.joinpath("incompatible_dep-1.0.0-py3-none-fakeplat.whl"),
     )
 
-    # Create multiple versions of a package that depend on the incompatible dependency
     requesting_pkg_v1 = make_wheel(
         name="requesting-pkg",
         version="1.0.0",
@@ -173,7 +168,6 @@ def test_new_resolver_no_versions_available_hint(script: CpipTestEnvironment) ->
         wheel_house.joinpath("requesting_pkg-2.0.0-py2.py3-none-any.whl"),
     )
 
-    # Attempt to install the requesting package
     result = script.cpip(
         "install",
         "--no-cache-dir",

@@ -8,8 +8,7 @@ from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
 
-from werkzeug.serving import BaseWSGIServer, WSGIRequestHandler
-from werkzeug.serving import make_server as make_server_internal
+from werkzeug.serving import BaseWSGIServer, WSGIRequestHandler, make_server
 
 from .compat import blocked_signals
 
@@ -21,13 +20,6 @@ Body = Iterable[bytes]
 
 @contextmanager
 def patch_getfqdn() -> Iterator[None]:
-    # HTTPServer, which Werkzeug subclasses, will try to query the fully qualified
-    # domain name for the socket address during socket binding. This can be extremely
-    # slow (30s, even) due to DNS timeouts. It's only used for the SERVER_NAME CGI
-    # environment field which is not relevant for our tests, so patch it to
-    # immediately return a fake local FQDN.
-    #
-    # See also: https://apple.stackexchange.com/questions/175320/why-is-my-hostname-resolution-taking-so-long
     with patch("socket.getfqdn", lambda name: "piptestserver.home.arpa"):
         yield
 
@@ -40,22 +32,15 @@ class RequestHandler(WSGIRequestHandler):
     def make_environ(self) -> dict[str, Any]:
         environ = super().make_environ()
 
-        # From pallets/werkzeug#1469, will probably be in release after
-        # 0.16.0.
         try:
-            # binary_form=False gives nicer information, but wouldn't be
-            # compatible with what Nginx or Apache could return.
             peer_cert = self.connection.getpeercert(binary_form=True)
             if peer_cert is not None:
-                # Nginx and Apache use PEM format.
                 environ["SSL_CLIENT_CERT"] = ssl.DER_cert_to_PEM_cert(
                     peer_cert,
                 )
         except ValueError:
-            # SSL handshake hasn't finished.
             self.server.log("error", "Cannot fetch SSL peer certificate info")
         except AttributeError:
-            # Not using TLS, the socket will not have getpeercert().
             pass
 
         return environ
@@ -113,7 +98,7 @@ def make_mock_server(**kwargs: Any) -> MockServer_internal:
     mock = Mock()
     app = mock_wsgi_adapter(mock)
     with patch_getfqdn():
-        server = make_server_internal("localhost", 0, app=app, **kwargs)
+        server = make_server("localhost", 0, app=app, **kwargs)
     server.mock = mock
     return server
 
@@ -130,9 +115,6 @@ def server_running(server: BaseWSGIServer) -> Iterator[None]:
     finally:
         server.shutdown()
         thread.join()
-
-
-# Helper functions for making responses in a declarative way.
 
 
 def text_html_response(text: str) -> "WSGIApplication":
@@ -242,6 +224,4 @@ class MockServer:
     def get_requests(self) -> list[dict[str, str]]:
         """Get environ for each received request."""
         assert not self.running, "cannot get mock from running server"
-        # Legacy: replace call[0][0] with call.args[0]
-        # when cpip drops support for python3.7
         return [call[0][0] for call in self.server_internal.mock.call_args_list]

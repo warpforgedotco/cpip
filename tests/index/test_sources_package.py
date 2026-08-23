@@ -105,7 +105,7 @@ def test_find_links_reuses_local_artifact_identity_until_refresh(
     artifact = tmp_path / "demo-1.0.tar.gz"
     artifact.write_bytes(b"artifact")
     source = FindLinksSource((str(tmp_path),))
-    import cpip.index.directory_index as directory_index
+    from cpip.index import directory_index
 
     scan = directory_index.os.scandir
     calls = 0
@@ -119,7 +119,6 @@ def test_find_links_reuses_local_artifact_identity_until_refresh(
     first = source.links_from_local_path(tmp_path)
     second = source.links_from_local_path(tmp_path)
 
-    # The scan attaches no stat identity; it is computed on first use.
     assert first[0].local_identity_internal is None
     assert second[0].local_identity_internal is None
     assert calls == 1
@@ -136,7 +135,7 @@ def test_find_links_caches_local_file_discovery(
     artifact = tmp_path / "demo-1.0.tar.gz"
     artifact.write_bytes(b"artifact")
     source = FindLinksSource((str(artifact),))
-    import cpip.index.source_locations as source_locations
+    from cpip.index import source_locations
 
     stat = source_locations.os.stat
     calls = 0
@@ -1263,7 +1262,6 @@ def test_candidate_provider_only_builds_highest_ranked_source_candidate(
     preferred = candidates[:2]
 
     assert Path(preferred[0].path).is_file()
-    # nab keeps source candidates lazy until they are selected/materialized.
     assert built == []
     assert [str(candidate.version) for candidate in preferred] == ["3.0", "1.0"]
 
@@ -1396,7 +1394,7 @@ def test_find_links_scan_defers_the_stat_to_the_first_fingerprint(
     """Scanning a wheelhouse must not stat every entry: the identity is
     computed when an artifact's metadata is first fingerprinted, in the
     same ``stat:dev:ino:size:mtime`` form, and remembered on the link."""
-    import cpip.index.candidate_materialization as materialization
+    from cpip.index import candidate_materialization
     from cpip.core.versions import Version
     from cpip.index.candidate_materialization import candidate_metadata_fingerprint
     from cpip.index.source_models import CandidateRecord
@@ -1404,7 +1402,7 @@ def test_find_links_scan_defers_the_stat_to_the_first_fingerprint(
     wheel = tmp_path / "demo-1.0-py3-none-any.whl"
     wheel.write_bytes(b"artifact")
     source = FindLinksSource((str(tmp_path),))
-    original_stat = materialization.os.stat
+    original_stat = candidate_materialization.os.stat
     stats = 0
 
     def counting_stat(*args: object, **kwargs: object) -> object:
@@ -1412,7 +1410,7 @@ def test_find_links_scan_defers_the_stat_to_the_first_fingerprint(
         stats += 1
         return original_stat(*args, **kwargs)
 
-    monkeypatch.setattr(materialization.os, "stat", counting_stat)
+    monkeypatch.setattr(candidate_materialization.os, "stat", counting_stat)
     links = source.links_from_local_path(tmp_path)
     assert len(links) == 1
     assert stats == 0

@@ -21,7 +21,6 @@ def zip_dir() -> Iterator[ZipDir]:
             for dirpath, _, filenames in os.walk(path):
                 for filename in filenames:
                     file_path = os.path.join(path, dirpath, filename)
-                    # Zip files must always have / as path separator
                     archive_path = os.path.relpath(file_path, path).replace(
                         os.pathsep,
                         "/",
@@ -150,22 +149,17 @@ def test_check_compatibility() -> None:
     name = "test"
     vc = wheel.VERSION_COMPATIBLE
 
-    # Major version is higher - should be incompatible
     higher_v = (vc[0] + 1, vc[1])
 
-    # test raises with correct error
     with pytest.raises(UnsupportedWheel) as e:
         wheel.check_compatibility(higher_v, name)
     assert "is not compatible" in str(e)
 
-    # Should only log.warning - minor version is greater
     higher_v = (vc[0], vc[1] + 1)
     wheel.check_compatibility(higher_v, name)
 
-    # These should work fine
     wheel.check_compatibility(wheel.VERSION_COMPATIBLE, name)
 
-    # E.g if wheel to install is 1.0 and we support up to 1.2
     lower_v = (vc[0], max(0, vc[1] - 1))
     wheel.check_compatibility(lower_v, name)
 

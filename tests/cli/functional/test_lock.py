@@ -34,7 +34,7 @@ def test_lock_wheel_from_findlinks(
         "--no-index",
         "--find-links",
         str(shared_data.root / "packages/"),
-        expect_stderr=True,  # for the experimental warning
+        expect_stderr=True,
     )
     result.did_create(Path("scratch") / "pylock.toml")
     pylock = tomllib.loads(script.scratch_path.joinpath("pylock.toml").read_text())
@@ -96,7 +96,7 @@ def test_lock_sdist_from_findlinks(
         "--no-index",
         "--find-links",
         str(shared_data.root / "packages/"),
-        expect_stderr=True,  # for the experimental warning
+        expect_stderr=True,
     )
     pylock = tomllib.loads(result.stdout)
     assert pylock["packages"] == [
@@ -138,12 +138,12 @@ def test_lock_local_directory(
         ".",
         "--quiet",
         "--output=-",
-        "--no-build-isolation",  # to use the pre-installed setuptools
+        "--no-build-isolation",
         "--no-index",
         "--find-links",
         str(shared_data.root / "packages/"),
         cwd=project_path,
-        expect_stderr=True,  # for the experimental warning
+        expect_stderr=True,
     )
     pylock = tomllib.loads(result.stdout)
     assert pylock["packages"] == [
@@ -175,12 +175,12 @@ def test_lock_local_editable_with_dep(
         ".",
         "--quiet",
         "--output=-",
-        "--no-build-isolation",  # to use the pre-installed setuptools
+        "--no-build-isolation",
         "--no-index",
         "--find-links",
         str(shared_data.root / "packages/"),
         cwd=project_path,
-        expect_stderr=True,  # for the experimental warning
+        expect_stderr=True,
     )
     pylock = tomllib.loads(result.stdout)
     wheel_name = pylock["packages"][1]["wheels"][0]["name"]
@@ -208,9 +208,9 @@ def test_lock_vcs(script: CpipTestEnvironment, shared_data: TestData) -> None:
         "git+https://github.com/pypa/pip-test-package@0.1.2",
         "--quiet",
         "--output=-",
-        "--no-build-isolation",  # to use the pre-installed setuptools
+        "--no-build-isolation",
         "--no-index",
-        expect_stderr=True,  # for the experimental warning
+        expect_stderr=True,
     )
     pylock = tomllib.loads(result.stdout)
     assert pylock["packages"] == [
@@ -233,9 +233,9 @@ def test_lock_archive(script: CpipTestEnvironment, shared_data: TestData) -> Non
         "https://github.com/pypa/pip-test-package/tarball/0.1.2",
         "--quiet",
         "--output=-",
-        "--no-build-isolation",  # to use the pre-installed setuptools
+        "--no-build-isolation",
         "--no-index",
-        expect_stderr=True,  # for the experimental warning
+        expect_stderr=True,
     )
     pylock = tomllib.loads(result.stdout)
     assert pylock["packages"] == [
@@ -260,13 +260,13 @@ def test_lock_roundtrip(script: CpipTestEnvironment, data: TestData) -> None:
     script.cpip(
         "lock",
         "--quiet",
-        "--no-build-isolation",  # to use the pre-installed setuptools
+        "--no-build-isolation",
         "--no-index",
         "-r",
         pylock_path,
         "--output",
         pylock_result_path,
-        expect_stderr=True,  # for the experimental warning
+        expect_stderr=True,
     )
 
     def simplify_path_and_url(d: dict[str, Any]) -> None:

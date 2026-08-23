@@ -27,14 +27,6 @@ class UserInstallationInvalid(InstallationError):
         return "User base directory is not specified"
 
 
-# Notes on _infer_* functions.
-# Unfortunately ``get_default_scheme()`` didn't exist before 3.10, so there's no
-# way to ask things like "what is the '_prefix' scheme on this platform". These
-# functions try to answer that with some heuristics while accounting for ad-hoc
-# platforms not covered by CPython's default sysconfig implementation. If the
-# ad-hoc implementation does not fully implement sysconfig, we'll fall back to
-# a POSIX scheme.
-
 AVAILABLE_SCHEMES = set(sysconfig.get_scheme_names())
 
 PREFERRED_SCHEME_API: Callable[[str], str] | None = getattr(
@@ -96,7 +88,7 @@ def infer_prefix() -> str:
     suffixed = f"{os.name}_prefix"
     if suffixed in AVAILABLE_SCHEMES:
         return suffixed
-    if os.name in AVAILABLE_SCHEMES:  # On Windows, prefx is just called "nt".
+    if os.name in AVAILABLE_SCHEMES:
         return os.name
     return "posix_prefix"
 
@@ -111,7 +103,7 @@ def infer_user() -> str:
         suffixed = f"{os.name}_user"
     if suffixed in AVAILABLE_SCHEMES:
         return suffixed
-    if "posix_user" not in AVAILABLE_SCHEMES:  # User scheme unavailable.
+    if "posix_user" not in AVAILABLE_SCHEMES:
         raise UserInstallationInvalid
     return "posix_user"
 
@@ -126,7 +118,6 @@ def infer_home() -> str:
     return "posix_home"
 
 
-# Update these keys if the user sets a custom home.
 HOME_KEYS = [
     "installed_base",
     "base",
@@ -171,9 +162,6 @@ def get_scheme(
     else:
         scheme_name = infer_prefix()
 
-    # Special case: When installing into a custom prefix, use posix_prefix
-    # instead of osx_framework_library. See _should_use_osx_framework_prefix()
-    # docstring for details.
     if prefix is not None and scheme_name == "osx_framework_library":
         scheme_name = "posix_prefix"
 
@@ -186,11 +174,6 @@ def get_scheme(
 
     paths = sysconfig.get_paths(scheme=scheme_name, vars=variables)
 
-    # Logic here is very arbitrary, we're doing it for compatibility, don't ask.
-    # 1. Cpip historically uses a special header path in virtual environments.
-    # 2. If the distribution name is not known, distutils uses 'UNKNOWN'. We
-    #    only do the same when not running in a virtual environment because
-    #    cpip's historical header path logic (see point 1) did not do this.
     if running_under_virtualenv():
         if user:
             base = variables.get("userbase", sys.prefix)

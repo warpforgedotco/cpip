@@ -33,9 +33,6 @@ class CacheManager:
     """
 
     def __init__(self, cache_dir: str | None = None) -> None:
-        # The same resolution every writer uses (explicit, then
-        # CPIP_CACHE_DIR, then the platform default), so the manager looks
-        # where the caches actually are.
         self.root = os.path.normcase(cache_root(cache_dir))
         self.cache_dir = versioned_cache_dir(self.root)
         self.http_dir = http_cache_path(self.cache_dir)
@@ -43,8 +40,6 @@ class CacheManager:
 
     def version_dirs(self) -> builtins.list[str]:
         """Every ``v<N>`` cache directory under the root, this cpip's or another's."""
-        # The root is escaped so a directory name with glob metacharacters
-        # still matches.
         return sorted(
             path
             for path in glob.glob(os.path.join(glob.escape(self.root), "v*"))
@@ -131,8 +126,6 @@ class CacheManager:
             except FileNotFoundError:
                 continue
             except OSError as error:
-                # Another cpip may hold a store open (Windows refuses to
-                # unlink an open SQLite file): report it and keep going.
                 print(f"WARNING: Could not remove {path}: {error}", file=sys.stderr)
                 continue
             files_removed += 1
@@ -140,8 +133,6 @@ class CacheManager:
             if verbose:
                 print(f"Removed {path}")
 
-        # A purge sweeps empty directories even when no file was left to
-        # remove, so a second purge finishes the job instead of warning.
         directories_removed = 0
         directories = [
             os.path.join(current, name)

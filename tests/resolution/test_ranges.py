@@ -20,8 +20,6 @@ from cpip._vendor.nab_resolver.ranges import (
     Range,
 )
 
-# Sample points, including half steps so an exclusive bound is distinguishable
-# from an inclusive one.
 PROBES = [value * 0.5 for value in range(-2, 20)]
 
 

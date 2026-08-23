@@ -11,7 +11,6 @@ def test_exact_version_reuses_the_specifiers_parsed_version() -> None:
     requirement = parse_requirement("pkg==1.2.3.post1")
     pinned = requirement.specifier.exact_version
     assert pinned == Version("1.2.3.post1")
-    # The same object the Specifier parsed at construction -- no re-parse.
     assert pinned is requirement.specifier.specifiers[0].parsed_version
 
 

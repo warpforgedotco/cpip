@@ -57,7 +57,7 @@ from cpip.index.source_models import (
     LazyCandidateMetadata,
 )
 from cpip.index.vcs import git_revision, is_immutable_vcs_link
-from cpip.index.vcs import vcs_scheme as parse_vcs_scheme
+from cpip.index.vcs import vcs_scheme
 from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
 
 TYPE_CHECKING = False
@@ -163,19 +163,11 @@ def _open_resolver_wheel_archive(
     """
 
     try:
-        # Unbuffered on purpose: WheelArchive's access pattern is one tail
-        # read plus exact-size seek+read pairs, so a BufferedReader's
-        # construction cost and readahead (discarded on every seek) are
-        # pure per-open overhead. Its short-read semantics are already
-        # what this reader treats as truncation.
         file = open(path_text, "rb", buffering=0)  # noqa: SIM115
 
         archive = WheelArchive(file)
 
         if any(member[0] not in {0, 8} for member in archive.members.values()):
-            # A compression method the raw reader cannot decode (bzip2,
-            # lzma): read() would fail on it later, so hand the whole
-            # wheel to zipfile now instead of reporting it invalid.
             file.close()
 
             return zipfile.ZipFile(path_text)
@@ -187,8 +179,6 @@ def _open_resolver_wheel_archive(
         except UnboundLocalError:
             pass
 
-        # Path form (rather than a passed-in file object) so ZipFile owns
-        # and auto-closes its own file handle on __exit__.
         return zipfile.ZipFile(path_text)
 
     return _ResolverWheelArchive(archive)
@@ -263,8 +253,6 @@ def candidate_metadata_fingerprint(candidate: CandidateRecord) -> str:
             pass
 
         else:
-            # The same identity a directory scan attaches when it has the
-            # stat in hand, remembered on the link so it is computed once.
             local_identity = (
                 f"stat:{stat.st_dev}:{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}"
             )
@@ -274,19 +262,9 @@ def candidate_metadata_fingerprint(candidate: CandidateRecord) -> str:
     return candidate.link.url
 
 
-def vcs_scheme(url: str) -> str | None:
-    return parse_vcs_scheme(url)
-
-
 class LazyWheelCandidate(WheelCandidate):
     """Resolver candidate whose metadata is cheap and whose wheel is deferred."""
 
-    # WheelCandidate's own slots (name, version, path, ...) go unused here --
-    # every one of them is overridden below as a property instead, backed by
-    # these six attributes.  A subclass that doesn't declare its own
-    # __slots__ gets a plain __dict__ regardless of what the parent
-    # declared, silently paying for both: one per candidate streamed during
-    # resolution, which is the hot path this class exists for.
     __slots__ = (
         "_record_internal",
         "_version_internal",
@@ -703,12 +681,6 @@ class CandidateMaterializer:
         if first is None:
             return CandidateStream(iter(()))
 
-        # A cached first choice is the common warm path. Do not speculate on a
-
-        # second release in that case; cold misses retain a two-request window
-
-        # so network latency can overlap when the resolver must backtrack.
-
         prefetch_count = 0 if self.has_cached_metadata(first, requested_extras) else 2
 
         initial_records = [first]
@@ -959,9 +931,6 @@ class CandidateMaterializer:
             vcs_path = path_text if candidate.link.is_vcs else None
 
             if candidate.link.kind in SOURCE_ARTIFACT_KINDS:
-                # Only source-tree/sdist candidates reach this; wheel
-                # candidates (the common case) never need build_backend's
-                # much heavier import chain.
                 from cpip.build.build_backend import prepare_project_metadata
 
                 path = path_text
@@ -982,20 +951,6 @@ class CandidateMaterializer:
                         validate_build_requirements(path)
 
                         def remember_wheel_if_reusable(wheel_path: str) -> None:
-                            # A backend without the optional
-                            # prepare_metadata_for_build_wheel hook makes
-                            # this metadata read build a full wheel and
-                            # throw it away. If this candidate later wins
-                            # the resolve, materialize() would otherwise
-                            # build the exact same wheel again from
-                            # scratch -- cache it here under the same key
-                            # materialize()'s own cached_wheel_for_link()
-                            # check already looks for, so a later build is
-                            # skipped for free. Only for the same
-                            # deterministic sources materialize() itself
-                            # caches (a plain sdist, or an immutable VCS
-                            # pin) -- a mutable ref could change by the
-                            # time it's actually installed.
                             if candidate.link.kind is ArtifactKind.SDIST or (
                                 candidate.link.kind is ArtifactKind.SOURCE_TREE
                                 and is_immutable_vcs_link(candidate.link.url)
@@ -1040,11 +995,6 @@ class CandidateMaterializer:
             else:
                 with _open_resolver_wheel_archive(path_text) as archive:
                     try:
-                        # Locating the .dist-info directory is all resolution
-                        # needs.  Reading WHEEL for its ``Wheel-Version`` costs
-                        # a second member decompression per candidate, and
-                        # ``include_layout=False`` discards the text anyway;
-                        # ``wheel_transaction`` re-validates before installing.
                         dist_info_dir = wheel_dist_info_dir(
                             archive,
                             os.path.basename(path_text)[:-4].split("-", 1)[0],
@@ -1176,14 +1126,6 @@ class CandidateMaterializer:
             response = self.session.get(url)
 
             if getattr(response, "status_code", None) == 404:
-                # The versioned JSON API is only a metadata optimization.
-
-                # Legacy or removed releases can remain downloadable from
-
-                # the Simple API after this endpoint disappears, so fall
-
-                # through to artifact metadata instead of failing resolution.
-
                 self.release_metadata_cache[release_key] = None
 
                 return None
@@ -1435,12 +1377,6 @@ class CandidateMaterializer:
                             self.wheel_candidates[cache_key] = built
 
                     if built is None:
-                        # The same fast reader the resolver used for this
-                        # wheel's metadata: zipfile.ZipFile would build a
-                        # ZipInfo per member just to hand back the layout
-                        # that WheelArchive's central-directory scan already
-                        # holds (modes included). Falls back to zipfile
-                        # itself for anything WheelArchive declines.
                         with _open_resolver_wheel_archive(path) as archive:
                             dist_info_dir, wheel_metadata_text = (
                                 validate_wheel_with_metadata(
@@ -1511,9 +1447,6 @@ class CandidateMaterializer:
                 dependencies=built.dependencies,
                 provided_extras=built.provided_extras,
                 requires_python=built.requires_python or candidate.link.requires_python,
-                # The layout is what lets open_wheel_archive read this wheel
-                # again without another central-directory scan; carried as
-                # stored so a lazy one stays unread here.
                 wheel_layout=built.stored_wheel_layout,
                 source_url=candidate.link.url,
                 source_hashes=cache_hashes
@@ -1578,15 +1511,15 @@ def validate_build_requirements(source: str | os.PathLike[str]) -> None:
         return
 
     try:
-        import tomllib
+        from tomllib import TOMLDecodeError, loads
 
     except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
-        from cpip._vendor import tomli as tomllib
+        from cpip._vendor.tomli import TOMLDecodeError, loads
 
     try:
-        data = tomllib.loads(contents)
+        data = loads(contents)
 
-    except tomllib.TOMLDecodeError as exc:
+    except TOMLDecodeError as exc:
         raise BuildError(
             f"Invalid PEP 518 build requirements in {pyproject}: {exc}",
         ) from exc

@@ -199,8 +199,6 @@ class CandidateRecord:
 
         self.metadata_loader = metadata_loader
 
-        # Eager: read on every link of every package listed, so a property
-        # with a memo slot was a frame per read; canonicalize_name is memoized.
         self._canonical_name: str | None = canonicalize_name(name)
 
     def __eq__(self, other: object) -> bool:
@@ -249,10 +247,6 @@ class CandidateRecord:
 
         yanked_rank = 0 if self.link.is_yanked else 1
 
-        # The version's comparison key orders exactly as the Version does
-        # (Version.__lt__ compares nothing else) and, being a tuple of
-        # ints, compares in C instead of through a Python-level __lt__ per
-        # comparison of the sort.
         version_key = self.version
 
         if prefer_binary:

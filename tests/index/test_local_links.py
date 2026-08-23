@@ -39,9 +39,6 @@ NAMES = (
 
 DIRECTORY_NAMES = ("plain", "with space", "üñí", "pct%41", "q?x", "h#x", "semi;c")
 
-# filename_internal is a lazily-filled cache: from_local_file fills it up
-# front with the value the filename property would compute, so it is
-# compared through that property instead of the raw slot.
 SLOTS = tuple(slot for slot in Link.__slots__ if slot != "filename_internal")
 
 
@@ -167,8 +164,6 @@ def test_links_from_local_path_matches_from_path_per_entry(tmp_path: Path) -> No
     path_text = os.fspath(directory)
     source = FindLinksSource((path_text,), set(), None)
     links = source.links_from_local_path(path_text)
-    # The scan filters by artifact suffix; compare against the very
-    # snapshot it cached rather than re-scanning with different rules.
     snapshot = source.local_snapshots[path_text]
     assert snapshot is not None
     assert snapshot.entries

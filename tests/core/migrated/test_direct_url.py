@@ -34,7 +34,6 @@ def test_archive_info() -> None:
     direct_url = DirectUrl.from_dict(direct_url_dict)
     assert direct_url.archive_info
     assert direct_url.url == direct_url_dict["url"]
-    # test we add the hashes key automatically
     assert direct_url.archive_info.hashes == {
         "sha1": "1b8c5bc61a86f377fea47b4276c8c8a5842d2220",
     }
@@ -50,7 +49,6 @@ def test_dir_info() -> None:
     assert direct_url.url == direct_url_dict["url"]
     assert direct_url.dir_info.editable is True
     assert direct_url.to_dict_compat() == direct_url_dict
-    # test editable default to False
     direct_url_dict = {"url": "file:///home/user/project", "dir_info": {}}
     direct_url = DirectUrl.from_dict(direct_url_dict)
     assert direct_url.dir_info

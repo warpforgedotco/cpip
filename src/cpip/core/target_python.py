@@ -53,7 +53,6 @@ def get_supported_internal(
         )
     supported = supported_wheel_tags(target)
 
-    # Deferred: `sysconfig` pulls `threading` in behind it.
     import sysconfig
 
     soabi = sysconfig.get_config_var("SOABI")

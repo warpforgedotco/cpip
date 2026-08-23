@@ -115,7 +115,6 @@ def test_installed_versions_leaves_hard_cases_to_the_full_scan(
     root = tmp_path / "site"
     _dist(root, "simple-1.0.dist-info", "simple", "1.0")
 
-    # Two entries for one name in one directory: the stdlib's listing order decides.
     _dist(root, "simple-2.0.dist-info", "simple", "2.0")
     monkeypatch.setattr(sys, "path", [str(root)])
     assert fast.installed_versions({"simple"}) is None
@@ -123,7 +122,6 @@ def test_installed_versions_leaves_hard_cases_to_the_full_scan(
     (root / "simple-2.0.dist-info").rmdir()
     assert fast.installed_versions({"simple"}) == {"simple": "1.0"}
 
-    # A zip on sys.path and an egg directory are the stdlib's to read.
     archive = tmp_path / "bundle.zip"
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("zipped-1.0.dist-info/METADATA", "Name: zipped\nVersion: 1.0\n")
@@ -134,7 +132,6 @@ def test_installed_versions_leaves_hard_cases_to_the_full_scan(
     monkeypatch.setattr(sys, "path", [str(root), str(egg)])
     assert fast.installed_versions({"simple"}) is None
 
-    # Another distribution finder on sys.meta_path.
     class Finder:
         @staticmethod
         def find_distributions(context=None):  # noqa: ANN001, ANN205
@@ -155,7 +152,7 @@ def test_run_reports_satisfied_requirements_like_the_normal_path(
     monkeypatch.delenv("CPIP_TARGET_PREFIX", raising=False)
     monkeypatch.delenv("CPIP_RESOLVER_DEBUG", raising=False)
 
-    import cpip.cli.config as config
+    from cpip.cli import config
 
     class Config:
         find_links: list[str] = []
@@ -174,7 +171,6 @@ def test_run_reports_satisfied_requirements_like_the_normal_path(
     assert fast.run_satisfied_install(["-q", "simple"]) == 0
     assert capsys.readouterr().out == ""
 
-    # Not satisfied, not installed, not a release version, or not ours to say.
     assert fast.run_satisfied_install(["simple>2"]) is None
     assert fast.run_satisfied_install(["simple<2"]) is None
     assert fast.run_satisfied_install(["missing"]) is None

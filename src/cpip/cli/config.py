@@ -25,7 +25,6 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     import configparser
 
-    # Annotation only: argparse is a measurable import on the fast path.
     import argparse
 
 NO_INDEX_VALUES = frozenset(("1", "true", "yes", "on"))
@@ -78,8 +77,6 @@ class ConfigurationStore:
             if os.path.isfile(os.fspath(location.path))
         ]
         if not paths:
-            # No configuration file: no parser, and configparser stays
-            # unimported on this command.
             return
 
         import configparser
@@ -123,14 +120,7 @@ def config_locations() -> list[ConfigLocation]:
     prefix = os.environ.get("VIRTUAL_ENV") or sys.prefix
     executable_prefix = os.path.dirname(os.path.dirname(sys.executable))
     if os.path.isfile(os.path.join(executable_prefix, "pyvenv.cfg")):
-        # Relocated virtualenv launchers can retain the template's
-        # ``sys.prefix``.  The executable's environment is the one whose
-        # site-level cpip.conf should apply.
         prefix = executable_prefix
-    # The site file lives directly under the prefix. (An earlier version
-    # walked up from sysconfig's purelib looking for the prefix, which can
-    # only ever land on this same path -- and cost every config load the
-    # sysconfig and threading imports.)
     locations.append(ConfigLocation("site", os.path.join(prefix, CONFIG_BASENAME)))
     if env_config:
         locations.append(ConfigLocation("env", os.path.expanduser(env_config)))

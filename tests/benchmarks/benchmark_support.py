@@ -13,12 +13,12 @@ import zipfile
 from pathlib import Path
 
 from cpip.core import caches
-from cpip.index import candidate_metadata_cache as candidate_metadata_cache_module
+from cpip.index import candidate_metadata_cache
 from cpip.index.candidate_metadata_cache import get_candidate_metadata_cache
 from cpip.index.metadata_cache import get_wheel_metadata_cache
 from cpip.index.release_facts_cache import get_release_facts_cache
-from cpip.index import metadata_cache as metadata_cache_module
-from cpip.index import release_facts_cache as release_facts_cache_module
+from cpip.index import metadata_cache
+from cpip.index import release_facts_cache
 
 SHA256_PLACEHOLDER = "a" * 64
 METADATA_PLACEHOLDER = "b" * 64
@@ -206,8 +206,6 @@ def make_backtracking_graph(wheelhouse: Path) -> None:
             wheelhouse,
             "right",
             f"4.{minor}.0",
-            # Only the oldest ``right`` release agrees with any ``left``
-            # release, so every newer combination has to be rejected first.
             requires=[f"shared==1.{11 - minor}.0", "left>=3.0.0"],
         )
     make_wheel(
@@ -543,10 +541,6 @@ def reset_caches() -> None:
     cannot show up at all.
     """
     caches.clear_all()
-    # Persistent caches are one instance per directory per process, so they
-    # outlive the provider that opened them; dropping the instances makes
-    # the next provider read the directory again instead of the instance's
-    # in-memory entries.
-    metadata_cache_module._CACHE_INSTANCES.clear()
-    candidate_metadata_cache_module.INSTANCES.clear()
-    release_facts_cache_module.INSTANCES.clear()
+    metadata_cache._CACHE_INSTANCES.clear()
+    candidate_metadata_cache.INSTANCES.clear()
+    release_facts_cache.INSTANCES.clear()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cpip.cli.entrypoint import main as run_entrypoint
+from cpip.cli import entrypoint
 
 
 def main(
@@ -18,4 +18,4 @@ def main(
     through the canonical :mod:`cpip.cli.entrypoint` implementation.
     """
 
-    return run_entrypoint(args, version=version, location=location)
+    return entrypoint.main(args, version=version, location=location)

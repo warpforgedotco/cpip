@@ -30,10 +30,6 @@ def run_download(args: list[str]) -> int:
 
     apply_proxy_environment(options.proxy)
 
-    # Downloads go through the same HTTP, metadata and artifact caches as an
-    # install, so repeating one costs a revalidation rather than a refetch.
-    # ``--no-cache-dir`` opts out, which is the only reason the flag existed
-    # before anything read it.
     cache_dir = None if options.no_cache_dir else resolve_cache_dir(options.cache_dir)
 
     sources = resolve_sources(options, load_source_config("download"))
@@ -94,8 +90,6 @@ def run_download(args: list[str]) -> int:
 
         names.append(os.path.basename(wheel).split("-", 1)[0])
 
-    # One locator for the whole batch: it memoizes resolved paths and holds
-    # the artifact cache, both of which a per-candidate instance would discard.
     artifact_locator = ArtifactLocator(bundle.session, cache_dir=cache_dir)
 
     for candidate in plan.candidates:
@@ -103,12 +97,6 @@ def run_download(args: list[str]) -> int:
 
         if candidate.source_kind == "sdist" and candidate.source_url is not None:
             source = artifact_locator.ensure_local(candidate.source_url)
-
-            # Build isolation commonly consumes setuptools from a local wheel
-
-            # directory. Preserve the materialized wheel for that bootstrap
-
-            # dependency when the index did not offer a compatible wheel URL.
 
             if candidate.canonical_name == "setuptools":
                 source = candidate.path

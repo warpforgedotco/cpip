@@ -100,8 +100,8 @@ def test_every_format_matches_the_normal_path(
         installer="uv",
     )
     _dist(site, "Mid-0.3.dist-info", "mid", "0.3")
-    _dist(site, "argparse-1.4.0.dist-info", "argparse", "1.4.0")  # stdlib name: skipped
-    (site / "empty-9.dist-info").mkdir()  # no metadata: skipped
+    _dist(site, "argparse-1.4.0.dist-info", "argparse", "1.4.0")
+    (site / "empty-9.dist-info").mkdir()
     (site / "notes.txt").write_text("x")
     monkeypatch.setattr(sys, "path", [str(tmp_path / "missing"), str(site)])
     monkeypatch.delenv("CPIP_TARGET_PREFIX", raising=False)
@@ -138,7 +138,6 @@ def test_declines_what_it_cannot_render_identically(
     monkeypatch.delenv("CPIP_TARGET_PREFIX", raising=False)
     assert _fast([]) is not None
 
-    # Options the recognizer does not implement.
     for args in (
         ["--outdated"],
         ["--user"],
@@ -150,17 +149,14 @@ def test_declines_what_it_cannot_render_identically(
     ):
         assert _fast(args) is None, args
 
-    # Versions the json and freeze formats would print normalized.
     _dist(site, "pre-1.0rc1.dist-info", "pre", "1.0rc1")
     assert _fast([]) is not None
     assert _fast(["--format=json"]) is None
     assert _fast(["--format=freeze"]) is None
 
-    # An egg-info entry: its editable status is an egg-link question.
     _dist(site, "legacy-0.1.egg-info", "legacy", "0.1", filename="PKG-INFO")
     assert _fast([]) is None
 
-    # A redirected target interpreter.
     monkeypatch.setattr(sys, "path", [str(tmp_path / "other")])
     (tmp_path / "other").mkdir()
     assert _fast([]) is not None

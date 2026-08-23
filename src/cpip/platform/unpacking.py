@@ -33,7 +33,6 @@ XZ_EXTENSIONS: tuple[str, ...] = (
 ZIP_EXTENSIONS: tuple[str, ...] = (".zip", ".whl")
 TAR_EXTENSIONS: tuple[str, ...] = (".tar.gz", ".tgz", ".tar")
 
-# Matches shutil's own default copy buffer size (not exposed in typeshed).
 _COPY_BUFSIZE = 1024 * 1024 if sys.platform == "win32" else 64 * 1024
 
 
@@ -50,7 +49,6 @@ except ImportError:
     logger.debug("bz2 module is not available")
 
 try:
-    # Only for Python 3.3+
     import lzma  # noqa
 
     SUPPORTED_EXTENSIONS += XZ_EXTENSIONS
@@ -142,8 +140,6 @@ def set_extracted_file_to_default_mode_plus_executable(path: str) -> None:
 
 def zip_item_is_executable(info: ZipInfo) -> bool:
     mode = info.external_attr >> 16
-    # if mode and regular file and any execute permissions for
-    # user/group/world?
     return bool(mode and stat.S_ISREG(mode) and mode & 0o111)
 
 
@@ -198,12 +194,6 @@ def _write_bytes_to_path(data: bytes, path: str) -> None:
         os.close(fd)
 
 
-# Matches open_wheel_archive()'s own threshold (wheel_archive_runtime.py):
-# WheelArchive.read()/read_many() decompress a member whole into memory,
-# unlike zipfile's ZipExtFile, which streams. Declining archives with a
-# member above this keeps that a non-issue for the wheels/sdists this
-# exists for -- countless small files -- while never risking a large
-# payload's full decompressed size sitting in memory at once.
 _FAST_UNZIP_MAX_MEMBER_SIZE = 1024 * 1024
 
 
@@ -220,9 +210,6 @@ def _fast_unzip(filename: str, location: str, flatten: bool) -> bool:
     """
 
     try:
-        # Unbuffered on purpose -- see candidate_materialization's
-        # _open_resolver_wheel_archive: WheelArchive reads with exact sizes
-        # and seeks, so buffering only adds per-open cost.
         file = open(filename, "rb", buffering=0)  # noqa: SIM115
 
         archive = WheelArchive(file)
@@ -319,11 +306,6 @@ def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
         return
 
     absolute_location = os.path.abspath(location)
-    # Members of a wheel/sdist overwhelmingly share a handful of parent
-    # directories (a package's whole tree, one .dist-info), so calling
-    # ensure_dir -> os.makedirs for every single member means every file
-    # after the first in a directory pays a real syscall just to be told
-    # EEXIST. Tracking what this extraction has already created skips that.
     ensured_dirs: set[str] = {absolute_location}
     zipfp = open(filename, "rb")
     try:
@@ -348,7 +330,6 @@ def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
                 )
                 raise InstallationError(message.format(filename, fn, location))
             if fn.endswith(("/", "\\")):
-                # A directory
                 if absolute_fn not in ensured_dirs:
                     ensure_dir(fn)
                     ensured_dirs.add(absolute_fn)
@@ -357,8 +338,6 @@ def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
                 if absolute_dir not in ensured_dirs:
                     ensure_dir(dir)
                     ensured_dirs.add(absolute_dir)
-                # Don't use read() to avoid allocating an arbitrarily large
-                # chunk of memory for the file's content
                 fp = zip.open(info)
                 try:
                     _write_stream_to_path(fp, fn, size_hint=info.file_size)
@@ -408,9 +387,6 @@ def untar_file(filename: str, location: str, flatten: bool = True) -> None:
         members = tar.getmembers()
         leading = flatten and has_leading_dir(member.name for member in members)
 
-        # PEP 706 added `tarfile.data_filter`, and made some other changes to
-        # Python's tarfile module (see below). The features were backported to
-        # security releases.
         try:
             data_filter = tarfile.data_filter
         except AttributeError:
@@ -421,9 +397,6 @@ def untar_file(filename: str, location: str, flatten: bool = True) -> None:
             default_mode_plus_executable = 0o777 & ~mask | 0o111
 
             if leading:
-                # Strip the leading directory from all files in the archive,
-                # including hardlink targets (which are relative to the
-                # unpack location).
                 for member in members:
                     name_lead, name_rest = split_leading_dir(member.name)
                     member.name = name_rest
@@ -446,18 +419,11 @@ def untar_file(filename: str, location: str, flatten: bool = True) -> None:
                             (3, 10, 12),
                             (3, 11, 4),
                         }:
-                            # The tarfile filter in specific Python versions
-                            # raises LinkOutsideDestinationError on valid input
-                            # (https://github.com/python/cpython/issues/107845)
-                            # Ignore the error there, but do use the
-                            # more lax `tar_filter`
                             member = tarfile.tar_filter(member, location)
                         else:
                             raise
                 except tarfile.TarError as exc:
                     message = "Invalid member in the tar file {}: {}"
-                    # Filter error messages mention the member name.
-                    # No need to add it here.
                     raise InstallationError(
                         message.format(
                             filename,
@@ -467,10 +433,6 @@ def untar_file(filename: str, location: str, flatten: bool = True) -> None:
                 if member.isfile() and orig_mode & 0o111:
                     member.mode = default_mode_plus_executable
                 else:
-                    # See PEP 706 note above.
-                    # The PEP changed this from `int` to `Optional[int]`,
-                    # where None means "use the default". Mypy doesn't
-                    # know this yet.
                     member.mode = None  # ty:ignore[invalid-assignment]
                 return member
 
@@ -556,9 +518,6 @@ def untar_without_filter(
     members: list[tarfile.TarInfo],
 ) -> None:
     """Fallback for Python without tarfile.data_filter"""
-    # NOTE: This function can be removed once cpip requires CPython ≥ 3.12.​
-    # PEP 706 added tarfile.data_filter, made tarfile extraction operations more secure.
-    # This feature is fully supported from CPython 3.12 onward.
     absolute_location = os.path.abspath(location)
     resolved_location = os.path.realpath(location)
 
@@ -571,9 +530,6 @@ def untar_without_filter(
             fn = split_leading_dir(fn)[1]
         path = os.path.join(location, fn)
 
-        # The plain check rejects textual ".." escapes; resolving symlinks also
-        # catches a later member redirected outside by an earlier member's
-        # symlink (e.g. "link/../file").
         if not is_within(absolute_location, os.path.abspath(path)) or not is_within(
             resolved_location,
             os.path.realpath(path),
@@ -583,8 +539,6 @@ def untar_without_filter(
         if member.isdir():
             ensure_dir(path)
         elif member.issym():
-            # Reject symlinks resolving outside the destination, so a later
-            # member cannot be written through them.
             target = os.path.join(os.path.dirname(path), member.linkname)
             if not is_within(resolved_location, os.path.realpath(target)):
                 message = (
@@ -603,14 +557,9 @@ def untar_without_filter(
                     message.format(filename, member.name, member.linkname),
                 )
             try:
-                # Avoid tarfile's internal ``data_filter`` lookup here: it is
-                # absent on older Python versions and can also be deliberately
-                # disabled by callers testing the fallback path.
                 ensure_dir(os.path.dirname(path))
                 os.symlink(member.linkname, path)
             except Exception as exc:
-                # Some corrupt tar files seem to produce this
-                # (specifically bad symlinks)
                 logger.warning(
                     "In the tar file %s the member %s is invalid: %s",
                     filename,
@@ -622,8 +571,6 @@ def untar_without_filter(
             try:
                 fp = tar.extractfile(member)
             except (KeyError, AttributeError) as exc:
-                # Some corrupt tar files seem to produce this
-                # (specifically bad symlinks)
                 logger.warning(
                     "In the tar file %s the member %s is invalid: %s",
                     filename,
@@ -637,9 +584,7 @@ def untar_without_filter(
                 _write_stream_to_path(fp, path, size_hint=member.size)
             finally:
                 fp.close()
-            # Update the timestamp (useful for cython compiled files)
             tar.utime(member, path)
-            # member have any execute permissions for user/group/world?
             if member.mode & 0o111:
                 set_extracted_file_to_default_mode_plus_executable(path)
 
@@ -681,7 +626,6 @@ class ArchiveExtractor:
             untar_file(self.filename, self.location, flatten=tar_flatten)
             return
 
-        # Avoid the ambiguous case where both signature checks return true.
         is_zipfile = zipfile.is_zipfile(self.filename)
         is_tarfile = tarfile.is_tarfile(self.filename)
         if is_zipfile and not is_tarfile:

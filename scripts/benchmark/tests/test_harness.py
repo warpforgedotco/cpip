@@ -37,10 +37,6 @@ def test_builds_all_offline_commands(tmp_path: Path) -> None:
         assert all(command.command for command in commands)
         for command in commands:
             if os.name != "nt":
-                # Neither tool should be routed through the runner.py
-                # subprocess wrapper on POSIX -- env vars ride in Command.env
-                # instead, so hyperfine measures the real tool, not an extra
-                # interpreter hop.
                 assert "cpip_benchmark.runner" not in " ".join(command.command)
                 if command.name.startswith("cpip"):
                     assert command.env.get("PYTHONPATH")
@@ -121,23 +117,18 @@ def test_hyperfine_dry_run_contains_prepare_and_names() -> None:
 
 
 def test_hyperfine_always_disables_the_shell() -> None:
-    # /bin/sh is SIP-protected on macOS and strips DYLD_* from every command it
-    # spawns, so an injected profiler never attaches to the measured process.
     run = example_run(Command("cpip (example)", None, ["python", "--version"]))
 
     assert "-N" in run.args()
 
 
 def test_hyperfine_omits_prepare_when_no_command_prepares() -> None:
-    # hyperfine rejects an empty --prepare under --shell=none.
     run = example_run(Command("cpip (example)", None, ["python", "--version"]))
 
     assert "--prepare" not in run.args()
 
 
 def test_hyperfine_pads_a_missing_prepare_with_a_no_op() -> None:
-    # --prepare is positional across commands, so a command without one still
-    # needs a slot -- and that slot has to be a command that runs and succeeds.
     run = example_run(
         Command("cpip (example)", "python -m cpip_benchmark.runner cleanup", ["a"]),
         Command("uv (example)", None, ["b"]),
@@ -150,8 +141,6 @@ def test_hyperfine_pads_a_missing_prepare_with_a_no_op() -> None:
 
 
 def test_hyperfine_carries_env_on_its_own_process() -> None:
-    # Wrapping each command to set env would put a Python startup inside the
-    # timed region, so the vars ride on hyperfine and are inherited.
     run = example_run(
         Command("cpip (example)", None, ["a"], {"PYTHONPATH": "/src"}),
         Command("uv (example)", None, ["b"]),

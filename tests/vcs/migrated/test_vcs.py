@@ -32,27 +32,22 @@ def test_ensure_svn_available() -> None:
 @pytest.mark.parametrize(
     "args, expected",
     [
-        # Test without subdir.
         (
             ("git+https://example.com/pkg", "dev", "myproj"),
             "git+https://example.com/pkg@dev#egg=myproj",
         ),
-        # Test with subdir.
         (
             ("git+https://example.com/pkg", "dev", "myproj", "sub/dir"),
             "git+https://example.com/pkg@dev#egg=myproj&subdirectory=sub/dir",
         ),
-        # Test with None subdir.
         (
             ("git+https://example.com/pkg", "dev", "myproj", None),
             "git+https://example.com/pkg@dev#egg=myproj",
         ),
-        # Test an unescaped project name.
         (
             ("git+https://example.com/pkg", "dev", "zope-interface"),
             "git+https://example.com/pkg@dev#egg=zope_interface",
         ),
-        # Test a revision with special characters.
         (
             ("git+https://example.com/pkg", "dev@1#2", "myproj"),
             "git+https://example.com/pkg@dev%401%232#egg=myproj",
@@ -72,12 +67,10 @@ def test_rev_options_repr() -> None:
 @pytest.mark.parametrize(
     "vc_class, expected1, expected2, kwargs",
     [
-        # First check VCS-specific RevOptions behavior.
         (Bazaar, [], ["-r", "123"], {}),
         (Git, ["HEAD"], ["123"], {}),
         (Mercurial, [], ["--rev=123"], {}),
         (Subversion, [], ["-r", "123"], {}),
-        # Test extra_args.  For this, test using a single VersionControl class.
         (
             Git,
             ["HEAD", "opt1", "opt2"],
@@ -99,8 +92,6 @@ def test_rev_options_to_args(
 
 def test_rev_options_to_display() -> None:
     """Test RevOptions.to_display()."""
-    # The choice of VersionControl class doesn't matter here since
-    # the implementation is the same for all of them.
     rev_options = RevOptions(Git)
     assert rev_options.to_display() == ""
 
@@ -110,8 +101,6 @@ def test_rev_options_to_display() -> None:
 
 def test_rev_options_make_new() -> None:
     """Test RevOptions.make_new()."""
-    # The choice of VersionControl class doesn't matter here since
-    # the implementation is the same for all of them.
     rev_options = RevOptions(Git, "master", extra_args=["foo", "bar"])
     new_options = rev_options.make_new("develop")
 
@@ -126,7 +115,6 @@ def test_rev_options_make_new() -> None:
     [
         ((40 * "a"), True),
         ((40 * "A"), True),
-        # Test a string containing all valid characters.
         ((18 * "a" + "0123456789abcdefABCDEF"), True),
         ((40 * "g"), False),
         ((39 * "a"), False),
@@ -140,14 +128,10 @@ def test_looks_like_hash(sha: str, expected: bool) -> None:
 @pytest.mark.parametrize(
     "vcs_cls, remote_url, expected",
     [
-        # Mercurial is one of the subclasses using the base class implementation.
-        # `hg://` isn't a real prefix but it tests the default behaviour.
         (Mercurial, "hg://user@example.com/MyProject", False),
         (Mercurial, "http://example.com/MyProject", True),
-        # The Git subclasses should return true in all cases.
         (Git, "git://example.com/MyProject", True),
         (Git, "http://example.com/MyProject", True),
-        # Subversion also overrides the base class implementation.
         (Subversion, "svn://example.com/MyProject", True),
     ],
 )
@@ -163,17 +147,11 @@ def test_should_add_vcs_url_prefix(
 @pytest.mark.parametrize(
     "url, target",
     [
-        # A fully qualified remote url. No changes needed.
         ("ssh://bob@server/foo/bar.git", "ssh://bob@server/foo/bar.git"),
         ("git://bob@server/foo/bar.git", "git://bob@server/foo/bar.git"),
-        # User is optional and does not need a default.
         ("ssh://server/foo/bar.git", "ssh://server/foo/bar.git"),
-        # The common scp shorthand for ssh remotes. Cpip won't recognise these as
-        # git remotes until they have a 'ssh://' prefix and the ':' in the middle
-        # is gone.
         ("git@example.com:foo/bar.git", "ssh://git@example.com/foo/bar.git"),
         ("example.com:foo.git", "ssh://example.com/foo.git"),
-        # Http(s) remote names are already complete and should remain unchanged.
         ("https://example.com/foo", "https://example.com/foo"),
         ("http://example.com/foo/bar.git", "http://example.com/foo/bar.git"),
         ("https://bob@example.com/foo", "https://bob@example.com/foo"),
@@ -186,16 +164,12 @@ def test_git_remote_url_to_pip(url: str, target: str) -> None:
 @pytest.mark.parametrize(
     "url, platform",
     [
-        # Windows paths with the ':' drive prefix look dangerously close to SCP.
         ("c:/piffle/wiffle/waffle/poffle.git", "nt"),
         (r"c:\faffle\waffle\woffle\piffle.git", "nt"),
-        # Unix paths less so but test them anyway.
         ("/muffle/fuffle/pufffle/fluffle.git", "posix"),
     ],
 )
 def test_paths_are_not_mistaken_for_scp_shorthand(url: str, platform: str) -> None:
-    # File paths should not be mistaken for SCP shorthand. If they do then
-    # 'c:/piffle/wiffle' would end up as 'ssh://c/piffle/wiffle'.
     from cpip.vcs.git import SCP_REGEX
 
     assert not SCP_REGEX.match(url)
@@ -208,7 +182,6 @@ def test_paths_are_not_mistaken_for_scp_shorthand(url: str, platform: str) -> No
 def test_git_remote_local_path(tmp_path: pathlib.Path) -> None:
     path = pathlib.Path(tmp_path, "project.git")
     path.mkdir()
-    # Path must exist to be recognised as a local git remote.
     assert Git.git_remote_to_cpip_url(str(path)) == path.as_uri()
 
 
@@ -280,15 +253,10 @@ def test_git_resolve_revision_not_found_warning(
     sha = 40 * "a"
     rev_options = Git.make_rev_options(sha)
 
-    # resolve_revision with a full sha would fail here because
-    # it attempts a git fetch. This case is now covered by
-    # test_resolve_commit_not_on_branch.
-
     rev_options = Git.make_rev_options(sha[:6])
     new_options = Git.resolve_revision(".", url, rev_options)
     assert new_options.rev == "aaaaaa"
 
-    # Check that a warning got logged only for the abbreviated hash.
     messages = [r.getMessage() for r in caplog.records]
     messages = [msg for msg in messages if msg.startswith("Did not find ")]
     assert messages == [
@@ -318,14 +286,10 @@ def test_git_is_commit_id_equal(
     assert Git.is_commit_id_equal("/path", rev_name) is result
 
 
-# The non-SVN backends all use the same get_netloc_and_auth(), so only test
-# Git as a representative.
 @pytest.mark.parametrize(
     "args, expected",
     [
-        # Test a basic case.
         (("example.com", "https"), ("example.com", (None, None))),
-        # Test with username and password.
         (("user:pass@example.com", "https"), ("user:pass@example.com", (None, None))),
     ],
 )
@@ -342,18 +306,13 @@ def test_git__get_netloc_and_auth(
 @pytest.mark.parametrize(
     "args, expected",
     [
-        # Test https.
         (("example.com", "https"), ("example.com", (None, None))),
-        # Test https with username and no password.
         (("user@example.com", "https"), ("example.com", ("user", None))),
-        # Test https with username and password.
         (("user:pass@example.com", "https"), ("example.com", ("user", "pass"))),
-        # Test https with URL-encoded reserved characters.
         (
             ("user%3Aname:%23%40%5E@example.com", "https"),
             ("example.com", ("user:name", "#@^")),
         ),
-        # Test ssh with username and password.
         (("user:pass@example.com", "ssh"), ("user:pass@example.com", (None, None))),
     ],
 )
@@ -388,12 +347,10 @@ def test_git__get_url_rev__idempotent() -> None:
             "svn+https://svn.example.com/MyProject",
             ("https://svn.example.com/MyProject", None, (None, None)),
         ),
-        # Test a "+" in the path portion.
         (
             "svn+https://svn.example.com/My+Project",
             ("https://svn.example.com/My+Project", None, (None, None)),
         ),
-        # Test percent-encoded characters in revision.
         (
             "svn+https://svn.example.com/MyProject@dev%401%232",
             ("https://svn.example.com/MyProject", "dev@1#2", (None, None)),
@@ -413,7 +370,6 @@ def test_version_control__get_url_rev_and_auth(
     "url",
     [
         "https://svn.example.com/MyProject",
-        # Test a URL containing a "+" (but not in the scheme).
         "https://svn.example.com/My+Project",
     ],
 )
@@ -430,7 +386,6 @@ def test_version_control__get_url_rev_and_auth__missing_plus(url: str) -> None:
 @pytest.mark.parametrize(
     "url",
     [
-        # Test a URL with revision part as empty.
         "git+https://github.com/MyUser/myProject.git@#egg=py_pkg",
     ],
 )
@@ -472,29 +427,23 @@ def test_version_control__run_command__fails(
 @pytest.mark.parametrize(
     "url, expected",
     [
-        # Test http.
         (
             "bzr+http://bzr.myproject.org/MyProject/trunk/#egg=MyProject",
             "http://bzr.myproject.org/MyProject/trunk/",
         ),
-        # Test https.
         (
             "bzr+https://bzr.myproject.org/MyProject/trunk/#egg=MyProject",
             "https://bzr.myproject.org/MyProject/trunk/",
         ),
-        # Test ftp.
         (
             "bzr+ftp://bzr.myproject.org/MyProject/trunk/#egg=MyProject",
             "ftp://bzr.myproject.org/MyProject/trunk/",
         ),
-        # Test sftp.
         (
             "bzr+sftp://bzr.myproject.org/MyProject/trunk/#egg=MyProject",
             "sftp://bzr.myproject.org/MyProject/trunk/",
         ),
-        # Test launchpad.
         ("bzr+lp:MyLaunchpadProject#egg=MyLaunchpadProject", "lp:MyLaunchpadProject"),
-        # Test ssh (special handling).
         (
             "bzr+ssh://bzr.myproject.org/MyProject/trunk/#egg=MyProject",
             "bzr+ssh://bzr.myproject.org/MyProject/trunk/",
@@ -510,22 +459,18 @@ def test_bazaar__get_url_rev_and_auth(url: str, expected: str) -> None:
 @pytest.mark.parametrize(
     "url, expected",
     [
-        # Test an https URL.
         (
             "svn+https://svn.example.com/MyProject#egg=MyProject",
             ("https://svn.example.com/MyProject", None, (None, None)),
         ),
-        # Test an https URL with a username and password.
         (
             "svn+https://user:pass@svn.example.com/MyProject#egg=MyProject",
             ("https://svn.example.com/MyProject", None, ("user", "pass")),
         ),
-        # Test an ssh URL.
         (
             "svn+ssh://svn.example.com/MyProject#egg=MyProject",
             ("svn+ssh://svn.example.com/MyProject", None, (None, None)),
         ),
-        # Test an ssh URL with a username.
         (
             "svn+ssh://user@svn.example.com/MyProject#egg=MyProject",
             ("svn+ssh://user@svn.example.com/MyProject", None, (None, None)),
@@ -541,8 +486,6 @@ def test_subversion__get_url_rev_and_auth(
     assert actual == expected
 
 
-# The non-SVN backends all use the same make_rev_args(), so only test
-# Git as a representative.
 @pytest.mark.parametrize(
     "username, password, expected",
     [
@@ -605,9 +548,9 @@ def test_get_git_version() -> None:
     [
         ("git version 2.17", (2, 17)),
         ("git version 2.18.1", (2, 18)),
-        ("git version 2.35.GIT", (2, 35)),  # gh:12280
-        ("oh my git version 2.37.GIT", ()),  #  invalid version
-        ("git version 2.GIT", ()),  # invalid version
+        ("git version 2.35.GIT", (2, 35)),
+        ("oh my git version 2.37.GIT", ()),
+        ("git version 2.GIT", ()),
     ],
 )
 def test_get_git_version_parser(version: str, expected: tuple[int, int]) -> None:
@@ -643,7 +586,6 @@ def test_subversion__init_use_interactive(
 def test_subversion__call_vcs_version() -> None:
     """Test Subversion.call_vcs_version() against local ``svn``."""
     version = Subversion().call_vcs_version()
-    # All Subversion releases since 1.0.0 have used three parts.
     assert len(version) == 3
     for part in version:
         assert isinstance(part, int)
@@ -731,7 +673,6 @@ def test_subversion__get_vcs_version_call_vcs(
     svn = Subversion()
     assert svn.get_vcs_version() == vcs_version
 
-    # Check that the version information is cached.
     assert svn.vcs_version_internal == vcs_version
 
 
@@ -777,10 +718,7 @@ class TestVcsArgs:
 
 class TestBazaarArgs(TestVcsArgs):
     def setup_method(self) -> None:
-        # Test Data.
         self.url = "bzr+http://username:password@bzr.example.com/"
-        # use_interactive is set to False to test that remote call options are
-        # properly added.
         self.svn = Bazaar()
         self.rev_options = RevOptions(Bazaar)
 
@@ -844,7 +782,6 @@ class TestBazaarArgs(TestVcsArgs):
 
 class TestGitArgs(TestVcsArgs):
     def setup_method(self) -> None:
-        # Test Data.
         self.url = "git+http://username:password@git.example.com/"
         self.svn = Git()
         self.rev_options = RevOptions(Git)
@@ -1119,7 +1056,6 @@ class TestGitArgs(TestVcsArgs):
 
 class TestMercurialArgs(TestVcsArgs):
     def setup_method(self) -> None:
-        # Test Data.
         self.url = "hg+http://username:password@hg.example.com/"
         self.svn = Mercurial()
         self.rev_options = RevOptions(Mercurial)
@@ -1227,10 +1163,7 @@ class TestMercurialArgs(TestVcsArgs):
 
 class TestSubversionArgs(TestVcsArgs):
     def setup_method(self) -> None:
-        # Test Data.
         self.url = "svn+http://username:password@svn.example.com/"
-        # use_interactive is set to False to test that remote call options are
-        # properly added.
         self.svn = Subversion(use_interactive=False)
         self.rev_options = RevOptions(Subversion)
 

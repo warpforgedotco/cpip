@@ -49,8 +49,6 @@ def local_checkout(
         create_svn_initools_repo(repo_url_path)
         repo_url_path = os.path.join(repo_url_path, "trunk")
     elif vcs_name == "git":
-        # Don't use vcs_backend.obtain() here because we don't want a partial clone:
-        # https://github.com/pypa/cpip/issues/12719
         subprocess.check_call(
             ["git", "clone", vcs_url, repo_url_path],
         )

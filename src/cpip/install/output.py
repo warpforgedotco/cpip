@@ -29,20 +29,10 @@ def _run_candidate_operation(
             completed.append(operation(remote_wheels[0]))
 
         else:
-            # Keep this import off warm paths where every wheel is already
-
-            # materialized from the local cache.
-
             with ThreadPoolExecutor(
                 max_workers=min(_MATERIALIZATION_WORKERS, len(remote_wheels)),
                 thread_name_prefix="cpip-wheel",
             ) as pool:
-                # Executor.map yields in input order, so errors and result
-
-                # assembly remain deterministic even when downloads finish
-
-                # out of order.
-
                 completed.extend(pool.map(operation, remote_wheels))
 
         remote_wheels.clear()
@@ -90,8 +80,6 @@ def prepare_install_candidates(
 
     if cache_dir is None or not candidates or prepare_archive is None:
         return materialize_candidates(candidates)
-
-    # Keep these imports off commands that do not install and cache wheels.
 
     count = len(candidates)
 
@@ -149,10 +137,6 @@ def prepare_install_candidates(
                     except Exception as exc:
                         errors[index] = exc
 
-        # Source builds and local candidates intentionally remain on the
-
-        # calling thread. Archive preparation still overlaps between them.
-
         for index, candidate in local:
             try:
                 submit_archive(index, materialize_candidate(candidate))
@@ -171,10 +155,6 @@ def prepare_install_candidates(
                 archive = future.result()
 
             except OSError:
-                # Cache access is an optimization. Preserve the concrete ZIP
-
-                # for the existing transactional installer.
-
                 prepared[index] = candidate
 
             except Exception as exc:

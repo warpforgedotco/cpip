@@ -13,12 +13,8 @@ def setup_broken_stdout_test(
         args,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        # Make the write happen while cpip is still inside its exception
-        # handler.  Buffered interpreter shutdown is reported differently on
-        # Windows and would bypass cpip's broken-pipe handling entirely.
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
-    # Call close() on stdout to cause a broken pipe.
     assert proc.stdout is not None
     proc.stdout.close()
     returncode = proc.wait()
@@ -41,7 +37,6 @@ def test_broken_stdout_pipe(deprecated_python: bool) -> None:
         deprecated_python=deprecated_python,
     )
 
-    # Check that no traceback occurs.
     assert "raise BrokenStdoutLoggingError()" not in stderr
     assert stderr.count("Traceback") == 0
 
@@ -56,7 +51,6 @@ def test_broken_stdout_pipe__log_option(deprecated_python: bool, tmpdir: Path) -
         deprecated_python=deprecated_python,
     )
 
-    # Check that no traceback occurs.
     assert "raise BrokenStdoutLoggingError()" not in stderr
     assert stderr.count("Traceback") == 0
 
@@ -70,8 +64,6 @@ def test_broken_stdout_pipe__verbose(deprecated_python: bool) -> None:
         deprecated_python=deprecated_python,
     )
 
-    # Check that a traceback occurs and that it occurs at most once.
-    # We permit up to two because the exception can be chained.
     assert "raise BrokenStdoutLoggingError()" in stderr
     assert 1 <= stderr.count("Traceback") <= 2
 

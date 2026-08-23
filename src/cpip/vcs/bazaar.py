@@ -93,8 +93,6 @@ class Bazaar(VersionControl):
             cwd=dest,
         )
         if output.startswith("Standalone "):
-            # Older versions of cpip used to create standalone branches.
-            # Convert the standalone branch to a checkout by calling "bzr bind".
             cmd_args = make_command("bind", *flags, url)
             self.run_command(cmd_args, cwd=dest)
 
@@ -103,7 +101,6 @@ class Bazaar(VersionControl):
 
     @classmethod
     def get_url_rev_and_auth(cls, url: str) -> tuple[str, str | None, AuthInfo]:
-        # hotfix the URL scheme after removing bzr+ from bzr+ssh:// re-add it
         url, rev, user_pass = super().get_url_rev_and_auth(url)
         if url.startswith("ssh://"):
             url = "bzr+" + url

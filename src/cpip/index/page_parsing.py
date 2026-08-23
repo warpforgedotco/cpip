@@ -171,8 +171,6 @@ def link_parser_class() -> type:
         def __init__(self, page_url: str, link_factory: LinkFactory) -> None:
             super().__init__(convert_charrefs=True)
             self.page_url = page_url
-            # Every link on the page resolves against this same base -- computed
-            # once here instead of once per <a> tag in handle_endtag.
             self.base_url_internal = ensure_trailing_slash(page_url)
             self.link_factory = link_factory
             self.links: list[Link] = []
@@ -182,10 +180,8 @@ def link_parser_class() -> type:
         def handle_starttag(
             self, tag: str, attrs: list[tuple[str, str | None]]
         ) -> None:
-            # HTMLParser already lowercases tag names before calling this.
             if tag != "a":
                 return
-            # HTMLParser already lowercases attribute names before calling this.
             self.current_internal = dict(attrs)
             self.text_internal = []
 
@@ -194,7 +190,6 @@ def link_parser_class() -> type:
                 self.text_internal.append(data)
 
         def handle_endtag(self, tag: str) -> None:
-            # HTMLParser already lowercases tag names before calling this.
             if tag != "a" or self.current_internal is None:
                 return
             href = self.current_internal.get("href")
@@ -290,8 +285,6 @@ def join_index_url(base_url: str, href: str) -> str:
         and "[" not in href
         and "]" not in href
     ):
-        # A non-empty netloc is what makes ``urljoin`` ignore the base
-        # entirely; its first character follows the ``//`` of the prefix.
         start = 8 if href[4] == "s" else 7
         if href[start : start + 1] not in "/?#":
             return href
@@ -354,8 +347,6 @@ def _join_relative_reference(base_url: str, href: str) -> str | None:
         return None
     path, _, fragment = href.partition("#")
     if not path:
-        # An empty path means "the base's own path" (plus the fragment);
-        # leave that branch, and its query inheritance, to urljoin.
         return None
     slash = base_url.find("/", start)
     if slash < 0:

@@ -186,8 +186,6 @@ class LazyZipOverHTTP:
                 raise
             with self.stay():
                 try:
-                    # For read-only ZIP files, ZipFile only needs
-                    # methods read, seek, seekable and tell.
                     ZipFile(self)
                 except BadZipFile:
                     pass
@@ -203,7 +201,6 @@ class LazyZipOverHTTP:
         """Return HTTP response to a range request from start to end."""
         headers = base_headers.copy()
         headers["Range"] = f"bytes={start}-{end}"
-        # TODO: Get range requests to be correctly cached
         headers["Cache-Control"] = "no-cache"
         return self.session_internal.get(
             self.url_internal,

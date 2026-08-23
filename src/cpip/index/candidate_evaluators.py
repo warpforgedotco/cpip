@@ -33,7 +33,6 @@ from cpip.index.source_models import (
 CandidateT = TypeVar("CandidateT", bound=CandidateRecord)
 
 _UNKNOWN_DIRECT_SOURCE_VERSION = ZERO_VERSION
-# `platform.python_version()` without the `platform` import behind it.
 _RUNNING_PYTHON = Version("%s.%s.%s" % sys.version_info[:3])
 
 
@@ -223,14 +222,6 @@ class CandidateEvaluator:
             )
 
         if isinstance(parsed, RejectedCandidate):
-            # Direct archive URLs often have non-distribution filenames (for
-
-            # example GitHub's ``master.zip``).  Keep those installable by
-
-            # deferring identity/version discovery to the build step, but do
-
-            # not mask invalid source-tree metadata this way.
-
             if (
                 unnamed_direct
                 and link.kind is ArtifactKind.SDIST
@@ -251,14 +242,6 @@ class CandidateEvaluator:
                 RejectionReason.DIFFERENT_PROJECT,
                 f"wrong project name: {parsed.name}",
             )
-
-        # A direct source URL with a non-distribution filename is represented
-
-        # by the placeholder version 0 until its build metadata is available.
-
-        # Applying an exact constraint to that placeholder rejects the source
-
-        # before it can be built and inspected.
 
         unknown_direct_source_version = (
             unnamed_direct
@@ -317,10 +300,6 @@ class CandidateEvaluator:
     @staticmethod
     @lru_cache(maxsize=4096)
     def requires_python_matches(requires_python: str) -> bool:
-        # Whether the running interpreter satisfies a Requires-Python text is
-        # a process constant, like supported_wheel_tags: memoized for the life
-        # of the process and deliberately not a cpip.core.caches table, so
-        # the benchmarks' reset leaves it alone.
         return SpecifierSet(requires_python).contains(_RUNNING_PYTHON)
 
     @staticmethod

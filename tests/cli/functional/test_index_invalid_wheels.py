@@ -20,7 +20,6 @@ def create_test_index_with_invalid_wheels(
 
     Returns the path to the index directory.
     """
-    # Create test index
     index_dir = tmpdir / "test_index"
     index_dir.mkdir()
 
@@ -41,12 +40,12 @@ def create_test_index_with_invalid_wheels(
         (f"{package_name}-2.0.0-py3-none-any.whl", "2.0.0"),
     ]
     invalid_wheels = [
-        (f"{package_name}-3.0_1-py3-none-any.whl", "3.0"),  # underscore in version
-        (f"{package_name}-_bad_-py3-none-any.wh", "0.0.0"),  # no version
+        (f"{package_name}-3.0_1-py3-none-any.whl", "3.0"),
+        (f"{package_name}-_bad_-py3-none-any.wh", "0.0.0"),
         (
             f"{package_name}-5.0.0_build1-py3-none-any.whl",
             "5.0.0",
-        ),  # underscore in build tag
+        ),
     ]
 
     all_wheels = valid_wheels + invalid_wheels
@@ -54,7 +53,6 @@ def create_test_index_with_invalid_wheels(
         wheel = make_wheel(name=package_name, version=version)
         wheel.save_to(pkg_dir / wheel_name)
 
-    # Create package index
     links = [
         f'<a href="{wheel_name}">{wheel_name}</a><br/>' for wheel_name, _ in all_wheels
     ]
@@ -79,7 +77,6 @@ def test_index_versions_ignores_invalid_wheel_names(
     """Test that cpip index versions ignores invalid wheel names."""
     index_dir = create_test_index_with_invalid_wheels(tmpdir)
 
-    # Run cpip index versions with JSON output
     result = script.cpip(
         "index",
         "versions",
@@ -106,7 +103,6 @@ def test_install_ignores_invalid_wheel_names(
     """Test that cpip install ignores invalid wheel names and installs valid ones."""
     index_dir = create_test_index_with_invalid_wheels(tmpdir)
 
-    # Run cpip install - should ignore invalid wheels and install the latest valid one
     result = script.cpip(
         "install",
         "pkg",

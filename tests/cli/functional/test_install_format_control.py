@@ -21,7 +21,6 @@ def test_order_no_binary_then_only_binary(script: CpipTestEnvironment) -> None:
     """
     wheel_path = create_basic_wheel_for_package(script, "simple", "1.0")
 
-    # This should allow wheels for 'simple' because --only-binary comes after
     result = script.cpip_install_local(
         "--no-binary=:all:",
         "--only-binary=simple",
@@ -29,7 +28,6 @@ def test_order_no_binary_then_only_binary(script: CpipTestEnvironment) -> None:
         find_links=[wheel_path.parent],
     )
     script.assert_installed(simple="1.0")
-    # Should NOT be building from source
     assert "Building wheel for simple" not in result.stdout
 
 
@@ -42,7 +40,6 @@ def test_order_only_binary_then_no_binary(script: CpipTestEnvironment) -> None:
     wheel_path = create_basic_wheel_for_package(script, "simple", "1.0")
     create_basic_sdist_for_package(script, "simple", "1.0")
 
-    # This should build from source for 'simple' because --no-binary comes after
     result = script.cpip_install_local(
         "--only-binary=:all:",
         "--no-binary=simple",
@@ -73,7 +70,6 @@ def test_reqfile_no_binary_overrides_cmdline_only_binary(
         find_links=[],
     )
     script.assert_installed(simple="1.0")
-    # Requirements file --no-binary should override CLI --only-binary
     assert "Building wheel for simple" in result.stdout
 
 
@@ -81,7 +77,6 @@ def test_reqfile_only_binary_overrides_cmdline_no_binary(
     script: CpipTestEnvironment,
 ) -> None:
     """Test requirements file --only-binary overrides command line --no-binary."""
-    # Create only a wheel, no sdist
     wheel_path = create_basic_wheel_for_package(script, "simple", "1.0")
 
     req_file = script.temporary_file(
@@ -97,7 +92,6 @@ def test_reqfile_only_binary_overrides_cmdline_no_binary(
         find_links=[],
     )
     result.assert_installed("simple", editable=False)
-    # Requirements file --only-binary should override CLI --no-binary
     assert "Building wheel for simple" not in result.stdout
 
 
@@ -115,5 +109,4 @@ def test_package_specific_overrides_all_in_requirements_file(
 
     result = script.cpip_install_local("-r", req_file, find_links=[])
     result.assert_installed("simple", editable=False)
-    # Package-specific --only-binary should override --no-binary :all:
     assert "Building wheel for simple" not in result.stdout

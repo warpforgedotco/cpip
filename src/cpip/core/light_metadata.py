@@ -63,9 +63,6 @@ class LightMetadata:
 
 def parse_metadata_text(text: str) -> LightMetadata:
     """Parse RFC 822-style metadata text (METADATA, WHEEL, PKG-INFO)."""
-    # Walk the raw text (not str.splitlines()) so the body slice below keeps
-    # whatever trailing newline the source had, matching
-    # email.message.Message.get_payload() exactly.
     fields: dict[str, list[str]] = {}
     current_key: str | None = None
     position = 0
@@ -77,10 +74,6 @@ def parse_metadata_text(text: str) -> LightMetadata:
         if not line:
             position = line_end + 1
             break
-        # A line folded across multiple physical lines (RFC 822 style, used
-        # for License/Description headers) continues with leading
-        # whitespace; email.message.Message strips that per line and joins
-        # with "\n" rather than truly unfolding, so match that exactly.
         if line[0] in " \t" and current_key is not None:
             fields[current_key][-1] += "\n" + line.strip()
         else:
@@ -97,8 +90,6 @@ def parse_metadata_text(text: str) -> LightMetadata:
 
 
 def _read_metadata_file(info_location: str) -> LightMetadata | None:
-    # The simplest legacy egg-info layout is a single flat PKG-INFO-formatted
-    # file (no dist-info/PKG-INFO subfile to look inside).
     if os.path.isfile(info_location):
         try:
             with open(info_location, encoding="utf-8", errors="replace") as file:
@@ -110,8 +101,6 @@ def _read_metadata_file(info_location: str) -> LightMetadata | None:
             return metadata
         return None
 
-    # dist-info uses METADATA; legacy egg-info uses PKG-INFO. Try both, since
-    # some setuptools egg-info layouts carry either.
     for filename in ("METADATA", "PKG-INFO"):
         try:
             with open(
@@ -146,7 +135,6 @@ def egg_link_path_from_sys_path(raw_name: str) -> str | None:
     return None
 
 
-# Mirrors InstalledMetadataDistribution.metadata_dict's field list exactly.
 _METADATA_DICT_FIELDS = {
     "metadata-version": False,
     "name": False,
@@ -209,8 +197,6 @@ class LightDistribution:
         self.info_location = info_location
         self.metadata = metadata
         self.user_site = user_site
-        # INSTALLER and direct_url.json are read once: list, freeze and
-        # inspect each ask for them more than once per distribution.
         self._installer: str | None = None
         self._direct_url: DirectUrl | None = None
         self._direct_url_read = False
@@ -354,8 +340,6 @@ class LightDistribution:
         except FileNotFoundError:
             return []
 
-        # RECORD is a CSV of path,hash,size -- only reached by `show --files`,
-        # so keep the csv module off every other invocation of these commands.
         import csv
         import io
 
@@ -372,8 +356,6 @@ def _iter_root_distributions(
                 entry.name
                 for entry in entries
                 if (entry.name.endswith(".dist-info") and entry.is_dir())
-                # Legacy egg-info can be a directory (with PKG-INFO inside)
-                # or, for the simplest packages, a single flat metadata file.
                 or (
                     entry.name.endswith(".egg-info")
                     and (entry.is_dir() or entry.is_file())

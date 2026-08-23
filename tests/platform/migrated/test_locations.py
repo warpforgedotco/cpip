@@ -38,12 +38,10 @@ class TestScheme:
         self.tempfile_gettempdir = tempfile.gettempdir
         self.old_os_fstat = os.fstat
         if sys.platform != "win32":
-            # os.geteuid and pwd.getpwuid are not implemented on windows
             self.old_os_geteuid = os.geteuid
             self.old_pwd_getpwuid = pwd.getpwuid
         self.old_getpass_getuser = getpass.getuser
 
-        # now patch
         tempfile.gettempdir = lambda: self.tempdir
         getpass.getuser = lambda: self.username
         os.fstat = lambda fd: self.get_mock_fstat(fd)
@@ -56,7 +54,6 @@ class TestScheme:
         tempfile.gettempdir = self.tempfile_gettempdir
         getpass.getuser = self.old_getpass_getuser
         if sys.platform != "win32":
-            # os.geteuid and pwd.getpwuid are not implemented on windows
             os.geteuid = self.old_os_geteuid
             pwd.getpwuid = self.old_pwd_getpwuid
         os.fstat = self.old_os_fstat
@@ -80,8 +77,6 @@ class TestScheme:
 
 class TestLocations:
     def test_root_modifies_appropriately(self) -> None:
-        # This deals with nt/posix path differences
-        # root is c:\somewhere\else or /somewhere/else
         root = os.path.normcase(
             os.path.abspath(os.path.join(os.path.sep, "somewhere", "else")),
         )

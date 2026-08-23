@@ -39,24 +39,17 @@ def test_debian_egg_name_workaround(
         f"simplewheel-2.0-py{pyversion}.egg-info",
     )
 
-    # Debian only removes pyversion for global installs, not inside a venv
-    # so even if this test runs on a Debian/Ubuntu system with broken
-    # setuptools, since our test runs inside a venv we'll still have the normal
-    # .egg-info
     result.did_create(egg_info, message=f"Couldn't find {egg_info}")
 
-    # The Debian no-pyversion version of the .egg-info
     mangled = os.path.join(script.site_packages, "simplewheel-2.0.egg-info")
     result.did_not_create(mangled, message=f"Found unexpected {mangled}")
 
-    # Simulate a Debian install by copying the .egg-info to their name for it
     full_egg_info = os.path.join(script.base_path, egg_info)
     assert os.path.isdir(full_egg_info)
     full_mangled = os.path.join(script.base_path, mangled)
     os.renames(full_egg_info, full_mangled)
     assert os.path.isdir(full_mangled)
 
-    # Try the uninstall and verify that everything is removed.
     result2 = script.cpip("uninstall", "simplewheel", "-y")
     assert_all_changes(result, result2, [script.venv / "build", "cache"])
 

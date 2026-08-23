@@ -4,11 +4,8 @@ This file is named as it is, to ensure that this module can't be imported via
 an import statement.
 """
 
-# /!\ This version compatibility check section must be Python 2 compatible. /!\
-
 import sys
 
-# Copied from pyproject.toml
 PYTHON_REQUIRES = (3, 10)
 
 
@@ -24,8 +21,6 @@ if sys.version_info[:2] < PYTHON_REQUIRES:
         ),
     )
 
-# From here on, we can use Python 3 features, but the syntax must remain
-# Python 2 compatible.
 
 import runpy  # noqa: E402
 from os.path import dirname  # noqa: E402

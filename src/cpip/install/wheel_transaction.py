@@ -99,9 +99,6 @@ def _target_has_distribution_metadata(target: InstallTarget) -> bool:
                 ):
                     return True
         except OSError:
-            # An unreadable or transient root must use the authoritative
-            # metadata scanner so installation does not silently skip an old
-            # distribution.
             return True
     return False
 
@@ -200,10 +197,6 @@ def install_wheel_internal(
     target_inventory: InstalledTargetInventory | None = None,
 ) -> WheelCandidate:
     if candidate is None:
-        # No pre-resolved candidate to reuse a cached layout from -- the
-        # archive opened here is closed before extraction runs, so keeping
-        # its layout would only misdirect open_wheel_archive() into the
-        # slower zipfile.ZipFile fallback for no benefit.
         candidate = wheel_candidate_from_path(path, include_layout=False)
     if lookup_existing:
         if target_inventory is not None:
@@ -216,8 +209,6 @@ def install_wheel_internal(
             ).find(candidate.name)
         else:
             existing = None
-    # A legacy (non-PEP 440) installed version is None and so never "the
-    # same version": it is replaced.
     same_version = existing is not None and existing.version == candidate.version
     if same_version and not force and not preserve_existing:
         return candidate
@@ -554,8 +545,6 @@ def install_wheel_internal(
                     maker.executable = script_executable
                 maker.make(f"{name} = {target_ref}", options={"gui": gui})
                 if os.name == "nt":
-                    # Keep the script-text form for callers that inspect the
-                    # generated script path. Windows execution uses the EXE.
                     source = os.path.join(script_stage, name)
                     with open(source, "w", encoding="utf-8") as file:
                         file.write(script_text(target_ref, script_executable))
@@ -678,11 +667,6 @@ def validate_wheel_batch(
     resolved_roots: ResolvedRoots = target.resolved_roots_internal
     resolved_directories = destination_cache if destination_cache is not None else {}
     for path in paths:
-        # One archive open covers both the wheel_candidate() metadata read
-        # and the member-destination validation below, instead of opening
-        # the same file twice and sending the first open through
-        # wheel_candidate's slow, email-based fallback for lack of a
-        # dist-info directory to hand it.
         with (
             open(path, "rb", buffering=32768) as stream,
             zipfile.ZipFile(stream) as archive,
@@ -758,8 +742,6 @@ def install_wheels_transactionally(
     if cache_dir is not None and all(
         candidate.source_kind in {None, "wheel"} for candidate in planned_candidates
     ):
-        # The clone route compiles bytecode in the staged tree itself, so a
-        # default install (compilation on) takes it too.
         cached_result = install_wheels_from_archive_cache(
             requests,
             planned_candidates,

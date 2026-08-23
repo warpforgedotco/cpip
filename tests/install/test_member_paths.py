@@ -102,7 +102,6 @@ def test_member_paths_matches_per_member_helpers(
     stage_root = os.fspath(tmp_path / "stage")
     resolver = MemberPaths(target, stage_root)
     assert _fast(resolver, name) == _slow(target, stage_root, name)
-    # A second sibling in the same directory goes through the cached entry.
     sibling = f"{name.rpartition('/')[0]}/sibling.py" if "/" in name else "sibling.py"
     assert _fast(resolver, sibling) == _slow(target, stage_root, sibling)
 
