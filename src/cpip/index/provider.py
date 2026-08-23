@@ -454,6 +454,8 @@ class CandidateProvider:
     def catalog_groups(
         self,
         requirement: Requirement,
+        *,
+        allow_fetch: bool = False,
     ) -> tuple[CatalogSourceSummary, ...] | None:
         if self.find_links or requirement.is_unnamed_direct or not self.index_sources:
             return None
@@ -466,7 +468,10 @@ class CandidateProvider:
         result: list[CatalogSourceSummary] = []
 
         for source in self.index_sources:
-            cached = source.collect_cached_catalog_summary(requirement)
+            cached = source.collect_cached_catalog_summary(
+                requirement,
+                allow_fetch=allow_fetch,
+            )
 
             if cached is None:
                 return None
@@ -2480,7 +2485,7 @@ class CandidateProvider:
 
         records_by_version: dict[Version, tuple[object, ...]] = {}
 
-        cached_groups = self.catalog_groups(requirement)
+        cached_groups = self.catalog_groups(requirement, allow_fetch=True)
 
         ordered_summaries: list[CandidateSummary] | None = (
             [] if cached_groups is not None and len(cached_groups) == 1 else None
