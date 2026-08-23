@@ -51,10 +51,7 @@ try:
 except ImportError:
     charset_normalizer_version = None
 
-try:
-    from chardet import __version__ as chardet_version
-except ImportError:
-    chardet_version = None
+chardet_version = None
 
 
 def check_compatibility(urllib3_version, chardet_version, charset_normalizer_version):
