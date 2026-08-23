@@ -39,31 +39,50 @@ class InvalidVersion(ValueError):
     pass
 
 
-VERSION_RE = re.compile(
-    r"""
-    ^\s*
-    v?
-    (?:(?P<epoch>\d+)!)?
-    (?P<release>\d+(?:\.\d+)*)
-    (?:
-        [._-]?
-        (?P<pre_l>a|b|c|rc|alpha|beta|pre|preview)
-        [._-]?
-        (?P<pre_n>\d+)?
-    )?
-    (?:
-        (?:-(?P<post_n1>\d+))
-        |
-        (?:[._-]?(?P<post_l>post|rev|r)[._-]?(?P<post_n2>\d+)?)
-    )?
-    (?:
-        [._-]?(?P<dev_l>dev)[._-]?(?P<dev_n>\d+)?
-    )?
-    (?:\+(?P<local>[a-z0-9]+(?:[-_.][a-z0-9]+)*))?
-    \s*$
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
+_version_re: re.Pattern[str] | None = None
+
+
+def version_re() -> re.Pattern[str]:
+    """The full PEP 440 grammar, compiled on first use.
+
+    ``Version.__new__`` answers a plain dotted-numeric version -- nearly
+    everything a resolve parses, and everything an installed-distribution
+    listing parses -- without this pattern at all. Compiling it is around half
+    a millisecond, and this module is imported by every command that touches a
+    requirement, so most of them would pay for a pattern they never match.
+    """
+
+    global _version_re
+
+    if _version_re is None:
+        _version_re = re.compile(
+            r"""
+            ^\s*
+            v?
+            (?:(?P<epoch>\d+)!)?
+            (?P<release>\d+(?:\.\d+)*)
+            (?:
+                [._-]?
+                (?P<pre_l>a|b|c|rc|alpha|beta|pre|preview)
+                [._-]?
+                (?P<pre_n>\d+)?
+            )?
+            (?:
+                (?:-(?P<post_n1>\d+))
+                |
+                (?:[._-]?(?P<post_l>post|rev|r)[._-]?(?P<post_n2>\d+)?)
+            )?
+            (?:
+                [._-]?(?P<dev_l>dev)[._-]?(?P<dev_n>\d+)?
+            )?
+            (?:\+(?P<local>[a-z0-9]+(?:[-_.][a-z0-9]+)*))?
+            \s*$
+            """,
+            re.IGNORECASE | re.VERBOSE,
+        )
+
+    return _version_re
+
 
 _PRE_RANK = {
     "a": 0,
@@ -117,7 +136,7 @@ class Version(tuple):
             suffix = FINAL_SUFFIX
             local: Any = _NO_LOCAL
         else:
-            match = VERSION_RE.match(raw)
+            match = version_re().match(raw)
             if match is None:
                 raise InvalidVersion(value)
             (
