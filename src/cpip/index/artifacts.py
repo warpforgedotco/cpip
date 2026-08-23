@@ -22,6 +22,8 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from typing import Any
 
+    from cpip.core.http import HttpSession
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,7 +58,7 @@ class ArtifactLocator:
 
     def __init__(
         self,
-        session: Any = None,
+        session: HttpSession | None = None,
         cache_dir: str | os.PathLike[str] | None = None,
     ) -> None:
         self.session = session
@@ -232,12 +234,13 @@ class ArtifactLocator:
         os.makedirs(os.path.dirname(target), exist_ok=True)
 
         if self.session is None:
-            from cpip._vendor import requests
-
-            self.session = requests.Session()
+            raise InstallationError(
+                f"A configured HTTP session is required to download {url}",
+            )
+        session = self.session
 
         def request() -> Any:
-            current = self.session.get(url, stream=True)
+            current = session.get(url, stream=True)
 
             if current.status_code < 400:
                 return current

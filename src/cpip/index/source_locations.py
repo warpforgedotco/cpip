@@ -21,8 +21,7 @@ from cpip.index.source_models import ArtifactKind
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
-    from typing import Any
-
+    from cpip.core.http import HttpSession
     from cpip.index.catalog_cache import CatalogSummary
 
 
@@ -79,7 +78,7 @@ class FindLinksSource:
         self,
         links: tuple[str, ...],
         trusted_hosts: tuple[str, ...] = (),
-        session: Any = None,
+        session: HttpSession | None = None,
     ) -> None:
         self.links = links
 
@@ -226,7 +225,7 @@ class SimpleIndexSource:
         self,
         index_url: str,
         trusted_hosts: tuple[str, ...] = (),
-        session: Any = None,
+        session: HttpSession | None = None,
     ) -> None:
         self.index_url = index_url
 

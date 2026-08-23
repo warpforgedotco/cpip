@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Mapping
-from contextlib import nullcontext
 from urllib.parse import urlsplit
 
 from cpip._vendor.nab_resolver.ranges import Range
@@ -29,12 +28,7 @@ from cpip.resolution.nab_types import (
     _RecordingRequirements,
 )
 
-TYPE_CHECKING = False
-
 _MISSING = object()
-
-if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
 
 
 # Sorting Versions through their comparison keys gives the order
@@ -175,10 +169,10 @@ class NabProvider:
         if not versions and requirement.url is None:
             # Nothing matched under the active policy. Look again with yanked
             # releases admitted so the package is at least known to exist.
-            with self._yanked_allowed():
-                fallback_candidates = tuple(
-                    self.provider.find_candidates(parse_requirement(package))
-                )
+            fallback_provider = self._provider_with_yanked()
+            fallback_candidates = tuple(
+                fallback_provider.find_candidates(parse_requirement(package))
+            )
             if fallback_candidates:
                 unyanked = tuple(
                     candidate
@@ -193,16 +187,11 @@ class NabProvider:
         self._version_cache[cache_key] = versions
         return versions
 
-    def _yanked_allowed(self) -> AbstractContextManager[None]:
-        """Scope a yanked-release fallback, when the provider supports one.
-
-        Stand-in providers used in tests implement only the query methods, so
-        fall back to leaving policy alone rather than probing for attributes
-        at each call site.
-        """
+    def _provider_with_yanked(self):
+        """Return an explicit yanked-policy view when the provider supports it."""
         if isinstance(self.provider, CandidateProvider):
-            return self.provider.yanked_allowed()
-        return nullcontext()
+            return self.provider.with_yanked_policy(True)
+        return self.provider
 
     def _allows(self, package: str, version: Version) -> bool:
         if not version.is_prerelease or self.allow_prereleases:
@@ -632,32 +621,32 @@ class NabProvider:
         if self.provider.allow_yanked:
             return None
 
-        with self.provider.yanked_allowed():
-            fallback = tuple(self.provider.find_candidates(parse_requirement(package)))
-            usable = [
-                item
-                for item in fallback
-                if item.version in version_range
-                and item.version in matching
-                and all(
-                    constraint.specifier.contains(
-                        item.version,
-                        allow_prereleases=True,
-                    )
-                    for constraint in constraints
+        fallback_provider = self.provider.with_yanked_policy(True)
+        fallback = tuple(fallback_provider.find_candidates(parse_requirement(package)))
+        usable = [
+            item
+            for item in fallback
+            if item.version in version_range
+            and item.version in matching
+            and all(
+                constraint.specifier.contains(
+                    item.version,
+                    allow_prereleases=True,
                 )
-                and item.yanked_reason is None
-            ]
-            if usable:
-                candidate = max(usable, key=lambda item: item.version)
-                return candidate.version, (candidate,)
-
-            return selected, tuple(
-                self.provider.find_candidates(
-                    parse_requirement(package),
-                    allowed_versions=frozenset({selected}),
-                ),
+                for constraint in constraints
             )
+            and item.yanked_reason is None
+        ]
+        if usable:
+            candidate = max(usable, key=lambda item: item.version)
+            return candidate.version, (candidate,)
+
+        return selected, tuple(
+            fallback_provider.find_candidates(
+                parse_requirement(package),
+                allowed_versions=frozenset({selected}),
+            ),
+        )
 
     def _invalid_metadata_rejects(self, candidate: WheelCandidate) -> bool:
         """Whether the candidate's metadata fails to load at all.

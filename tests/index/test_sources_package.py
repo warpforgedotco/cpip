@@ -33,8 +33,20 @@ from cpip.index.source_models import (
 from cpip.index.vcs import is_immutable_vcs_link, vcs_reference
 from cpip.network.cache import SafeFileCache
 from cpip.network.http import HttpResponse
-
 from ..wheel_helpers import make_sdist, make_wheel
+
+
+def test_yanked_policy_view_does_not_mutate_provider() -> None:
+    provider = object.__new__(CandidateProvider)
+    provider.allow_yanked = False
+    provider.sources = ()
+
+    view = provider.with_yanked_policy(True)
+
+    assert view is not provider
+    assert provider.allow_yanked is False
+    assert view.allow_yanked is True
+    assert view.sources is provider.sources
 
 
 @pytest.mark.parametrize(

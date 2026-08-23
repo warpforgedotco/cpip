@@ -7,6 +7,8 @@ import os
 import urllib.parse
 from typing import Any, Callable
 
+from cpip.core.errors import InstallationError
+from cpip.core.http import HttpSession
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.catalog_cache import load_links, save_links
 from cpip.index.datetime import parse_iso_datetime
@@ -33,7 +35,7 @@ class IndexPageParser:
         self,
         link_factory: LinkFactory = Link.from_url,
         trusted_hosts: tuple[str, ...] = (),
-        session: Any = None,
+        session: HttpSession | None = None,
     ) -> None:
         self.link_factory = link_factory
         self.trusted_hosts = {host.lower() for host in trusted_hosts}
@@ -87,10 +89,9 @@ class IndexPageParser:
             ),
         }
         if self.session is None:
-            from cpip._vendor import requests
-
-            self.session = requests.Session()
-            self.artifacts.session = self.session
+            raise InstallationError(
+                f"A configured HTTP session is required to read index page {url}",
+            )
         response = self.session.get(url, headers=headers)
         response.raise_for_status()
         return IndexContent(
