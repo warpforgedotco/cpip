@@ -393,15 +393,13 @@ class NetworkSession:
         cached_metadata = None
 
         if method == "GET" and not stream and "Range" not in request_headers:
-            cached = self.cached_response(request)
+            cached, cached_metadata = self.cache_lookup(request)
 
             if cached is not None:
                 if self.network_stats is not None:
                     self.network_stats.cache_hits += 1
 
                 return cached
-
-            cached_metadata = self.stale_cache_metadata(request)
 
             if cached_metadata is not None:
                 for name in ("etag", "last-modified"):
@@ -594,22 +592,41 @@ class NetworkSession:
 
             flight.event.set()
 
-    def cached_response(self, request: HttpRequest) -> HttpResponse | None:
+    def cache_lookup(
+        self,
+        request: HttpRequest,
+    ) -> tuple[HttpResponse | None, dict[str, Any] | None]:
+        """One cache read: a fresh response, stale metadata for revalidation, or neither."""
+
         if self.cache is None:
-            return None
+            return None, None
 
-        metadata = self.cache.get(request.url)
+        get_with_body = getattr(self.cache, "get_with_body", None)
 
-        body = self.cache.get_body(request.url)
+        if get_with_body is not None:
+            metadata, body = get_with_body(request.url)
 
-        if metadata is None or body is None:
+        else:
+            metadata = self.cache.get(request.url)
+
+            body = self.cache.get_body(request.url)
+
+        if metadata is None:
             if body is not None:
                 body.close()
 
-            return None
+            return None, None
 
         try:
             values = json.loads(metadata.decode("utf-8"))
+
+            expires_at = values.get("expires_at")
+
+            if expires_at is not None and float(expires_at) <= time.time():
+                if body is not None:
+                    body.close()
+
+                return None, values
 
             headers = values["headers"]
 
@@ -617,17 +634,14 @@ class NetworkSession:
 
             reason = str(values["reason"])
 
-            expires_at = values.get("expires_at")
+        except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            if body is not None:
+                body.close()
 
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-            body.close()
+            return None, None
 
-            return None
-
-        if expires_at is not None and float(expires_at) <= time.time():
-            body.close()
-
-            return None
+        if body is None:
+            return None, None
 
         import email.message
 
@@ -644,7 +658,7 @@ class NetworkSession:
             raw=body,
             request=request,
             from_cache=True,
-        )
+        ), None
 
     def has_fresh_cached_response(self, url: str) -> bool:
         """Check cache freshness without reading the cached response body."""
@@ -684,31 +698,6 @@ class NetworkSession:
         self.fresh_cached_response_cache[url] = expires_at_value
 
         return True
-
-    def stale_cache_metadata(self, request: HttpRequest) -> dict[str, Any] | None:
-        if self.cache is None:
-            return None
-
-        metadata = self.cache.get(request.url)
-
-        if metadata is None:
-            return None
-
-        try:
-            values = json.loads(metadata.decode("utf-8"))
-
-            if not isinstance(values, dict):
-                return None
-
-            expires_at = values.get("expires_at")
-
-            if expires_at is None or float(expires_at) > time.time():
-                return None
-
-            return values
-
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return None
 
     def revalidated_response(
         self,

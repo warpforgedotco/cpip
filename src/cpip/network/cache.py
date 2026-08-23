@@ -115,6 +115,16 @@ class SafeFileCache:
         with suppressed_cache_errors():
             os.remove(path + ".atomic")
 
+    def get_with_body(self, key: str) -> tuple[bytes | None, BinaryIO | None]:
+        """Read the metadata and open the body with one path computation."""
+        metadata_path = self.get_cache_path(key)
+        body_path = metadata_path + ".body"
+        with suppressed_cache_errors():
+            with open(metadata_path, "rb") as file:
+                metadata = file.read()
+            return metadata, open(body_path, "rb")
+        return None, None
+
     def get_body(self, key: str) -> BinaryIO | None:
         metadata_path = self.get_cache_path(key)
         body_path = metadata_path + ".body"
