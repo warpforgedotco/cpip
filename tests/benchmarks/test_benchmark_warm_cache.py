@@ -394,3 +394,91 @@ def test_warm_installed_state_scan(
     finally:
         use_header_cache(None)
         clear_installed_index()
+
+
+@pytest.fixture(scope="module")
+def stale_index(
+    graph_wheelhouse: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[object, str]:
+    """warm_index, but every page's HTTP entry is stale with a matching ETag:
+    each resolve must revalidate (304 answered offline) before the summary
+    world opens. This is the everyday case -- PyPI pages outlive their
+    max-age between two cpip runs while their content stays unchanged."""
+    import io
+
+    from cpip.network.http import HttpRequest, HttpResponse, NetworkSession
+
+    class Stale304Session(NetworkSession):
+        def open_internal(
+            self,
+            request: HttpRequest,
+            timeout,
+            *,
+            stream: bool = False,
+        ) -> HttpResponse:
+            if request.headers.get("If-None-Match") == '"stale-page"':
+                return HttpResponse(
+                    status_code=304,
+                    reason="Not Modified",
+                    url=request.url,
+                    headers={"ETag": '"stale-page"', "Cache-Control": "max-age=0"},
+                    raw=io.BytesIO(b""),
+                    content_internal=b"",
+                    request=request,
+                )
+            body = b"{}"
+            return HttpResponse(
+                status_code=200,
+                reason="OK",
+                url=request.url,
+                headers={
+                    "Content-Type": "application/vnd.pypi.simple.v1+json",
+                    "Cache-Control": "max-age=0",
+                    "ETag": '"stale-page"',
+                    "Content-Length": str(len(body)),
+                },
+                raw=io.BytesIO(body),
+                content_internal=body,
+                request=request,
+            )
+
+    root = tmp_path_factory.mktemp("stale-index")
+    session = Stale304Session(cache=str(root / "http"))
+    cache = session.cache
+    by_project: dict[str, list[Path]] = {}
+    for wheel in sorted(graph_wheelhouse.glob("*.whl")):
+        by_project.setdefault(parse_wheel_file(wheel.name).name, []).append(wheel)
+    for name, wheels in by_project.items():
+        page_url = SimpleIndexSource.project_page_url(INDEX_URL, name)
+        save_links(
+            cache,
+            page_url,
+            [
+                Link.from_url(
+                    path_to_url(str(wheel)), source_url=page_url, text=wheel.name
+                )
+                for wheel in wheels
+            ],
+        )
+        session.get(page_url).close()
+    cache_dir = str(root / "cache")
+    os.makedirs(cache_dir)
+    assert len(resolve_index(session, cache_dir).candidates) > 10
+    flush_persistent_caches(cache_dir)
+    reset_caches()
+    return session, cache_dir
+
+
+def test_stale_index_revalidated_resolve(
+    benchmark: BenchmarkFixture,
+    stale_index: tuple[object, str],
+) -> None:
+    """Resolving when every cached page is past its max-age but unchanged:
+    one conditional request per project, then the summary world."""
+    session, cache_dir = stale_index
+
+    def resolve_stale() -> int:
+        return len(resolve_index(session, cache_dir).candidates)
+
+    assert benchmark(resolve_stale) > 10
