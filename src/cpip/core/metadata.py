@@ -4,7 +4,6 @@ import os
 import pathlib
 import site
 import sys
-import sysconfig
 from collections.abc import Collection, Iterable
 
 from .packaging import (
@@ -260,6 +259,10 @@ class InstalledDistribution:
 
 
 def default_lib_path() -> str:
+    # Deferred: the installed-distribution scan below reaches this only when a
+    # caller asks for the default search path, not to list a given one.
+    import sysconfig
+
     return sysconfig.get_paths()["purelib"]
 
 

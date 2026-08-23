@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import functools
 import os
-import sysconfig
 
 from cpip.core.appdirs import user_cache_dir
 from cpip.core.errors import InstallationError
@@ -46,4 +45,6 @@ def change_root(new_root: str, pathname: str) -> str:
 
 @functools.cache
 def is_osx_framework() -> bool:
+    import sysconfig
+
     return bool(sysconfig.get_config_var("PYTHONFRAMEWORK"))

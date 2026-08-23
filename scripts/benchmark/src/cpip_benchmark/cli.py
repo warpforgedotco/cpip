@@ -3,14 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from cpip_benchmark.hyperfine import Command, Hyperfine, env_prefix
+from cpip_benchmark.hyperfine import Command, Hyperfine, command_line, env_prefix
 from cpip_benchmark.workloads import (
     OFFICIAL_WORKLOAD_NAMES,
     OFFICIAL_WORKLOADS,
@@ -118,29 +117,6 @@ def collect_run_metadata(*, cpip_python: str, uv_path: str) -> dict[str, str]:
     }
 
 
-def tool_command(
-    command: list[str], *, env: dict[str, str] | None = None
-) -> tuple[list[str], dict[str, str]]:
-    """Attach ``env`` to ``command`` for hyperfine to run.
-
-    On POSIX this is a plain ``(command, env)`` pair: ``Hyperfine.args()``
-    renders ``env`` as a shell assignment prefix, so no extra process is
-    spawned just to set variables. Windows' shell doesn't support that
-    syntax, so there we fall back to wrapping the command through
-    ``cpip_benchmark.runner run --env ...``, which does the assignment
-    in-process before exec'ing the real command.
-    """
-    if not env:
-        return command, {}
-    if os.name == "nt":
-        wrapped = [sys.executable, "-m", "cpip_benchmark.runner", "run"]
-        for name, value in env.items():
-            wrapped.extend(["--env", f"{name}={value}"])
-        wrapped.extend(command)
-        return wrapped, {}
-    return command, env
-
-
 def cpip_direct_launcher(workspace: Path) -> Path:
     launcher = workspace / "cpip-direct.py"
     if not launcher.exists():
@@ -170,20 +146,49 @@ def cpip_command(
         command = [cpip_python, "-m", "cpip", *args]
     env = {"PYTHONPATH": str(repo_root() / "src")}
     env.update(extra_env or {})
-    return tool_command(command, env=env)
+    return command, env
 
 
 def uv_command(uv_path: str, args: list[str]) -> list[str]:
     return [uv_path, *args]
 
 
+def runner_command(*args: str) -> str:
+    return command_line([sys.executable, "-m", "cpip_benchmark.runner", *args])
+
+
 def cleanup_command(paths: list[Path], *, mkdir: list[Path] | None = None) -> str:
-    command = [sys.executable, "-m", "cpip_benchmark.runner", "cleanup"]
+    args = ["cleanup"]
     for path in paths:
-        command.extend(["--path", str(path)])
+        args.extend(["--path", str(path)])
     for path in mkdir or []:
-        command.extend(["--mkdir", str(path)])
-    return shlex.join(command)
+        args.extend(["--mkdir", str(path)])
+    return runner_command(*args)
+
+
+def cleanup_step(paths: list[Path], *, mkdir: list[Path] | None = None) -> dict:
+    return {
+        "kind": "cleanup",
+        "path": [str(path) for path in paths],
+        "mkdir": [str(path) for path in mkdir or []],
+    }
+
+
+def run_step(command: list[str], env: dict[str, str] | None = None) -> dict:
+    step: dict = {"kind": "run", "command": command}
+    if env:
+        step["env"] = env
+    return step
+
+
+def chain_command(steps: list[dict]) -> str:
+    """Render a multi-step ``--setup``/``--prepare`` for a shell-less hyperfine.
+
+    ``--shell=none`` means no ``&&``, so the steps travel as one JSON argument
+    and ``cpip_benchmark.runner chain`` sequences them. Preparation is untimed,
+    so the extra interpreter is free.
+    """
+    return runner_command("chain", "--spec", json.dumps(steps, separators=(",", ":")))
 
 
 def prepare_with_cache(
@@ -196,18 +201,10 @@ def prepare_with_cache(
     return cleanup_command(paths, mkdir=[cwd])
 
 
-def shell_command(command: list[str]) -> str:
-    if os.name == "nt":
-        return subprocess.list2cmdline(command)
-    return shlex.join(command)
-
-
-def warm_setup(commands: list[Command], cleanup: list[Path]) -> str:
-    parts = [cleanup_command(cleanup)]
-    parts.extend(
-        env_prefix(command.env) + shell_command(command.command) for command in commands
-    )
-    return " && ".join(parts)
+def warm_setup(commands: list[Command], stale: list[Path]) -> str:
+    steps = [cleanup_step(stale)]
+    steps.extend(run_step(command.command, command.env) for command in commands)
+    return chain_command(steps)
 
 
 def build_commands(
@@ -487,17 +484,11 @@ def build_commands(
                 incremental_update,
             ],
         )
-        cpip_prepare = " && ".join(
-            (
-                cleanup_command([cpip_target]),
-                env_prefix(cpip_base_env) + shell_command(cpip_base),
-            ),
+        cpip_prepare = chain_command(
+            [cleanup_step([cpip_target]), run_step(cpip_base, cpip_base_env)],
         )
-        uv_prepare = " && ".join(
-            (
-                cleanup_command([uv_target]),
-                shell_command(uv_base),
-            ),
+        uv_prepare = chain_command(
+            [cleanup_step([uv_target]), run_step(uv_base)],
         )
         return [
             Command(label("cpip"), cpip_prepare, cpip_update, cpip_update_env),
@@ -669,7 +660,7 @@ def main() -> None:
                 ignore_failure=benchmark == "startup-invalid-command",
             )
             if args.dry_run:
-                print(shell_command(run.args()))
+                print(env_prefix(run.environment()) + command_line(run.args()))
             else:
                 run.run()
         if args.keep_workspace:

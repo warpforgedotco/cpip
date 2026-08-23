@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import string
 from collections import namedtuple
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
@@ -334,6 +333,11 @@ def format_list_json(
             info["latest_filetype"] = filetype
 
         data.append(info)
+
+    # Deferred: `json` is a three-module package, and this is the only caller
+    # in a module that `show`, `check` and `list` all import for their
+    # installed-distribution queries.
+    import json
 
     return json.dumps(data)
 

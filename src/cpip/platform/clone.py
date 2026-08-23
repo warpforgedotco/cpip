@@ -14,15 +14,19 @@ from __future__ import annotations
 
 import errno
 import os
-import shutil
 import stat
 import sys
-from collections.abc import Callable
-from typing import cast
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    CloneFile = Callable[[bytes, bytes, int], int]
 
 _FICLONE = 0x40049409
 
-_clonefile: object | None = None
+_clonefile: CloneFile | None = None
 
 _clonefile_loaded = False
 
@@ -57,8 +61,6 @@ def _darwin_clone(source: str, destination: str) -> bool:
 
     if function is None:
         return False
-
-    function = cast("Callable[[bytes, bytes, int], int]", function)
 
     if (
         function(
@@ -138,6 +140,8 @@ def _linux_reflink(source: str, destination: str) -> bool:
     finally:
         os.close(source_fd)
 
+    import shutil
+
     shutil.copystat(source, destination, follow_symlinks=False)
 
     return True
@@ -186,6 +190,12 @@ def clone_path(source: str, destination: str) -> None:
             if destination_exists:
                 return clone_path(source_text, destination_text)
 
+            # Deferred, with the copy fallback below: on a filesystem that
+            # can clone, this module hands back a whole tree without ever
+            # touching `shutil` -- which drags in `zlib`, `bz2` and `lzma`
+            # for archive helpers nothing here calls.
+            import shutil
+
             try:
                 with os.scandir(source_text) as entries:
                     for entry in entries:
@@ -213,6 +223,8 @@ def clone_path(source: str, destination: str) -> None:
             return
 
         if not _linux_reflink(source_text, destination_text):
+            import shutil
+
             shutil.copy2(source_text, destination_text, follow_symlinks=False)
 
         return

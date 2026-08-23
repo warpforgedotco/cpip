@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sysconfig
 from functools import lru_cache
 
 from .wheel import TargetContext, WheelTag, supported_wheel_tags
@@ -53,6 +52,10 @@ def get_supported_internal(
             abis=tuple(abis or ()),
         )
     supported = supported_wheel_tags(target)
+
+    # Deferred: `sysconfig` pulls `threading` in behind it.
+    import sysconfig
+
     soabi = sysconfig.get_config_var("SOABI")
     if soabi and "-" in soabi:
         normalized: list[WheelTag] = []

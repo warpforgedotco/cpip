@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import platform
+import sys
 from functools import lru_cache
 from collections.abc import Sequence
 from typing import TypeVar
@@ -33,7 +33,8 @@ from cpip.index.source_models import (
 CandidateT = TypeVar("CandidateT", bound=CandidateRecord)
 
 _UNKNOWN_DIRECT_SOURCE_VERSION = ZERO_VERSION
-_RUNNING_PYTHON = Version(platform.python_version())
+# `platform.python_version()` without the `platform` import behind it.
+_RUNNING_PYTHON = Version("%s.%s.%s" % sys.version_info[:3])
 
 
 class CandidateEvaluator:

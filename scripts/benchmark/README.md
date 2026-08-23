@@ -99,6 +99,37 @@ always resolves from scratch regardless of what's already on disk at
 again under a different name, not a distinct measurement. Revisit if `cpip
 lock` ever grows preferred-versions-from-an-existing-lockfile support.
 
+## Recording a baseline
+
+```console
+uv run cpip-bench-record
+```
+
+Sweeps the offline and live workloads with `--json` into
+`benchmark-runs/<branch>-<timestamp>/` (gitignored) and prints the
+`cpip-bench-compare` line for a later run. `--workload` narrows the sweep,
+`-o` picks the directory, and anything after `--` is forwarded to
+`cpip-bench`.
+
+It refuses to record unless the machine is actually quiet -- 1-minute load
+average under `cores/4`, on mains power, not thermally limited -- and names
+every blocker plus the top CPU consumers rather than stopping at the first
+one. A baseline recorded under load is worse than no baseline: it looks
+authoritative and quietly poisons every comparison made against it. `--force`
+overrides, and says so in the output.
+
+"Not thermally limited" means `pmset -g therm` reports no CPU limit below
+100; the keys are printed whenever there is a CPU power status at all, so
+their presence alone is not throttling. A platform with no load average of
+its own -- Windows has no `os.getloadavg` -- is a blocker too, on the same
+reasoning: an unverifiable machine is exactly the one whose numbers look
+authoritative and are not.
+
+Note that `cpip-bench` measures whatever `--cpip-python` points at, which
+defaults to this harness's own interpreter -- pinned to 3.10 by
+`.python-version`, not the 3.12 the CodSpeed job uses. `meta.json` records
+which one ran, and `cpip-bench-compare` warns when two runs disagree.
+
 ## Comparing two runs
 
 `--json` also writes a `meta.json` recording the interpreter/uv versions and
@@ -114,3 +145,35 @@ This prints a before/after/delta table per benchmark and tool, and warns if
 `meta.json` shows the two runs used different interpreters -- a fresh `uv
 sync` with no Python pin can silently resolve a different version than an
 existing checkout, which will otherwise look like a real performance change.
+
+## No shell in the measured path
+
+hyperfine is invoked with `--shell=none`, so every benchmarked command is
+exec'd directly instead of through `/bin/sh`. Two reasons:
+
+- On macOS `/bin/sh` is SIP-protected and strips `DYLD_*` from the
+  environment of everything it spawns, which silently detaches any profiler
+  that attaches by injection (CodSpeed's walltime instrument, samply,
+  Instruments) from the process actually being measured.
+- It removes a `fork`+`exec` from every timed iteration. hyperfine calibrates
+  and subtracts the mean shell startup, but that correction has its own
+  variance, and the `startup-*` benchmarks measure ~10-50 ms.
+
+With no shell there is nothing to interpret a command string, so two things
+moved:
+
+- Per-command env vars (`PYTHONPATH`, `CPIP_CACHE_DIR`) are set on the
+  hyperfine process and inherited, rather than written as a `FOO=bar` prefix.
+  Wrapping each command in a helper interpreter instead would put a whole
+  Python startup inside the timed region. `Hyperfine.environment` raises if
+  two commands in one benchmark want different values for the same variable.
+- `--setup`/`--prepare` steps that used to chain with `&&` are now a single
+  `cpip_benchmark.runner chain --spec '<json>'` call. Preparation is untimed,
+  so the extra interpreter costs the measurement nothing.
+
+Measured on `startup-help` (30 runs, two sequential pairs), dropping the
+shell moved the mean by -4.2 ms and -2.4 ms, and roughly halved the spread:
+sigma 21.8 -> 8.9 ms and 9.0 -> 4.2 ms. The tighter spread is the point; the
+mean shift is small but real, so JSON exports recorded before this landed are
+not comparable to ones recorded after -- re-record both sides of any
+`cpip-bench-compare` baseline.

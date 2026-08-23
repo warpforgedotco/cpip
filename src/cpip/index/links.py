@@ -303,14 +303,17 @@ class Link:
         # paths through a file URL can rewrite `/var` to `/private/var` on
         # macOS, losing access to the project metadata.
         local_path = os.path.abspath(path_text) if is_dir else path_text
+        # One basename: it feeds both the display text and (for files) the
+        # artifact-kind sniff, called once per find-links entry.
+        base_name = os.path.basename(path_text)
         return cls(
             path_to_url(local_path),
             comes_from=source_url,
-            text=os.path.basename(path_text),
+            text=base_name,
             kind=(
                 ArtifactKind.SOURCE_TREE
                 if is_dir
-                else cls.artifact_kind_from_filename(os.path.basename(path_text))
+                else cls.artifact_kind_from_filename(base_name)
             ),
             local_path_internal=str(local_path),
             local_identity_internal=local_identity,
