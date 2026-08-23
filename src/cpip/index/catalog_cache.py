@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime
 import hashlib
 import marshal
 import posixpath
@@ -346,8 +345,36 @@ def valid_summary_group(value: object) -> bool:
     )
 
 
+def valid_str_dict(value: object) -> bool:
+    return isinstance(value, dict) and all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    )
+
+
 def valid_record(value: object) -> bool:
-    if not isinstance(value, tuple) or len(value) != 8:
+    """One full validation at load time: link_from_record trusts its input."""
+    if not isinstance(value, tuple) or len(value) != 9:
+        return False
+    (url, text, hashes, requires_python, yanked, metadata, upload_time, _, parts) = (
+        value
+    )
+    if not isinstance(url, str) or not isinstance(text, str):
+        return False
+    if not valid_str_dict(hashes):
+        return False
+    if requires_python is not None and not isinstance(requires_python, str):
+        return False
+    if yanked is not None and not isinstance(yanked, str):
+        return False
+    if metadata is not None and not valid_str_dict(metadata):
+        return False
+    if upload_time is not None and not isinstance(upload_time, str):
+        return False
+    if (
+        not isinstance(parts, tuple)
+        or len(parts) != 5
+        or not all(isinstance(part, str) for part in parts)
+    ):
         return False
     identity = value[RECORD_WHEEL_IDENTITY]
     if identity is None:
@@ -668,11 +695,13 @@ def link_record(
         None if metadata is None else dict(metadata.hashes or {}),
         None if upload_time is None else upload_time.isoformat(),
         wheel_identity(parsed_wheel),
+        tuple(link.parsed_url_internal),
     )
 
 
 def link_from_record(record: object, *, source_url: str | None = None) -> Link:
-    if not isinstance(record, tuple) or len(record) != 8:
+    """Materialize a record that ``valid_record`` accepted at load time."""
+    if not isinstance(record, tuple) or len(record) != 9:
         raise ValueError("invalid catalog record")
     (
         url,
@@ -683,40 +712,20 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
         metadata,
         upload_time,
         _wheel_identity,
+        parts,
     ) = record
-    if not isinstance(url, str) or not isinstance(text, str):
-        raise ValueError("invalid catalog link")
-    if source_url is not None and not isinstance(source_url, str):
-        raise ValueError("invalid catalog source")
-    if hashes is not None and (
-        not isinstance(hashes, dict)
-        or not all(isinstance(key, str) for key in hashes)
-        or not all(isinstance(value, str) for value in hashes.values())
-    ):
-        raise ValueError("invalid catalog hashes")
-    if metadata is not None and (
-        not isinstance(metadata, dict)
-        or not all(isinstance(key, str) for key in metadata)
-        or not all(isinstance(value, str) for value in metadata.values())
-    ):
-        raise ValueError("invalid catalog metadata")
-    hashes_value = hashes if isinstance(hashes, dict) else None
-    metadata_value = metadata if isinstance(metadata, dict) else None
-    parsed_upload_time: datetime.datetime | None = None
-    if upload_time is not None:
-        if not isinstance(upload_time, str):
-            raise ValueError("invalid catalog upload time")
-        parsed_upload_time = parse_iso_datetime(upload_time)
     return Link.from_cached_record(
-        url,
-        parsed_url=urllib.parse.urlsplit(url),
+        url,  # ty:ignore[invalid-argument-type]
+        parsed_url=urllib.parse.SplitResult(*parts),  # ty:ignore[not-iterable]
         source_url=source_url,
-        text=text,
-        hashes=hashes_value or {},  # ty:ignore[invalid-argument-type]
-        requires_python=requires_python if isinstance(requires_python, str) else None,
-        yanked_reason=yanked if isinstance(yanked, str) else None,
+        text=text,  # ty:ignore[invalid-argument-type]
+        hashes=hashes,  # ty:ignore[invalid-argument-type]
+        requires_python=requires_python,  # ty:ignore[invalid-argument-type]
+        yanked_reason=yanked,  # ty:ignore[invalid-argument-type]
         metadata_file=(
-            MetadataFile(metadata_value) if metadata_value is not None else None  # ty:ignore[invalid-argument-type]
+            MetadataFile(metadata) if metadata is not None else None  # ty:ignore[invalid-argument-type]
         ),
-        upload_time=parsed_upload_time,
+        upload_time=(
+            parse_iso_datetime(upload_time) if upload_time is not None else None  # ty:ignore[invalid-argument-type]
+        ),
     )
