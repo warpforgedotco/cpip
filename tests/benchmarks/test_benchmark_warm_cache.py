@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from benchmark_support import flush_persistent_caches, reset_caches
+from benchmark_support import flush_persistent_caches, make_wheel, reset_caches
 from cpip.cli.fast_install import FastInstallMetadataCache, resolve_simple_wheelhouse
 from cpip.core.packaging import parse_requirement
 from cpip.core.urls import path_to_url
@@ -462,12 +462,47 @@ def stale_index(
             ],
         )
         session.get(page_url).close()
+
+    bulk_wheel = make_wheel(root, "bulk-dependency", "2.0.0")
+    bulk_page_url = SimpleIndexSource.project_page_url(INDEX_URL, "bulk-dependency")
+    bulk_links = [
+        Link.from_url(
+            f"https://files.invalid/bulk_dependency-1.{index}.0-py3-none-any.whl",
+            source_url=bulk_page_url,
+            text=f"bulk_dependency-1.{index}.0-py3-none-any.whl",
+        )
+        for index in range(400)
+    ]
+    bulk_links.append(
+        Link.from_url(
+            path_to_url(str(bulk_wheel)),
+            source_url=bulk_page_url,
+            text=bulk_wheel.name,
+        ),
+    )
+    save_links(cache, bulk_page_url, bulk_links)
+    session.get(bulk_page_url).close()
+
     cache_dir = str(root / "cache")
     os.makedirs(cache_dir)
-    assert len(resolve_index(session, cache_dir).candidates) > 10
+    assert len(resolve_stale_index(session, cache_dir).candidates) > 10
     flush_persistent_caches(cache_dir)
     reset_caches()
     return session, cache_dir
+
+
+def resolve_stale_index(session: object, cache_dir: str):
+    """resolve_index plus one PyPI-scale project (400 releases, one winner)."""
+    reset_caches()
+    return ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            index_url=INDEX_URL,
+            no_index=False,
+            session=session,
+            wheel_cache_dir=cache_dir,
+        ),
+        ignore_installed=True,
+    ).resolve([ROOT, "bulk-dependency"])
 
 
 def test_stale_index_revalidated_resolve(
@@ -479,6 +514,6 @@ def test_stale_index_revalidated_resolve(
     session, cache_dir = stale_index
 
     def resolve_stale() -> int:
-        return len(resolve_index(session, cache_dir).candidates)
+        return len(resolve_stale_index(session, cache_dir).candidates)
 
     assert benchmark(resolve_stale) > 10
