@@ -47,6 +47,20 @@ class _MissingCacheExpiry(enum.Enum):
 _MISSING_CACHE_EXPIRY = _MissingCacheExpiry.TOKEN
 
 
+class _NeverRaised(Exception):
+    """Placeholder transport exception for sessions that never hit the network."""
+
+
+class _FileTransportExceptions:
+    Timeout = _NeverRaised
+
+    SSLError = _NeverRaised
+
+    ProxyError = _NeverRaised
+
+    ConnectionError = _NeverRaised
+
+
 class HeaderDict:
     """Case-insensitive header mapping for cache- and file-backed responses."""
 
@@ -454,11 +468,15 @@ class NetworkSession:
 
                 request.headers = request_headers
 
-        self.ensure_requests_backend()
+        if request_url.startswith("file:"):
+            requests_exceptions: Any = _FileTransportExceptions
 
-        requests_exceptions = self.requests_exceptions
+        else:
+            self.ensure_requests_backend()
 
-        assert requests_exceptions is not None
+            requests_exceptions = self.requests_exceptions
+
+            assert requests_exceptions is not None
 
         attempts = self.retries + 1
 
