@@ -622,9 +622,7 @@ class CandidateProvider:
 
         loaded = load_catalog_checked(persistent_cache, source_url, generation)
 
-        groups = (
-            None if loaded is None else group_artifacts_by_version(loaded, name)
-        )
+        groups = None if loaded is None else group_artifacts_by_version(loaded, name)
 
         self.catalog_checked_group_cache[key] = groups
 
@@ -1791,9 +1789,13 @@ class CandidateProvider:
         if len(self.index_sources) != 1 or not groups:
             return None
 
-        _supported_tags, target_key = self.catalog_target_internal()
+        supported_tags, target_key = self.catalog_target_internal()
 
         allow_binary, allow_source = self.allowed_formats_internal(requirement)
+
+        catalog_key = (requirement.canonical_name, allow_binary, allow_source)
+
+        persistent_cache = getattr(self.session, "cache", None)
 
         cache_identity = (
             source_url,
@@ -1807,7 +1809,7 @@ class CandidateProvider:
 
         if choices is None:
             choices = load_choices(
-                getattr(self.session, "cache", None),
+                persistent_cache,
                 source_url,
                 generation,
                 target_key,
@@ -1819,6 +1821,8 @@ class CandidateProvider:
 
         if not choices:
             return None
+
+        dirty = False
 
         start, stop = self.catalog_summary_bounds(groups, requirement)
 
@@ -1866,7 +1870,18 @@ class CandidateProvider:
                 continue
 
             if version_text not in choices:
-                return None
+                if not self._fill_catalog_choice(
+                    catalog_key,
+                    supported_tags,
+                    choices,
+                    persistent_cache,
+                    source_url,
+                    generation,
+                    version,
+                ):
+                    return None
+
+                dirty = True
 
             seen_versions.add(version)
 
@@ -1900,6 +1915,17 @@ class CandidateProvider:
 
             descriptor_buckets[bucket].append(
                 (version, record, record_kind, tag_rank, source_url),
+            )
+
+        if dirty:
+            save_choices(
+                persistent_cache,
+                source_url,
+                generation,
+                target_key,
+                allow_binary,
+                allow_source,
+                choices,
             )
 
         if self.prefer_binary:
@@ -1970,8 +1996,6 @@ class CandidateProvider:
             for index, descriptor in enumerate(descriptors)
             if index not in preferred_set
         )
-
-        catalog_key = (requirement.canonical_name, allow_binary, allow_source)
 
         return self._generate_catalog_candidates(catalog_key, ordered)
 
@@ -2120,6 +2144,8 @@ class CandidateProvider:
 
         persistent_cache = getattr(self.session, "cache", None)
 
+        dirty_choices: set[tuple[str, str, str, bool, bool]] = set()
+
         descriptor_list: list[
             tuple[Version, tuple[object, ...], int, int | None, str]
         ] = []
@@ -2168,7 +2194,18 @@ class CandidateProvider:
                 version_text = version.public
 
                 if version_text not in choices:
-                    return None
+                    if not self._fill_catalog_choice(
+                        catalog_key,
+                        supported_tags,
+                        choices,
+                        persistent_cache,
+                        source_url,
+                        generation,
+                        version,
+                    ):
+                        return None
+
+                    dirty_choices.add(cache_identity)
 
                 choice = choices[version_text]
 
@@ -2198,6 +2235,17 @@ class CandidateProvider:
 
             if best is not None:
                 descriptor_list.append(best)
+
+        for dirty_identity in dirty_choices:
+            save_choices(
+                persistent_cache,
+                dirty_identity[0],
+                dirty_identity[1],
+                dirty_identity[2],
+                dirty_identity[3],
+                dirty_identity[4],
+                self.catalog_choice_cache[dirty_identity],
+            )
 
         exact_pin = any(
             specifier.operator in {"==", "==="} and not specifier.version.endswith(".*")
