@@ -180,7 +180,8 @@ def test_auth_credential_resolution(benchmark: BenchmarkFixture) -> None:
         count = 0
         for url in PAGE_URLS:
             resolved, username, password = auth.get_url_and_credentials(url)
-            assert username is None and password is None
+            assert username is None
+            assert password is None
             count += 1
         return count
 
