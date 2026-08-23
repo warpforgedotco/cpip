@@ -7,7 +7,7 @@ import os
 import zipfile
 
 from cpip.install.wheel_archive_cache import CachedWheelArchive
-from cpip.resolution.archive import (
+from cpip.platform.archive import (
     WheelArchive,
     WheelhouseUnavailable,
 )

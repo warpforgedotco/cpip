@@ -21,7 +21,7 @@ from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
 from cpip.install.target import InstallTarget
 from cpip.install.uninstall import DistributionUninstaller
-from cpip.install.unpacking import unzip_file
+from cpip.platform.unpacking import unzip_file
 from cpip.install.wheel_transaction import WheelInstaller
 from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.files import parse_requirements

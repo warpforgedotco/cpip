@@ -847,7 +847,7 @@ def wheel_metadata(
 
             return list(dependencies), pure
 
-    from cpip.resolution.archive import WheelArchive, WheelhouseUnavailable
+    from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
 
     try:
         with open(path, "rb") as wheel_file:
@@ -1078,7 +1078,7 @@ def install_resolved_pure_wheels(
 
     # Deferred: extraction only runs when no cached tree could be cloned.
     from cpip.install.wheel_archive import mode_from_external_attr
-    from cpip.resolution.archive import WheelArchive, WheelhouseUnavailable
+    from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
 
     target = os.path.abspath(target)
 

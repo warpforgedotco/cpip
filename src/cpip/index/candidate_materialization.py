@@ -58,13 +58,15 @@ from cpip.index.source_models import (
 )
 from cpip.index.vcs import git_revision, is_immutable_vcs_link
 from cpip.index.vcs import vcs_scheme as parse_vcs_scheme
-from cpip.resolution.archive import WheelArchive, WheelhouseUnavailable
+from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
 
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Iterable, Iterator
     from typing import Any
+
+    from cpip.core.http import HttpSession
 
 logger = logging.getLogger(__name__)
 
@@ -475,7 +477,7 @@ class CandidateMaterializer:
         build_isolation: bool = True,
         dry_run: bool = False,
         compute_source_hashes: bool = False,
-        session: Any = None,
+        session: HttpSession | None = None,
     ) -> None:
         self.build_options = build_options
 
@@ -1169,9 +1171,7 @@ class CandidateMaterializer:
 
         try:
             if self.session is None:
-                from cpip._vendor import requests
-
-                self.session = requests.Session()
+                return None
 
             response = self.session.get(url)
 

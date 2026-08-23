@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 import pytest
-from cpip.install import tar_reader
+from cpip.platform import tar_reader
 
 
 def _write_tar(
@@ -511,7 +511,7 @@ class TestFastUntarEmptyArchive:
         extracted_names[0] after a successful-but-empty fast_untar() raised
         IndexError instead of the (correct) no-op.
         """
-        from cpip.install.unpacking import untar_file
+        from cpip.platform.unpacking import untar_file
 
         archive_path = tmp_path / "empty.tar.gz"
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from cpip.core.errors import InstallationError
-from cpip.install import unpacking
+from cpip.platform import unpacking
 
 
 def _write_zip(

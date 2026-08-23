@@ -125,28 +125,16 @@ def unpack_source(source: str, destination: str) -> str:
 
 def unpack_source_internal(source: str, destination: str) -> str:
     # Only sdist/archive sources reach this -- an already-unpacked directory
-    # source never calls it, so keep tarfile/zipfile off that common path.
-    import tarfile
-    import zipfile
+    # source never calls it, so keep archive machinery off the common path.
+    from cpip.core.errors import InstallationError
+    from cpip.platform.unpacking import ArchiveExtractor
 
     source_text = os.fspath(source)
     destination_text = os.fspath(destination)
-    if source_text.endswith(".zip"):
-        with zipfile.ZipFile(source_text) as archive:
-            archive.extractall(destination_text)
-    elif os.path.basename(source_text).endswith(
-        (".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".tar.lzma", ".tar"),
-    ):
-        with tarfile.open(source_text) as archive:
-            archive.extractall(destination_text)
-    elif zipfile.is_zipfile(source_text):
-        with zipfile.ZipFile(source_text) as archive:
-            archive.extractall(destination_text)
-    elif tarfile.is_tarfile(source_text):
-        with tarfile.open(source_text) as archive:
-            archive.extractall(destination_text)
-    else:
-        raise BuildError(f"Unsupported source archive: {source}")
+    try:
+        ArchiveExtractor(source_text, destination_text, flatten=False).extract()
+    except InstallationError as exc:
+        raise BuildError(f"Cannot unpack source archive {source_text}: {exc}") from exc
     return single_project_root_internal(destination)
 
 

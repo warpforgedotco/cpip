@@ -19,7 +19,7 @@ from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
 from cpip.index.source_models import CandidateRecord
 from cpip.resolution.api import ResolutionEngine
-from cpip.resolution.archive import WheelArchive
+from cpip.platform.archive import WheelArchive
 
 from ..wheel_helpers import make_wheel
 
@@ -244,7 +244,7 @@ def test_materialized_candidate_keeps_the_resolver_layout(tmp_path: Path) -> Non
     candidate: it is what lets the installer open the wheel again without
     another central-directory scan."""
     from cpip.install.wheel_archive_runtime import RawWheelArchive, open_wheel_archive
-    from cpip.resolution import archive as archive_module
+    from cpip.platform import archive as archive_module
 
     wheel = _write_wheel_with_script(tmp_path, "layout-pkg", "1.0")
     provider = CandidateProvider.from_options(find_links=[str(tmp_path)], no_index=True)

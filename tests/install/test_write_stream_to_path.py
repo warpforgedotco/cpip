@@ -5,7 +5,7 @@ import random
 from pathlib import Path
 
 import pytest
-from cpip.install import unpacking
+from cpip.platform import unpacking
 
 
 class TestWriteStreamToPathPartialWrites:
