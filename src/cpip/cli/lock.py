@@ -335,6 +335,7 @@ def run_lock(args: list[str]) -> int:
             options.find_links,
             string_requirements,
             constraints=constraints,
+            session=resolution_session,
         )
 
     if plan is None and requirements:
