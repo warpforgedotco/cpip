@@ -174,9 +174,17 @@ BUILTIN_BACKENDS = (
     ("subversion", "svn", ".svn"),
 )
 
+BUILTIN_NAMES = frozenset(name for _, name, _ in BUILTIN_BACKENDS)
+
 
 class VcsSupport:
     registry_internal: dict[str, VersionControl] = {}
+    # Set once the registry stops being exactly the builtin table -- a backend
+    # registered from outside this package, or a builtin removed -- which is
+    # what ``get_backend_for_dir`` checks before trusting BUILTIN_BACKENDS to
+    # describe every backend. Class-level like the registry it describes,
+    # since a second ``VcsSupport()`` shares that registry.
+    registry_customized_internal: bool = False
     schemes = ["ssh", "git", "hg", "bzr", "sftp", "svn"]
 
     def __init__(self) -> None:
@@ -229,37 +237,20 @@ class VcsSupport:
         if cls.name not in self.registry_internal:
             self.registry_internal[cls.name] = cls()
             logger.debug("Registered VCS backend: %s", cls.name)
+        if cls.name not in BUILTIN_NAMES:
+            VcsSupport.registry_customized_internal = True
 
     def unregister(self, name: str) -> None:
         if name in self.registry_internal:
             del self.registry_internal[name]
+            VcsSupport.registry_customized_internal = True
 
     def get_backend_for_dir(self, location: str) -> VersionControl | None:
         """Return a VersionControl object if a repository of that type is found
         at the given directory.
         """
-        # The innermost root wins below, and no root can be deeper than
-        # ``location`` itself: a backend whose marker directory sits right
-        # in ``location`` is the answer without asking the others -- each
-        # of which would otherwise spawn its command (``hg root``,
-        # ``bzr root``, ``svn info``) just to learn it owns nothing here.
-        #
-        # That first pass reads nothing but each backend's marker directory
-        # name, which BUILTIN_BACKENDS states directly (and
-        # ``test_builtin_backend_table_matches_the_backend_classes`` pins it
-        # against the
-        # classes). So the module holding the winner is the only one that has
-        # to be imported -- worth avoiding, since between them the four drag
-        # in ``configparser`` and a second subprocess stack for repositories
-        # the caller does not have. Last match still wins, in the same
-        # registration order as loading all four and walking the registry.
-        found_backend = None
-        for module_name, backend_name, dirname in BUILTIN_BACKENDS:
-            if os.path.exists(os.path.join(location, dirname)):
-                found_backend = (module_name, backend_name)
-        if found_backend is not None:
-            self._load_builtin_backend(found_backend[0])
-            found = self.registry_internal[found_backend[1]]
+        found = self._backend_owning_directory(location)
+        if found is not None:
             logger.debug("Determine that %s uses VCS: %s", location, found.name)
             return found
         self._ensure_builtin_backends_loaded()
@@ -280,6 +271,46 @@ class VcsSupport:
         # i.e. the backend representing the inner-most repository.
         inner_most_repo_path = max(vcs_backends, key=len)
         return vcs_backends[inner_most_repo_path]
+
+    def _backend_owning_directory(self, location: str) -> VersionControl | None:
+        """The backend whose marker directory sits in ``location`` itself.
+
+        The innermost root wins in ``get_backend_for_dir``, and no root can be
+        deeper than ``location``, so a marker directory right here answers the
+        question without asking the others -- each of which would otherwise
+        spawn its command (``hg root``, ``bzr root``, ``svn info``) just to
+        learn it owns nothing. Last match wins, as it did when this walked the
+        registry.
+
+        The pass reads nothing but each backend's ``dirname``, which
+        BUILTIN_BACKENDS states directly, so only the module holding the
+        winner has to be imported -- worth avoiding, since between them the
+        four drag in ``configparser`` and a second subprocess stack for
+        repositories the caller does not have.
+
+        ``register`` and ``unregister`` are public, though, and the table
+        cannot describe a backend from outside this package -- nor can it
+        place one in registry order, which is what decides a tie. Once the
+        registry stops matching the table, this asks every backend directly
+        again, exactly as before.
+        """
+
+        if self.registry_customized_internal:
+            self._ensure_builtin_backends_loaded()
+            found = None
+            for vcs_backend in self.registry_internal.values():
+                if vcs_backend.is_repository_directory(location):
+                    found = vcs_backend
+            return found
+
+        found_backend = None
+        for module_name, backend_name, dirname in BUILTIN_BACKENDS:
+            if os.path.exists(os.path.join(location, dirname)):
+                found_backend = (module_name, backend_name)
+        if found_backend is None:
+            return None
+        self._load_builtin_backend(found_backend[0])
+        return self.registry_internal[found_backend[1]]
 
     def get_backend_for_scheme(self, scheme: str) -> VersionControl | None:
         """Return a VersionControl object or None."""

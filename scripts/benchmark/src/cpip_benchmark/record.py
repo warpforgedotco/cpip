@@ -47,8 +47,46 @@ def on_battery() -> bool:
     return "Battery Power" in pmset("batt")
 
 
+THERMAL_LIMIT_KEYS = ("CPU_Speed_Limit", "CPU_Scheduler_Limit")
+
+
+def parse_thermal_limits(report: str) -> list[int]:
+    """The CPU limit percentages ``pmset -g therm`` reports, if any."""
+    limits = []
+    for line in report.splitlines():
+        key, separator, value = line.partition("=")
+        if not separator or key.strip() not in THERMAL_LIMIT_KEYS:
+            continue
+        try:
+            limits.append(int(value.strip()))
+        except ValueError:
+            continue
+    return limits
+
+
 def is_throttled() -> bool:
-    return "CPU_Speed_Limit" in pmset("therm")
+    """Whether the CPU is actually being held below full speed.
+
+    ``pmset`` prints these keys whenever it has a CPU power status to report
+    at all, and the unthrottled value is 100 -- so reading the key's presence
+    as throttling refuses to record on a perfectly idle machine.
+    """
+    return any(limit < 100 for limit in parse_thermal_limits(pmset("therm")))
+
+
+def load_average() -> float | None:
+    """The 1-minute load average, or ``None`` where there is no such thing.
+
+    ``os.getloadavg`` does not exist on Windows, and nothing restricts this
+    command to Unix.
+    """
+    getloadavg = getattr(os, "getloadavg", None)
+    if getloadavg is None:
+        return None
+    try:
+        return getloadavg()[0]
+    except OSError:
+        return None
 
 
 def busiest_processes(count: int = 5) -> list[str]:
@@ -72,7 +110,7 @@ def busiest_processes(count: int = 5) -> list[str]:
 
 def preflight_failures(
     *,
-    load: float,
+    load: float | None,
     max_load: float,
     battery: bool,
     throttled: bool,
@@ -83,7 +121,15 @@ def preflight_failures(
     machine to test it on.
     """
     failures = []
-    if load > max_load:
+    if load is None:
+        # Refusing is the same call the rest of this module makes: an
+        # unverifiable machine is exactly the one whose numbers look
+        # authoritative and are not.
+        failures.append(
+            "this platform reports no load average, "
+            "so a busy machine cannot be ruled out",
+        )
+    elif load > max_load:
         failures.append(
             f"load average {load:.2f} is above the {max_load:.2f} ceiling",
         )
@@ -174,7 +220,7 @@ def main() -> int:
     args = parser.parse_args()
 
     failures = preflight_failures(
-        load=os.getloadavg()[0],
+        load=load_average(),
         max_load=args.max_load,
         battery=on_battery(),
         throttled=is_throttled(),

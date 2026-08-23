@@ -118,6 +118,13 @@ one. A baseline recorded under load is worse than no baseline: it looks
 authoritative and quietly poisons every comparison made against it. `--force`
 overrides, and says so in the output.
 
+"Not thermally limited" means `pmset -g therm` reports no CPU limit below
+100; the keys are printed whenever there is a CPU power status at all, so
+their presence alone is not throttling. A platform with no load average of
+its own -- Windows has no `os.getloadavg` -- is a blocker too, on the same
+reasoning: an unverifiable machine is exactly the one whose numbers look
+authoritative and are not.
+
 Note that `cpip-bench` measures whatever `--cpip-python` points at, which
 defaults to this harness's own interpreter -- pinned to 3.10 by
 `.python-version`, not the 3.12 the CodSpeed job uses. `meta.json` records

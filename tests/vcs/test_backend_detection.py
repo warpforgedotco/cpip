@@ -3,8 +3,13 @@ checkout's own directory carries the marker directory."""
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
+import cpip
 import pytest
 from cpip.vcs.git import Git
 from cpip.vcs.versioncontrol import BUILTIN_BACKENDS, VersionControl, vcs
@@ -115,17 +120,75 @@ def test_builtin_backend_table_matches_the_backend_classes() -> None:
         assert type(backend).__module__ == f"cpip.vcs.{module_name}"
 
 
-def test_marker_detection_imports_only_the_matching_backend(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_marker_detection_imports_only_the_matching_backend(tmp_path: Path) -> None:
     """A checkout carrying one marker directory loads that backend's module
-    and leaves the other three unimported."""
-    monkeypatch.setattr(vcs, "_builtin_backends_loaded", False)
-    monkeypatch.setattr(
-        vcs,
-        "_ensure_builtin_backends_loaded",
-        lambda: pytest.fail("all four backends were loaded"),
-    )
-    (tmp_path / ".git").mkdir()
+    and leaves the other three unimported.
 
-    assert vcs.get_backend_for_dir(str(tmp_path)) is vcs.registry_internal["git"]
+    In a fresh interpreter, because this module has already imported Git and
+    earlier tests here load all four through ``no_vcs_commands`` -- so only a
+    subprocess can tell what detection alone pulled in.
+    """
+    (tmp_path / ".git").mkdir()
+    program = textwrap.dedent(
+        """
+        import sys
+        from cpip.vcs.versioncontrol import vcs
+
+        backend = vcs.get_backend_for_dir(sys.argv[1])
+        loaded = sorted(
+            name.rpartition(".")[2]
+            for name in sys.modules
+            if name.startswith("cpip.vcs.")
+        )
+        print(backend.name)
+        print(" ".join(loaded))
+        """
+    )
+    source = Path(cpip.__file__).resolve().parents[1]
+
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "PYTHONPATH": str(source)},
+    )
+
+    name, loaded = result.stdout.splitlines()[:2]
+    modules = set(loaded.split())
+
+    assert name == "git"
+    assert "git" in modules
+    assert not modules & {"bazaar", "mercurial", "subversion"}
+
+
+def test_registered_backend_outstays_a_builtin_marker(tmp_path: Path) -> None:
+    """A backend registered from outside this package still wins a directory
+    the builtin table also claims.
+
+    ``register`` is public, and the marker table cannot describe such a
+    backend or place it in registry order -- so registering one has to send
+    detection back to asking every backend directly.
+    """
+
+    class Custom(VersionControl):
+        name = "custom"
+        dirname = ".git"
+        repo_name = "custom"
+
+    (tmp_path / ".git").mkdir()
+    customized = vcs.registry_customized_internal
+    # Load the builtins first, so ``Custom`` is unambiguously the last
+    # registration and the expected winner does not depend on what earlier
+    # tests in the session happened to load.
+    vcs._ensure_builtin_backends_loaded()
+    vcs.register(Custom)
+
+    try:
+        found = vcs.get_backend_for_dir(str(tmp_path))
+    finally:
+        vcs.unregister("custom")
+        type(vcs).registry_customized_internal = customized
+
+    assert found is not None
+    assert found.name == "custom"
