@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import re
 import sys
-import sysconfig
 from collections.abc import Callable, Collection, Mapping
 from functools import lru_cache
 
@@ -704,20 +703,78 @@ def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag,
     )
 
 
-def current_platform_tag() -> str:
-    platform_name = sysconfig.get_platform()
+_MACOS_VERSION_PLIST = "/System/Library/CoreServices/SystemVersion.plist"
 
+
+def macos_product_version() -> str | None:
+    """``platform.mac_ver()[0]``, without ``plistlib`` behind it.
+
+    ``mac_ver`` pulls one string out of a 600-byte XML plist and pays
+    ``plistlib`` -- and ``xml.parsers.expat``, ``datetime``, ``struct`` and
+    ``binascii`` behind that -- to do it, on every command that has to name
+    the running platform. Scanning for the one key is exact for the file macOS
+    actually ships and returns ``None`` for anything it does not recognize, so
+    a binary plist, a relocated file or a changed layout falls back to the
+    stdlib reader rather than guessing.
+    """
+
+    try:
+        with open(_MACOS_VERSION_PLIST, "rb") as handle:
+            text = handle.read(65536)
+
+    except OSError:
+        return None
+
+    if not text.startswith(b"<?xml"):
+        return None
+
+    key = text.find(b"<key>ProductVersion</key>")
+
+    if key < 0:
+        return None
+
+    start = text.find(b"<string>", key)
+
+    if start < 0 or text.find(b"<key>", key + 1, start) >= 0:
+        # Another key intervened, so that value belongs to something else.
+        return None
+
+    start += len(b"<string>")
+
+    end = text.find(b"</string>", start)
+
+    if end < 0:
+        return None
+
+    try:
+        return text[start:end].decode("ascii")
+
+    except UnicodeDecodeError:
+        return None
+
+
+def current_platform_tag() -> str:
     if sys.platform == "darwin":
         import platform
 
-        mac_version = platform.mac_ver()[0].split(".")
+        release = macos_product_version()
+
+        if release is None:
+            release = platform.mac_ver()[0]
+
+        mac_version = release.split(".")
 
         if len(mac_version) >= 2 and all(part.isdigit() for part in mac_version[:2]):
-            platform_name = (
-                f"macosx_{mac_version[0]}_{mac_version[1]}_{platform.machine()}"
-            )
+            return f"macosx_{mac_version[0]}_{mac_version[1]}_{platform.machine()}".replace(
+                "-", "_"
+            ).replace(".", "_")
 
-    return platform_name.replace("-", "_").replace(".", "_")
+    # Deferred: `sysconfig` pulls `threading` in behind it, and this module is
+    # imported for its filename and metadata parsers by paths (fast install,
+    # list, show, check) that never ask for a platform tag.
+    import sysconfig
+
+    return sysconfig.get_platform().replace("-", "_").replace(".", "_")
 
 
 @memoized(4096)
