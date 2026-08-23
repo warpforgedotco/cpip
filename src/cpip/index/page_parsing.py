@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 import os
 import urllib.parse
-from typing import Any, Callable
+from collections.abc import Callable
 
 from cpip.core.errors import InstallationError
-from cpip.core.http import HttpSession
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.catalog_cache import load_links, save_links
 from cpip.index.datetime import parse_iso_datetime
@@ -17,6 +16,11 @@ from cpip.index.links import Link
 from cpip.index.source_models import MetadataFile
 
 LinkFactory = Callable[..., Link]
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from cpip.core.http import HttpSession
 
 
 class IndexContent:
@@ -228,7 +232,7 @@ def metadata_file_from_attrs(attrs: dict[str, str | None]) -> MetadataFile | Non
     return None
 
 
-def metadata_file_from_json(file_data: dict[str, Any]) -> MetadataFile | None:
+def metadata_file_from_json(file_data: dict[str, object]) -> MetadataFile | None:
     if "core-metadata" in file_data:
         return metadata_file_from_json_value(file_data["core-metadata"])
     if "dist-info-metadata" in file_data:
@@ -236,7 +240,7 @@ def metadata_file_from_json(file_data: dict[str, Any]) -> MetadataFile | None:
     return None
 
 
-def metadata_file_from_json_value(value: Any) -> MetadataFile | None:
+def metadata_file_from_json_value(value: object) -> MetadataFile | None:
     if isinstance(value, dict):
         return MetadataFile({str(name): str(hash_) for name, hash_ in value.items()})
     if value is True:
@@ -304,7 +308,20 @@ def join_index_url(base_url: str, href: str) -> str:
         joined = _join_relative_reference(base_url, href)
         if joined is not None:
             return joined
-    return urllib.parse.urljoin(base_url, href)
+    return _urljoin_compat(base_url, href)
+
+
+def _urljoin_compat(base_url: str, href: str) -> str:
+    """Keep the pre-3.14 treatment of an explicitly empty fragment."""
+    joined = urllib.parse.urljoin(base_url, href)
+    if (
+        base_url
+        and href.count("#") == 1
+        and href.endswith("#")
+        and joined.endswith("#")
+    ):
+        return joined[:-1]
+    return joined
 
 
 def _join_relative_reference(base_url: str, href: str) -> str | None:
