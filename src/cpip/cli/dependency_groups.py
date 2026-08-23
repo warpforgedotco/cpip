@@ -38,7 +38,9 @@ def toml_module() -> Any:
     try:
         import tomllib
     except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
-        from cpip._vendor import tomli as tomllib
+        from cpip._vendor import tomli
+
+        return tomli
     return tomllib
 
 

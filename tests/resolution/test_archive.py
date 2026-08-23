@@ -155,8 +155,6 @@ class TestWheelArchiveMatchesRealZipfile:
         with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
             info = zipfile.ZipInfo("with-extra.txt")
 
-            # A well-formed (but non-zip64) extra field: id 0x5455
-            # ("UT", Info-ZIP Unix extra) carrying a 5-byte payload.
             info.extra = b"\x55\x54\x05\x00\x01\x00\x00\x00\x00"
 
             archive.writestr(info, b"payload with an extra field")
@@ -183,8 +181,6 @@ class TestWheelArchiveMatchesRealZipfile:
         archive = _open(path)
 
         try:
-            # The long-named member sits before the filler, outside the
-            # tail region of this >64KB archive.
             assert archive.members[long_name][4] < path.stat().st_size - (22 + 65535)
 
             assert archive.read(long_name) == b"long-named member contents"
@@ -235,10 +231,6 @@ class TestWheelArchiveFallback:
             archive.writestr("only.txt", "second record")
 
         with zipfile.ZipFile(path) as real:
-            # Confirm the fixture actually has two distinct central
-            # directory records under the same name, matching what a real
-            # (if unusual) zip tool could produce -- not an artifact of
-            # this test's own construction.
             assert len(real.infolist()) == 2
 
             assert {info.filename for info in real.infolist()} == {"only.txt"}
@@ -259,10 +251,6 @@ class TestWheelArchiveFallback:
 
         eocd = raw.rindex(b"PK\x05\x06")
 
-        # size_cd is the little-endian L at byte 12 of the EOCD record
-        # (<4s4H2LH). 0x7FFFFFF0 is huge but not the 0xFFFFFFFF zip64
-        # sentinel, so it reaches the bounds check rather than the
-        # sentinel check.
         raw[eocd + 12 : eocd + 16] = (0x7FFFFFF0).to_bytes(4, "little")
 
         path.write_bytes(bytes(raw))
@@ -314,7 +302,6 @@ class TestWheelArchiveFallback:
 
         cd = raw.index(b"PK\x01\x02")
 
-        # extra_size is the little-endian H at byte 30 of the record.
         raw[cd + 30 : cd + 32] = (0xFF00).to_bytes(2, "little")
 
         path.write_bytes(bytes(raw))
@@ -345,14 +332,9 @@ class TestWheelArchiveFallback:
 
         raw = bytearray(path.read_bytes())
 
-        # Forcing zipfile's own writer to emit a genuine zip64 sentinel
-        # needs a multi-GB member; patch the central directory record's
-        # compressed/uncompressed-size fields to the 0xFFFFFFFF sentinel
-        # directly instead, to exercise the same detection this guards
-        # against on a real oversized archive.
         cd_offset = raw.index(zipfile.stringCentralDir)  # ty:ignore[unresolved-attribute]
 
-        compressed_size_offset = cd_offset + 20  # _CD_COMPRESSED_SIZE
+        compressed_size_offset = cd_offset + 20
 
         struct.pack_into("<L", raw, compressed_size_offset, 0xFFFFFFFF)
 
@@ -408,13 +390,9 @@ class TestWheelArchiveFallback:
 
         raw = bytearray(path.read_bytes())
 
-        # Flip general-purpose bit 0 (encrypted) on the sole central
-        # directory record.
         cd_offset = raw.index(zipfile.stringCentralDir)  # ty:ignore[unresolved-attribute]
 
-        flag_offset = (
-            cd_offset + 8
-        )  # signature(4) + version-made-by(2) + version-needed(2)
+        flag_offset = cd_offset + 8
 
         raw[flag_offset] |= 0x1
 
@@ -430,9 +408,6 @@ class TestWheelArchiveFallback:
 
         raw = bytearray(path.read_bytes())
 
-        # The payload is stored (uncompressed) right after the local file
-        # header (30 bytes) + "only.txt" (8 bytes) -- flip a byte inside it
-        # to break the CRC check.
         data_offset = 30 + len(b"only.txt")
 
         raw[data_offset] ^= 0xFF
@@ -497,7 +472,6 @@ def _write_counting_wheel(path: Path, members: int) -> dict[str, bytes]:
 @pytest.mark.skipif(not hasattr(os, "pread"), reason="positioned reads need os.pread")
 def test_file_descriptor_reads_use_positioned_reads(tmp_path: Path) -> None:
     path = tmp_path / "pkg-1.0-py3-none-any.whl"
-    # Enough members that they sit outside the 64 KiB tail buffer.
     contents = _write_counting_wheel(path, 3000)
     file = _CountingFileIO(os.fspath(path))
     archive = WheelArchive(file)

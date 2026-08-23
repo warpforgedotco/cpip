@@ -76,9 +76,6 @@ class HelpFormatter(argparse.HelpFormatter):
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        # Filling the width in here is what keeps `shutil` off the path; the
-        # remaining parameters are passed through positionally because 3.14
-        # adds more of them after `width`.
         super().__init__(
             prog,
             indent_increment,

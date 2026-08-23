@@ -54,7 +54,6 @@ def command_args_to_argv(
 
 
 def _argv_item(arg: CommandArg) -> str | bytes | PathLike[Any]:
-    # A HiddenText argument exposes its real value as ``secret``.
     secret = getattr(arg, "secret", None)
     if isinstance(secret, str):
         return secret
@@ -80,7 +79,6 @@ def call_subprocess(
     cwd: str | None = None,
     extra_environ: dict[str, str] | None = None,
 ) -> str:
-    # Deferred: the stdlib module is needed only when a process is run.
     import subprocess
 
     log_level = logging.INFO if show_stdout else VERBOSE

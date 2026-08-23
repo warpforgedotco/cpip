@@ -76,27 +76,13 @@ def freeze(
         installations[req.canonical_name] = req
 
     if requirement:
-        # Only `-r`/`--requirement` needs requirement-file parsing, so a plain
-        # `cpip freeze` never pays for the resolution package.
         from cpip.resolution.files.parser import COMMENT_RE
         from cpip.resolution.input_requirements import (
             install_req_from_editable,
             install_req_from_line,
         )
 
-        # the options that don't get turned into an InstallRequirement
-
-        # should only be emitted once, even if the same option is in multiple
-
-        # requirements files, so we need to keep track of what has been emitted
-
-        # so that we don't emit it again if it's seen again
-
         emitted_options: set[str] = set()
-
-        # keep track of which files a requirement is in so that we can
-
-        # give an accurate warning if a requirement appears multiple times.
 
         req_files: dict[str, list[str]] = collections.defaultdict(list)
 
@@ -163,10 +149,6 @@ def freeze(
                         line_req_canonical_name = canonicalize_name(line_req.name)
 
                         if line_req_canonical_name not in installations:
-                            # either it's not installed, or it is installed
-
-                            # but has been processed already
-
                             if not req_files[line_req.name]:
                                 logger.warning(
                                     "Requirement file [%s] contains %s, but "
@@ -204,10 +186,6 @@ def freeze(
 
                             req_files[line_req.name].append(req_file_path)
 
-        # Warn about requirements that were included multiple times (in a
-
-        # single requirements file or in different requirements files).
-
         for name, files in req_files.items():
             if len(files) > 1:
                 logger.warning(
@@ -228,8 +206,6 @@ def format_as_name_version(dist: LightDistribution) -> str:
         dist_version = dist.version
 
     except InvalidVersion:
-        # legacy version
-
         return f"{dist.raw_name}==={dist.raw_version}"
 
     else:
@@ -242,8 +218,6 @@ def get_editable_info(dist: LightDistribution) -> EditableInfo:
     FrozenRequirement.from_dist().
 
     """
-    # Only editable installs reach this, and it's the only place freeze
-    # needs VCS backends -- keep them off every other `cpip freeze` run.
     from cpip.vcs.errors import BadCommand
     from cpip.vcs.versioncontrol import RemoteNotFoundError, RemoteNotValidError, vcs
 
@@ -364,13 +338,9 @@ class FrozenRequirement:
             direct_url = dist.direct_url
 
             if direct_url:
-                # if PEP 610 metadata is present, use it
-
                 req = direct_url.as_pep440_direct_reference(dist.raw_name)
 
             else:
-                # name==version requirement
-
                 req = format_as_name_version(dist)
 
         return cls(dist.raw_name, req, editable, comments=comments)

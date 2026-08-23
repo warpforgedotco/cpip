@@ -36,7 +36,6 @@ def test_install_requested_basic(script: CpipTestEnvironment, data: TestData) ->
         "require_simple",
     )
     assert_requested_present(script, result, "require_simple", "1.0")
-    # dependency is not REQUESTED
     assert_requested_absent(script, result, "simple", "3.0")
 
 
@@ -75,7 +74,6 @@ def test_install_requested_dep_in_requirements(
         script.scratch_path / "requirements.txt",
     )
     assert_requested_present(script, result, "require_simple", "1.0")
-    # simple must have REQUESTED because it is in requirements.txt
     assert_requested_present(script, result, "simple", "2.0")
 
 
@@ -97,7 +95,6 @@ def test_install_requested_reqs_and_constraints(
         script.scratch_path / "constraints.txt",
     )
     assert_requested_present(script, result, "require_simple", "1.0")
-    # simple must not have REQUESTED because it is merely a constraint
     assert_requested_absent(script, result, "simple", "2.0")
 
 
@@ -121,7 +118,6 @@ def test_install_requested_in_reqs_and_constraints(
         script.scratch_path / "constraints.txt",
     )
     assert_requested_present(script, result, "require_simple", "1.0")
-    # simple must have REQUESTED because it is in requirements.txt
     assert_requested_present(script, result, "simple", "2.0")
 
 
@@ -140,7 +136,6 @@ def test_install_requested_from_cli_with_constraint(
         script.scratch_path / "constraints.txt",
         "simple",
     )
-    # simple must have REQUESTED because it was provided on the command line
     assert_requested_present(script, result, "simple", "2.0")
 
 
@@ -160,5 +155,4 @@ def test_install_requested_from_cli_with_url_constraint(
         script.scratch_path / "constraints.txt",
         "pip-test-package",
     )
-    # pip-test-package must have REQUESTED because it was provided on the command line
     assert_requested_present(script, result, "pip_test_package", "0.1.1")

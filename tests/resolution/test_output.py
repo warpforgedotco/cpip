@@ -48,7 +48,6 @@ def test_run_candidate_operation_runs_remote_wheels_concurrently_in_order() -> N
             if active == len(candidates):
                 all_started.set()
         assert all_started.wait(timeout=5)
-        # Finish in reverse order to verify ordered result assembly.
         index = indexes[id(candidate)]
         time.sleep((len(candidates) - index) * 0.005)
         with lock:

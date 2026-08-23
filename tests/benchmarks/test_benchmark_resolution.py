@@ -23,10 +23,6 @@ def resolve(wheelhouse: Path, requirements: list[str]) -> int:
         provider=CandidateProvider.from_options(
             find_links=[str(wheelhouse)],
             no_index=True,
-            # ``cli/install.py`` and ``cli/lock.py`` both pass a cache
-            # directory, which is what makes the materializer keep a
-            # persistent metadata cache. Leaving it unset here measured a
-            # configuration no real install uses.
             wheel_cache_dir=cold_metadata_cache_dir(),
         ),
         ignore_installed=True,

@@ -12,11 +12,6 @@ from cpip.index.links import SOURCE_ARCHIVE_SUFFIXES
 
 class LocalSourceEntry(NamedTuple):
     path: str
-    # The stat-based identity is computed on first use by the Link built
-    # from the entry (Link.artifact_kind / candidate_metadata_fingerprint),
-    # not while scanning: a wheelhouse directory holds thousands of entries
-    # and a resolve touches the metadata of a fraction of them, so a stat
-    # per entry here was mostly wasted syscalls.
     identity: str | None
     stat_identity: tuple[int, int, int] | None
 
@@ -66,9 +61,6 @@ def local_source_snapshot(
                 normalized_suffixes
             ):
                 continue
-            # is_file() follows symlinks like stat() did and answers from the
-            # directory entry's type without a syscall on the common
-            # filesystems; only a symlink costs a stat.
             try:
                 if not entry.is_file():
                     continue

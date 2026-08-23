@@ -19,9 +19,6 @@ if TYPE_CHECKING:
 REQ_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
-# frozenset(), unlike (), is not a singleton -- every call allocates. Most
-# requirements have no extras, so this constant is reused instead of paying
-# for a fresh empty frozenset on every one of them.
 EMPTY_FROZENSET: frozenset[str] = frozenset()
 
 
@@ -31,13 +28,6 @@ def safe_extra(extra: str) -> str:
 
 @memoized(8)
 def default_environment(extra: str | None = None) -> dict[str, str]:
-    # Only reached when a requirement actually carries an environment
-    # marker (see marker_applies' early exit), so keep it off the far more
-    # common marker-free parse's import cost. Every field but "extra" is
-    # fixed for the life of the process, so a cache miss only ever pays
-    # the platform-module cost once per distinct `extra` value seen
-    # (currently always None -- _marker_applies_cached reads "extra" from
-    # its own extras set, not this dict's field).
     import platform
 
     impl = platform.python_implementation()
@@ -74,8 +64,6 @@ class Specifier:
 
     __slots__ = ("is_wildcard", "operator", "parsed_version", "version")
 
-    # Declared because __init__ writes them through object.__setattr__,
-    # which no checker can follow back to an attribute.
     operator: str
     version: str
     parsed_version: Version | None
@@ -119,14 +107,12 @@ class Specifier:
         operator = self.operator
         other = self.parsed_version
 
-        if other is None:  # ===
+        if other is None:
             return version.public == self.version
 
         if operator == "==":
             if self.is_wildcard:
                 return _prefix_matches(version, other)
-            # A clause without a local label matches every local version
-            # of its release; one with a label matches exactly.
             return version == other or (
                 bool(version[3]) and not other[3] and version[:3] == other[:3]
             )
@@ -148,9 +134,6 @@ class Specifier:
             if not version > other:
                 return False
             suffix = version[2]
-            # Not a post-release of V itself (V with post/dev/local removed
-            # equals the candidate's) unless V is a post-release, and not a
-            # local version of V.
             if suffix[2] == 1 and other[2][2] == 0:
                 pre_rank, pre_number = suffix[0], suffix[1]
                 base_suffix = (
@@ -165,8 +148,6 @@ class Specifier:
         if operator == "<":
             if not version < other:
                 return False
-            # Not a prerelease of V itself -- anything from V.dev0 up --
-            # unless V is a prerelease.
             if version.is_prerelease and not other.is_prerelease:
                 other_suffix = other[2]
                 earliest_suffix = (
@@ -184,8 +165,6 @@ class Specifier:
         raise ValueError(f"unknown specifier operator: {operator}")
 
 
-# Frozen classes write their slots through the slot descriptors: a direct
-# descriptor call, unlike object.__setattr__, skips the attribute lookup.
 _write_operator = Specifier.__dict__["operator"].__set__
 _write_version = Specifier.__dict__["version"].__set__
 _write_is_wildcard = Specifier.__dict__["is_wildcard"].__set__
@@ -267,12 +246,6 @@ def _bounds_of(
 
 _CONTAINS_CACHE_SIZE = 4096
 
-# One SpecifierSet per distinct text. Real metadata repeats the same handful
-# of specifier texts across thousands of Requires-Dist lines, and a set's
-# derived state and containment answers are then shared by every
-# requirement that names it. Unsynchronized like every table in
-# cpip.core.caches: two threads missing on one text build two equal sets
-# and one wins the slot.
 _SPECIFIER_SET_CACHE_SIZE = 4096
 _specifier_sets: dict[str, SpecifierSet] = register_table({})
 
@@ -309,8 +282,6 @@ class SpecifierSet:
     )
 
     specifiers: tuple[Specifier, ...]
-    # Everything else is computed on first read and stored once; a set that
-    # is only ever asked "contains?" pays for nothing it does not use.
     _text: str
     _bounds: tuple[tuple[Version, bool] | None, tuple[Version, bool] | None]
     _exact_version: Version | None
@@ -325,11 +296,6 @@ class SpecifierSet:
         if cached is not None:
             return cached
 
-        # Clauses are split on commas and read with string operations: this
-        # runs for every Requires-Dist line of every candidate examined
-        # during resolution, and the regex it replaces needed a second pass
-        # (a substitution) to confirm it had matched the whole text. Here a
-        # part that does not start with an operator is the error directly.
         clauses: list[Specifier] = []
         for part in key.split(","):
             clause = part.strip()
@@ -460,11 +426,6 @@ class SpecifierSet:
         if not specifiers and not parsed.is_prerelease:
             return True
 
-        # Two caches keyed directly by Version rather than one keyed by
-        # (Version, bool): the lookup is the whole cost of a warm call.
-        # Bounded: instances live as long as the intern table keeps them,
-        # so a long-lived embedder checking ever-new versions against
-        # ">=1" must not grow this without limit.
         try:
             cache = (
                 self._contains_with_prereleases if allow_prereleases else self._contains
@@ -727,12 +688,6 @@ def parse_requirement(value: str) -> Requirement:
                 raw=raw,
             )
 
-        # A direct URL to a source directory does not contain a wheel
-        # filename or an ``#egg`` fragment from which to get the project
-        # name.  Keep the URL as the locator, but use its final path
-        # component as the resolver key.  Treating the complete URL as the
-        # name makes dependencies such as ``lib_a @ file:///.../lib_a``
-        # appear to require a project literally named ``file:///...``.
         name = raw
         if looks_like_url(raw):
             path = urllib.parse.unquote(urllib.parse.urlsplit(raw).path)
@@ -789,9 +744,6 @@ def parse_requirement(value: str) -> Requirement:
 
         spec = rest
 
-        # SpecifierSet's clause parser rejects anything that is not an
-        # operator followed by a version; brackets are caught here so the
-        # error names the specifier rather than a malformed version.
         if spec and ("[" in spec or "]" in spec):
             raise ValueError(f"invalid version specifier: {value!r}")
 
@@ -806,7 +758,6 @@ def canonicalize_requirement(value: str) -> str:
     parts = [requirement.canonical_name]
 
     if requirement.extras:
-        # Extras were canonicalized when parsed.
         parts.append(f"[{','.join(sorted(requirement.extras))}]")
 
     if requirement.url:
@@ -822,10 +773,6 @@ def canonicalize_requirement(value: str) -> str:
 
 
 def looks_like_direct_reference(value: str) -> bool:
-    # Every direct-reference form carries a ":" (a URL scheme or a Windows
-    # drive) or starts with ".", "/" or "~"; a text with neither -- nearly
-    # every requirement parsed -- is answered here without the URL parse
-    # and the two Windows-path checks below. Exactly equivalent.
     if ":" not in value and value[:1] not in (".", "/", "~"):
         return False
     return (
@@ -918,13 +865,6 @@ def egg_fragment_internal(value: str) -> tuple[str | None, frozenset[str]]:
 
 
 def split_marker(value: str) -> tuple[str, str | None]:
-    # The character walk below exists only to skip a ";" inside a quoted
-    # string. The overwhelming majority of requirement lines have no ";" at
-    # all, and nearly all of the rest have no quote character before their
-    # first ";" (quotes in the marker *after* it, e.g.
-    # `pkg ; python_version >= "3.8"`, don't affect the split point) --
-    # both answered by C-level scans instead of a per-character Python
-    # loop.
     semicolon = value.find(";")
 
     if semicolon == -1:

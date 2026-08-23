@@ -22,10 +22,6 @@ def _write_zip(
         for name, data in members.items():
             info = zipfile.ZipInfo(name)
 
-            # A per-member ZipInfo's own compress_type (default ZIP_STORED)
-            # takes precedence over the archive-level default passed to
-            # ZipFile() above -- set explicitly, or a "compressed" case
-            # silently writes stored members instead.
             info.compress_type = compress_type
 
             if name in executable:
@@ -98,11 +94,6 @@ def _assert_matches_real_zipfile(
     real_tree = _tree(real_dest)
 
     if flatten:
-        # unzip_file()'s own leading-dir flatten only applies to the fast
-        # path's output here -- compare against a manually-flattened view
-        # of the real extraction instead of re-deriving the prefix. The
-        # top-level directory placeholder itself (rest == "") vanishes
-        # entirely once flattened, rather than surviving under its own name.
         stripped = {}
 
         for rel, contents in real_tree.items():
@@ -219,9 +210,6 @@ class TestFastUnzipDeclines:
 
         unpacking.unzip_file(str(archive_path), str(dest), flatten=False)
 
-        # The slow zipfile-based path processes both records in order, so
-        # the later one wins -- same last-write-wins outcome the fast path
-        # would have produced too, had it not declined up front.
         assert (Path(dest) / "only.txt").read_bytes() == b"second record"
 
     def test_zip64_sentinel_declines(self, tmp_path: Path) -> None:
@@ -233,10 +221,6 @@ class TestFastUnzipDeclines:
 
         raw = bytearray(archive_path.read_bytes())
 
-        # A real zip64 archive (a member actually needing extended fields)
-        # takes gigabytes to produce; patch the central directory record's
-        # compressed-size field to the 0xFFFFFFFF sentinel directly instead,
-        # to exercise the same detection a real oversized archive would hit.
         cd_offset = raw.index(zipfile.stringCentralDir)  # ty:ignore[unresolved-attribute]
 
         compressed_size_offset = cd_offset + 20

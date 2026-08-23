@@ -89,7 +89,6 @@ def assert_consistent(solution: PartialSolution[str, int]) -> None:
     assert observed(solution) == replay(solution)
 
     internals = cast("Any", solution)
-    # The per-package index must stay a partition of the chronological trail.
     indexed = [
         assignment
         for entries in internals._assignments_by_package.values()

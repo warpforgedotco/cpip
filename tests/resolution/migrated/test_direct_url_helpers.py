@@ -63,9 +63,6 @@ def test_as_pep440_requirement_dir() -> None:
 
 
 def test_as_pep440_requirement_editable_dir() -> None:
-    # direct_url_as_pep440_direct_reference behaves the same
-    # irrespective of the editable flag. It's the responsibility of
-    # callers to render it as editable
     direct_url = DirectUrl(
         url="file:///home/user/project",
         dir_info=DirInfo(editable=True),
@@ -169,7 +166,6 @@ def test_from_link_archive() -> None:
     assert direct_url.archive_info.hashes == {
         "sha1": "1b8c5bc61a86f377fea47b4276c8c8a5842d2220",
     }
-    # Test the hashes key has been automatically populated.
     assert direct_url.archive_info.hashes == {
         "sha1": "1b8c5bc61a86f377fea47b4276c8c8a5842d2220",
     }
@@ -183,8 +179,6 @@ def test_from_link_dir(tmp_path: Path) -> None:
 
 
 def test_from_link_hide_user_password() -> None:
-    # Basic test only here, other variants are covered by
-    # direct_url.redact_url tests.
     direct_url = direct_url_from_link(
         Link("git+https://user:password@g.c/u/p.git@branch#egg=pkg"),
         link_is_in_wheel_cache=True,

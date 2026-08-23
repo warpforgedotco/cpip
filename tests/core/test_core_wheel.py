@@ -296,8 +296,6 @@ def test_project_wheel_dependencies_marker_filtering() -> None:
         provided_extras=frozenset(),
         requires_python=None,
     )
-    # No markers: every dependency applies for any extras set, and the
-    # metadata's own tuple is handed back rather than a filtered copy.
     assert project_wheel_dependencies(plain, None, frozenset()) is plain.dependencies
     assert (
         project_wheel_dependencies(plain, None, frozenset({"x"})) is plain.dependencies

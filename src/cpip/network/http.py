@@ -347,8 +347,6 @@ class NetworkSession:
         if version is None:
             version = get_cpip_version()
 
-        # `platform.python_version()` is this expression, and importing
-        # `platform` for it costs the session a module it never uses again.
         python_version = "%s.%s.%s" % sys.version_info[:3]
 
         return f"cpip/{version} Python/{python_version}"
@@ -631,8 +629,6 @@ class NetworkSession:
 
             return None
 
-        # Deferred: email.message only when a cached response is actually
-        # reconstructed, never on a cache-disabled or cache-miss request.
         import email.message
 
         response_headers = email.message.Message()
@@ -667,7 +663,6 @@ class NetworkSession:
 
             self.fresh_cached_response_cache.pop(url, None)
 
-        # get() only returns metadata whose body is present.
         metadata = self.cache.get(url)
 
         if metadata is None:

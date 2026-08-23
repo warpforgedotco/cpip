@@ -8,7 +8,7 @@ import urllib.parse
 
 from cpip.core.errors import InstallationError, InvalidWheelFilename
 from cpip.core.packaging import EMPTY_FROZENSET, parse_requirement
-from cpip.core.packaging import Requirement as ParsedRequirement
+from cpip.core.packaging import Requirement
 from cpip.core.urls import path_to_url
 from cpip.index.links import Link
 from cpip.resolution.input_paths import (
@@ -49,7 +49,7 @@ def install_req_from_line(
         else:
             marker = parsed.marker
             if marker is not None:
-                parsed = ParsedRequirement(
+                parsed = Requirement(
                     name=parsed.name,
                     specifier=parsed.specifier,
                     extras=parsed.extras,
@@ -118,7 +118,7 @@ def install_req_from_line(
                 wheel_requirement = parse_requirement(
                     f"{wheel_parts[0]}=={wheel_parts[1]}",
                 )
-                parsed = ParsedRequirement(
+                parsed = Requirement(
                     name=wheel_requirement.name,
                     specifier=wheel_requirement.specifier,
                     extras=path_extras,
@@ -127,7 +127,7 @@ def install_req_from_line(
                     raw=text,
                 )
         if path_extras:
-            parsed = ParsedRequirement(
+            parsed = Requirement(
                 name=parsed.name,
                 specifier=parsed.specifier,
                 extras=path_extras,
@@ -178,7 +178,7 @@ def install_req_from_line(
                 raise InstallationError(f"Invalid requirement: {text!r}")
     marker = parsed.marker
     if marker is not None:
-        parsed = ParsedRequirement(
+        parsed = Requirement(
             name=parsed.name,
             specifier=parsed.specifier,
             extras=parsed.extras,

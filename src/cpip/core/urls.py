@@ -11,8 +11,6 @@ WINDOWS = sys.platform == "win32"
 
 def path_to_url(path: str) -> str:
     path = normalize_windows_path(path)
-    # abspath already normalizes -- it is defined as normpath(join(cwd, path))
-    # -- and this runs once per file when a find-links directory is scanned.
     path = os.path.abspath(path)
     if WINDOWS:
         from urllib import request
@@ -45,9 +43,6 @@ def url_to_path(url: str) -> str:
         path = request.url2pathname(netloc + path)
     else:
         path = urllib.parse.unquote(netloc + path)
-    # ``url2pathname`` has returned both ``/C:/...`` and ``\\C:\\...``
-    # for drive-qualified file URLs across Python versions.  Leaving the
-    # separator in place makes ``abspath`` turn it into ``C:\\C:\\...``.
     return normalize_windows_path(path, strip_drive_separator=not bool(netloc))
 
 

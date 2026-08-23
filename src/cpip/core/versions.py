@@ -96,12 +96,6 @@ _PRE_RANK = {
 }
 _PRE_LABEL = ("a", "b", "rc")
 
-# The suffix element of the key. Six integers ordered so that
-# dev < pre < final < post and a dev of any of those sorts before it:
-#   (pre_rank, pre_number, post_rank, post_number, dev_rank, dev_number)
-# with pre_rank 3 meaning "no prerelease", dev_rank 1 meaning "no dev", and
-# a bare dev release (no pre, no post) taking pre_rank -1 so that it sorts
-# before every prerelease of the same release.
 FINAL_SUFFIX = (3, 0, 0, 0, 1, 0)
 _NO_LOCAL: tuple[()] = ()
 
@@ -112,10 +106,6 @@ _versions: dict[str, Version] = register_table({})
 class Version(tuple):
     """A parsed PEP 440 version; see the module docstring for the rules."""
 
-    # No __slots__: a tuple subclass cannot add slots, so the display fields
-    # live in the instance dict -- ``release`` written once in __new__,
-    # ``public`` on first use (most versions a resolve builds are compared
-    # and discarded, never printed).
     release: tuple[int, ...]
 
     def __new__(cls, value: str) -> Version:
@@ -199,8 +189,6 @@ class Version(tuple):
         _versions[value] = self
         return self
 
-    # --- immutability -------------------------------------------------
-
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError(f"Version is immutable (tried to set {name!r})")
 
@@ -215,8 +203,6 @@ class Version(tuple):
 
     def __deepcopy__(self, memo: object) -> Version:
         return self
-
-    # --- display ------------------------------------------------------
 
     @property
     def public(self) -> str:
@@ -248,8 +234,6 @@ class Version(tuple):
     def __repr__(self) -> str:
         return f"<Version({self.public!r})>"
 
-    # --- derived, all cold ---------------------------------------------
-
     @property
     def epoch(self) -> int:
         return self[0]
@@ -271,8 +255,6 @@ class Version(tuple):
         """Epoch and release only, without pre/post/dev/local markers."""
         release = ".".join(map(str, self.release))
         return f"{self[0]}!{release}" if self[0] else release
-
-    # --- wire record --------------------------------------------------
 
     def to_wire(self) -> tuple[str, tuple[int, ...], tuple[Any, ...]]:
         """The record cached catalog summaries store: ``(public, release, key)``.

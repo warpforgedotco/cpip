@@ -89,10 +89,6 @@ class InstallTarget:
                 platlib=target_text,
                 purelib=target_text,
                 headers=target_text,
-                # Keep target installs self-contained.  Sending scripts to the
-                # active interpreter's bin directory makes an isolated target
-                # install mutate the caller's environment and can create
-                # unrelated-file collisions between packages.
                 scripts=os.path.join(
                     target_text,
                     "Scripts" if os.name == "nt" else "bin",
@@ -149,14 +145,6 @@ class InstallTarget:
 def apply_root(scheme: Scheme, root: str) -> Scheme:
     def relocate(path: str) -> str:
         value = os.fspath(path)
-
-        # ``/target`` is rooted on the current drive on Windows, but it still
-
-        # represents a path relative to the synthetic installation root.
-
-        # Checking the anchor handles both POSIX roots and drive-relative
-
-        # Windows paths consistently.
 
         drive, tail = os.path.splitdrive(value)
 

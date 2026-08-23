@@ -20,12 +20,10 @@ TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     import zipfile
-    from email.parser import Parser as EmailParser
+    from email import parser
     from email.message import Message
     from typing import IO, NoReturn, Protocol
 
-    # Structural types used only in annotations: typing stays off the
-    # paths (check, list, show) that import this module for its parsers.
     class ZipEntryInfo(Protocol):
         """The subset of ``zipfile.ZipInfo`` these functions read.
 
@@ -112,7 +110,7 @@ MACOS_COMPATIBLE_ARCHES = {
 }
 
 
-def Parser() -> EmailParser:
+def Parser() -> parser.Parser:
     """Lazily construct the legacy email parser.
 
     The import is deferred as well: ``email.parser`` costs more to import
@@ -120,9 +118,9 @@ def Parser() -> EmailParser:
     parses a METADATA file this way.
     """
 
-    from email.parser import Parser as EmailParser
+    from email import parser
 
-    return EmailParser()
+    return parser.Parser()
 
 
 _UNRESOLVED = object()
@@ -251,8 +249,6 @@ class WheelCandidate(PureWheelCandidate):
     def copy_with(self, **changes: object) -> WheelCandidate:
         values = {name: getattr(self, name) for name in self.__slots__}
 
-        # The stored layout travels as it is: a lazy one stays lazy and the
-        # copy shares its eventual read.
         values["wheel_layout"] = values.pop("_wheel_layout")
 
         values.update(changes)
@@ -277,10 +273,6 @@ class WheelTag:
     )
 
     def __init__(self, interpreter: str, abi: str, platform: str) -> None:
-        # Written through object.__setattr__ because __setattr__ below refuses
-        # every assignment: a tag lives in sets and dictionary keys, and both
-        # the cached hash and the cached lowercase forms would go stale if one
-        # were rewritten in place.
         setter = object.__setattr__
 
         setter(self, "interpreter", interpreter)
@@ -297,10 +289,6 @@ class WheelTag:
 
         setter(self, "_platform_lower", platform_lower)
 
-        # Tags are hashed far more often than they are built -- ranking one
-        # wheel re-hashes the whole supported-tag tuple to probe
-        # wheel_tag_rank's cache, so this runs per candidate per tag, while a
-        # process builds only a handful of tags.
         setter(self, "_hash", hash((interpreter, abi, platform)))
 
         if platform_lower.startswith(("macosx_", "android_")):
@@ -332,8 +320,6 @@ class WheelTag:
 
     platform: str
 
-    # Declared because __init__ writes them through object.__setattr__, which
-    # no checker can follow back to an attribute.
     _interpreter_lower: str
 
     _abi_lower: str
@@ -429,11 +415,6 @@ class TargetContext:
         python_version: str | None = None,
         abis: tuple[str, ...] = (),
     ) -> None:
-        # Written through object.__setattr__ because __setattr__ below
-        # refuses every assignment: a target is looked up in the unbounded
-        # supported_wheel_tags cache by hash, and both the cache entry and
-        # the cached hash below would go stale if a field were rewritten in
-        # place after construction.
         setter = object.__setattr__
 
         setter(self, "platforms", platforms)
@@ -444,10 +425,6 @@ class TargetContext:
 
         setter(self, "abis", abis)
 
-        # A cached, hashable target is looked up on every wheel candidate
-        # through the unbounded ``supported_wheel_tags`` cache, which must
-        # hash it on every call regardless of whether the result is already
-        # cached.
         setter(self, "_hash", hash((platforms, implementation, python_version, abis)))
 
     def __setattr__(self, name: str, value: object) -> NoReturn:
@@ -486,8 +463,6 @@ class TargetContext:
 
     abis: tuple[str, ...]
 
-    # Declared because __init__ writes it through object.__setattr__, which
-    # no checker can follow back to an attribute.
     _hash: int
 
 
@@ -496,7 +471,6 @@ VERSION_COMPATIBLE = (1, 0)
 
 WHEEL_METADATA_CACHE_SIZE = 1024
 
-# Shared empty result for an absent multi-value header (never mutated).
 _NO_HEADERS: list[str] = []
 
 
@@ -547,10 +521,6 @@ wheel_dependency_cache: dict[
     tuple[Requirement, ...],
 ] = register_table({})
 
-# Keyed by (stat-based identity, requested extras) rather than
-# wheel_metadata_cache's own (possibly archive/CRC-based) identity, so
-# wheel_candidate_from_path can check it via a cheap os.stat() *before*
-# opening the archive at all -- see wheel_candidate_from_path.
 no_layout_candidate_cache: dict[
     tuple[tuple[str, int, int], frozenset[str]],
     tuple[str, Version, tuple[Requirement, ...], frozenset[str], str | None],
@@ -559,11 +529,6 @@ no_layout_candidate_cache: dict[
 
 def parse_wheel_file(path: str) -> WheelFile | None:
     name = os.fspath(path)
-    # Most callers already hold a bare filename (Link.filename is one), and
-    # basename of a string with no separator is the identity -- on ntpath
-    # too, which additionally splits on a backslash and a drive colon. Skip
-    # the call for those; it was the single largest cost of evaluating a
-    # wheel link.
     if "/" in name or "\\" in name or ":" in name:
         name = os.path.basename(name)
     return _parse_wheel_filename(name)
@@ -660,9 +625,6 @@ class _HashCachedTags(tuple):
             return value
 
 
-# A process-constant derivation, not a parse cache: what tags this
-# interpreter (or the given target) supports never changes while it runs,
-# so it is deliberately not registered for caches.clear_all().
 @lru_cache(maxsize=1024)
 def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag, ...]:
     if target is None:
@@ -736,7 +698,6 @@ def macos_product_version() -> str | None:
     start = text.find(b"<string>", key)
 
     if start < 0 or text.find(b"<key>", key + 1, start) >= 0:
-        # Another key intervened, so that value belongs to something else.
         return None
 
     start += len(b"<string>")
@@ -769,9 +730,6 @@ def current_platform_tag() -> str:
                 "-", "_"
             ).replace(".", "_")
 
-    # Deferred: `sysconfig` pulls `threading` in behind it, and this module is
-    # imported for its filename and metadata parsers by paths (fast install,
-    # list, show, check) that never ask for a platform tag.
     import sysconfig
 
     return sysconfig.get_platform().replace("-", "_").replace(".", "_")
@@ -833,11 +791,6 @@ def project_wheel_dependencies(
 
     declared = metadata.dependencies
 
-    # A wheel whose Requires-Dist lines carry no markers applies them all
-    # for every extras set: hand back the metadata's own tuple instead of
-    # filtering -- and when filtering is needed, a list comprehension runs
-    # in one frame where the generator expression paid a frame resumption
-    # per dependency, per candidate wheel examined.
     if all(requirement.marker is None for requirement in declared):
         dependencies = declared
     else:
@@ -895,9 +848,6 @@ def wheel_candidate(
                 if metadata_cache is not None and identity is not None:
                     metadata_cache.put(identity, headers)
 
-            # The header dict is keyed by casefolded names already; these are
-            # the same lookups without a casefold per call (five per
-            # candidate wheel examined).
             header_get = headers.get
 
             def get_header(name: str) -> str | None:
@@ -939,10 +889,6 @@ def wheel_candidate(
         metadata = WheelResolutionMetadata(
             name=metadata_name,
             version=parsed_metadata_version,
-            # map(), not a genexpr: this runs per candidate wheel examined
-            # during resolution, and a genexpr pays a generator-frame
-            # resumption per Requires-Dist line where map iterates at the
-            # C level with no intermediate frame or list at all.
             dependencies=tuple(
                 map(parse_requirement, get_all_headers("requires-dist")),
             ),
@@ -969,9 +915,6 @@ def wheel_candidate(
         if wheel_metadata_text is None:
             wheel_metadata_text = archive.read(f"{dist_info_dir}/WHEEL").decode("utf-8")
 
-        # Everything open_wheel_archive needs to read the members again
-        # without re-parsing the central directory -- the mode bits
-        # included, so executable members keep their modes on that path.
         wheel_layout = (
             dist_info_dir,
             tuple(
@@ -1104,12 +1047,6 @@ def _dist_info_match_key(name: str) -> str:
 
 
 def wheel_dist_info_dir(source: ZipArchiveSource, name: str) -> str:
-    # ZipFile already builds this filename index while reading the central
-
-    # directory. Iterating it avoids another ZipInfo lookup for every member,
-
-    # which is significant for wheels containing thousands of files.
-
     dist_info_dir: str | None = None
 
     for filename in source.NameToInfo:
@@ -1215,8 +1152,6 @@ def check_compatibility(version: tuple[int, ...], name: str) -> None:
         )
 
     if version > VERSION_COMPATIBLE:
-        # The module's only use of logging; importing it here keeps the
-        # logging machinery off the local fast install path.
         import logging
 
         logging.getLogger(__name__).warning(

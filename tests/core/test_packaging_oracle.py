@@ -30,10 +30,7 @@ from typing import Any
 
 from cpip.core.packaging import SpecifierSet
 from cpip.core.versions import InvalidVersion, Version
-from packaging.specifiers import InvalidSpecifier
-from packaging.specifiers import SpecifierSet as TheirSpecifierSet
-from packaging.version import InvalidVersion as TheirInvalidVersion
-from packaging.version import Version as TheirVersion
+from packaging import specifiers, version
 
 SEED = 20260820
 VERSION_SAMPLES = 6000
@@ -50,8 +47,6 @@ class Divergence:
     ours: object
     theirs: object
 
-
-# --- generators ---
 
 PRE_LABELS = ("a", "b", "rc", "c", "alpha", "beta", "pre", "preview")
 SEPARATORS = ("", ".", "-", "_")
@@ -109,18 +104,15 @@ def specifier_texts(rng: random.Random, count: int, versions: list[str]) -> list
     return out
 
 
-# --- the comparison ---
-
-
-def _parse_both(text: str) -> tuple[Version | None, TheirVersion | None, bool]:
+def _parse_both(text: str) -> tuple[Version | None, version.Version | None, bool]:
     """(ours, theirs, agree_on_validity)."""
     try:
         ours = Version(text)
     except InvalidVersion:
         ours = None
     try:
-        theirs = TheirVersion(text)
-    except TheirInvalidVersion:
+        theirs = version.Version(text)
+    except version.InvalidVersion:
         theirs = None
     return ours, theirs, (ours is None) == (theirs is None)
 
@@ -139,7 +131,7 @@ def _normalized_specifier(text: str) -> str | None:
         operator, operand = match.groups()
         if operator == "===" or operand.endswith(".*"):
             return None
-        clauses.append(operator + str(TheirVersion(operand)))
+        clauses.append(operator + str(version.Version(operand)))
     return ",".join(clauses)
 
 
@@ -147,7 +139,7 @@ def collect_divergences() -> list[Divergence]:
     rng = random.Random(SEED)
     divergences: list[Divergence] = []
     texts = version_texts(rng, VERSION_SAMPLES)
-    parsed: dict[str, tuple[Version, TheirVersion]] = {}
+    parsed: dict[str, tuple[Version, version.Version]] = {}
     for text in texts:
         ours, theirs, agree = _parse_both(text)
         if not agree:
@@ -180,8 +172,8 @@ def collect_divergences() -> list[Divergence]:
     operands = list(parsed)[:400]
     for text in specifier_texts(rng, SPECIFIER_SAMPLES, operands):
         try:
-            theirs_set = TheirSpecifierSet(text)
-        except InvalidSpecifier:
+            theirs_set = specifiers.SpecifierSet(text)
+        except specifiers.InvalidSpecifier:
             theirs_set = None
         try:
             ours_set = SpecifierSet(text)
@@ -200,9 +192,6 @@ def collect_divergences() -> list[Divergence]:
             continue
         if ours_set is None or theirs_set is None:
             continue
-        # packaging >= 24 admits prereleases by default when nothing else
-        # matches; cpip's allow_prereleases=False is packaging's "only when a
-        # clause names one", which is what SpecifierSet.prereleases reports.
         modes = ((False, bool(theirs_set.prereleases)), (True, True))
         for _ in range(CONTAINS_PER_SPECIFIER):
             candidate = rng.choice(operands)
@@ -219,9 +208,6 @@ def collect_divergences() -> list[Divergence]:
     return divergences
 
 
-# --- classification ---
-
-
 def _packaging_disagrees_with_its_normalised_self(d: Divergence) -> bool:
     if d.specifier is None or not d.observable.startswith("contains"):
         return False
@@ -229,25 +215,18 @@ def _packaging_disagrees_with_its_normalised_self(d: Divergence) -> bool:
     if normalised is None:
         return False
     allow = d.observable.endswith("True)")
-    theirs_set = TheirSpecifierSet(normalised)
+    theirs_set = specifiers.SpecifierSet(normalised)
     prereleases = True if allow else bool(theirs_set.prereleases)
     return (
-        theirs_set.contains(TheirVersion(d.version), prereleases=prereleases) == d.ours
+        theirs_set.contains(version.Version(d.version), prereleases=prereleases)
+        == d.ours
     )
 
 
 KNOWN_DIVERGENCES: dict[str, Callable[[Divergence], bool]] = {
-    # cpip's specifier grammar accepts texts packaging rejects: local labels
-    # on ordering/compatible operators, "v" prefixes and leading zeros in
-    # operands, r/rev post spellings, wildcards after a prerelease, and ``~=``
-    # with a single release segment. Validity only -- both agree on
-    # everything that both accept.
     "specifier grammar is more lenient than packaging": lambda d: (
         d.observable == "specifier_validity" and d.ours is True and d.theirs is False
     ),
-    # packaging computes the ``~=`` prefix from the operand text as written,
-    # so "~=v2.1" and "~=2.0001" match nothing; cpip computes it from the
-    # parsed release. cpip is right here.
     "packaging's ~= prefix is taken from the unnormalised operand": (
         _packaging_disagrees_with_its_normalised_self
     ),

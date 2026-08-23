@@ -5,11 +5,11 @@ import os
 import shutil
 import sysconfig
 import textwrap
-import venv as venv_internal
+import venv
 from pathlib import Path
 from typing import Literal
 
-import virtualenv as virtualenv_internal
+import virtualenv
 
 VirtualEnvironmentType = Literal["virtualenv", "venv"]
 
@@ -59,7 +59,6 @@ class VirtualEnvironment:
         if clear:
             shutil.rmtree(self.location)
         if self.template_internal:
-            # Clone virtual environment from template.
             shutil.copytree(
                 self.template_internal.location,
                 self.location,
@@ -68,9 +67,8 @@ class VirtualEnvironment:
             self.sitecustomize_internal = self.template_internal.sitecustomize
             self.user_site_packages_internal = self.template_internal.user_site_packages
         else:
-            # Create a new virtual environment.
             if self.venv_type_internal == "virtualenv":
-                virtualenv_internal.cli_run(
+                virtualenv.cli_run(
                     [
                         "--no-pip",
                         "--no-setuptools",
@@ -78,7 +76,7 @@ class VirtualEnvironment:
                     ],
                 )
             elif self.venv_type_internal == "venv":
-                builder = venv_internal.EnvBuilder()
+                builder = venv.EnvBuilder()
                 context = builder.ensure_directories(os.fspath(self.location))
                 builder.create_configuration(context)
                 builder.setup_python(context)
@@ -89,7 +87,6 @@ class VirtualEnvironment:
             self.user_site_packages = self.user_site_packages_internal
 
     def customize_site(self) -> None:
-        # Enable user site (before system).
         contents = textwrap.dedent(f"""
             import os, site, sys
             if not os.environ.get('PYTHONNOUSERSITE', False):
@@ -117,7 +114,6 @@ class VirtualEnvironment:
             contents += "\n" + self.sitecustomize_internal
         sitecustomize = self.site / "sitecustomize.py"
         sitecustomize.write_text(contents)
-        # Make sure bytecode is up-to-date too.
         assert compileall.compile_file(str(sitecustomize), quiet=1, force=True)
 
     def rewrite_pyvenv_cfg(self, replacements: dict[str, str]) -> None:
@@ -128,7 +124,7 @@ class VirtualEnvironment:
             key = line.split("=", 1)[0].strip()
             try:
                 value = replacements[key]
-            except KeyError:  # No need to replace.
+            except KeyError:
                 return line
             return f"{key} = {value}"
 

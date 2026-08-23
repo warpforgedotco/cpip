@@ -11,9 +11,6 @@ END_OF_CENTRAL_DIRECTORY = struct.Struct("<4s4H2LH")
 CENTRAL_DIRECTORY_HEADER = struct.Struct("<4s6H3L5H2L")
 LOCAL_FILE_HEADER = struct.Struct("<4s5H3L2H")
 
-# Headroom for read_member's combined read: enough for any realistic member
-# name plus local extra field (zipfile-written wheels have no local extra at
-# all). A longer name only costs the fallback read, never correctness.
 _LOCAL_HEADER_HEADROOM = 512
 
 
@@ -21,9 +18,6 @@ class WheelhouseUnavailable(Exception):
     pass
 
 
-# Positioned reads (one syscall) replace seek+read pairs on a real file
-# descriptor; anything else -- a BytesIO, a lazy HTTP wheel, Windows --
-# keeps the stream calls.
 _HAS_PREAD = hasattr(os, "pread")
 
 
@@ -44,23 +38,9 @@ class WheelArchive:
         self.members: dict[str, tuple[int, int, int, int, int]] = (
             {} if members is None else members
         )
-        # External attributes (mode bits) per member, filled alongside
-        # members by read_central_directory() or pre-supplied with them.
         self.modes: dict[str, int] = {} if modes is None else modes
-        # Populated by read_central_directory() with the same bytes its
-        # end-of-central-directory scan already had to read from the tail of
-        # the file. Members whose local header falls inside that region
-        # (the common case for a wheel small enough that the tail scan
-        # covers the whole file) can be read straight out of it in
-        # read_member()/read_many() instead of a second file seek+read.
-        # Empty/zero when unset (a pre-supplied `members` cache skips the
-        # scan), which read_member()/read_many() treat as "nothing cached".
         self._tail = b""
         self._tail_start = 0
-        # Set by read_central_directory() when a member uses a compression
-        # method this reader cannot decode (anything but stored/deflate), so
-        # an opener can hand the wheel to zipfile without a second pass over
-        # the members.
         self.needs_zipfile = False
         if members is None:
             self.read_central_directory()
@@ -73,8 +53,6 @@ class WheelArchive:
             return self.file.read(size)
         data = os.pread(fd, size, offset)
         if len(data) < size:
-            # pread may return short (a signal, or EOF); finish the read
-            # exactly as a stream read would, stopping at end of file.
             chunks = [data]
             got = len(data)
             while got < size:
@@ -110,28 +88,14 @@ class WheelArchive:
         ):
             raise WheelhouseUnavailable
         if directory_offset + directory_size > size:
-            # The declared directory range must fit inside the file --
-            # checked before reading so a lying directory_size (the field
-            # can claim up to 4 GiB) declines instead of attempting the
-            # allocation.
             raise WheelhouseUnavailable
         if directory_offset >= tail_start:
-            # Already sitting in `tail` from the scan above -- slice the
-            # central directory out of it instead of paying for a second
-            # seek+read round trip to fetch bytes already in hand.
             start = directory_offset - tail_start
             directory = tail[start : start + directory_size]
         else:
             directory = self._read_at(directory_offset, directory_size)
         if len(directory) != directory_size:
             raise WheelhouseUnavailable
-        # Parse the records in place with a running offset. The obvious
-        # loop -- two stream read()s and a seek() per record -- costs three
-        # method calls and a 46-byte allocation for every member, tens of
-        # thousands of pure overhead calls on a many-file wheel;
-        # unpack_from reads the buffer directly. Bounding the parse by the
-        # end-of-central-directory record's own directory_size also matches
-        # what zipfile itself does.
         directory_end = len(directory)
         unpack_record = CENTRAL_DIRECTORY_HEADER.unpack_from
         offset = 0
@@ -169,10 +133,6 @@ class WheelArchive:
             name_end = offset + 46 + name_size
             record_end = name_end + extra_size + comment_size
             if record_end > directory_end:
-                # The whole declared record body -- name, extra field, and
-                # comment -- must fit inside the declared directory, or a
-                # final record with an oversized extra field would be
-                # accepted despite claiming bytes past the boundary.
                 raise WheelhouseUnavailable
             name_bytes = directory[offset + 46 : name_end]
             offset = record_end
@@ -183,10 +143,6 @@ class WheelArchive:
                 uncompressed_size,
                 local_offset,
             )
-            # Member names are almost always ASCII, which decodes the same
-            # under every codec here; the ASCII codec runs in C where cp437
-            # goes through the Python-level charmap codec (5x slower), and
-            # a wheel with a few thousand members pays that per member.
             if name_bytes.isascii():
                 name = name_bytes.decode("ascii")
             else:
@@ -197,14 +153,6 @@ class WheelArchive:
             if compression != 8 and compression != 0:
                 self.needs_zipfile = True
             if name in self.members:
-                # self.members is keyed by name, so a second record for the
-                # same name would silently overwrite the first -- including
-                # its independent compressed data at a different offset,
-                # which then never gets read or CRC-checked at all. A real
-                # archive never has two central-directory records for the
-                # same name; something crafted enough to have one shouldn't
-                # get the abbreviated trust this reader extends everything
-                # else.
                 raise WheelhouseUnavailable
             self.members[name] = member
             self.modes[name] = external_attr
@@ -222,8 +170,6 @@ class WheelArchive:
     def read_member(self, member: tuple[int, int, int, int, int]) -> bytes:
         compression, crc, compressed_size, uncompressed_size, local_offset = member
         if self._tail and local_offset >= self._tail_start:
-            # Already in memory: slice the header and data straight out of
-            # the tail buffer, with no stream object or read calls at all.
             base = local_offset - self._tail_start
             tail = self._tail
             header = tail[base : base + 30]
@@ -235,12 +181,6 @@ class WheelArchive:
             start = base + 30 + name_size + extra_size
             data = tail[start : start + compressed_size]
         else:
-            # One combined positioned over-read: header, the (nearly always
-            # short) name and extra field, and the member data together --
-            # sliced apart afterward. The obvious sequence pays a seek, a
-            # header read, a relative seek, and a data read: four syscalls
-            # per member on the unbuffered file this reader is handed, per
-            # member extracted from a many-file wheel.
             blob = self._read_at(
                 local_offset,
                 30 + _LOCAL_HEADER_HEADROOM + compressed_size,
@@ -256,8 +196,6 @@ class WheelArchive:
             if end <= len(blob):
                 data = blob[start:end]
             else:
-                # The name plus extra field exceeded the headroom (or the
-                # blob was cut short) -- one exact positioned read instead.
                 data = self._read_at(local_offset + start, compressed_size)
         if len(data) != compressed_size:
             raise WheelhouseUnavailable

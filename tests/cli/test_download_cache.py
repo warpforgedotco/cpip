@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from cpip.cli import download as download_module
+from cpip.cli import download
 from cpip.core.appdirs import resolve_cache_dir
 
 
@@ -26,12 +26,12 @@ def captured(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     seen: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        download_module,
+        download,
         "load_source_config",
         lambda _name: None,
     )
     monkeypatch.setattr(
-        download_module,
+        download,
         "resolve_sources",
         lambda options, _config: type(
             "Sources",
@@ -44,9 +44,9 @@ def captured(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             },
         )(),
     )
-    monkeypatch.setattr(download_module, "apply_proxy_environment", lambda _proxy: None)
+    monkeypatch.setattr(download, "apply_proxy_environment", lambda _proxy: None)
     monkeypatch.setattr(
-        download_module,
+        download,
         "parse_dependency_groups",
         lambda _groups: [],
     )
@@ -55,13 +55,13 @@ def captured(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         seen["collect_cache_dir"] = kwargs.get("cache_dir")
         raise Stop
 
-    monkeypatch.setattr(download_module, "collect_requirements", fake_collect)
+    monkeypatch.setattr(download, "collect_requirements", fake_collect)
     return seen
 
 
 def run(args: list[str]) -> None:
     with pytest.raises(Stop):
-        download_module.run_download([*args, "--dest", "unused"])
+        download.run_download([*args, "--dest", "unused"])
 
 
 def test_cache_is_enabled_by_default(captured: dict[str, Any]) -> None:

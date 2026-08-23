@@ -45,7 +45,6 @@ def create_find_links(script: CpipTestEnvironment) -> FindLinks:
             "(2 matches, 0 no digest): discarding no candidates",
         ),
         (
-            # Different hash lists are intersected.
             """
             base==0.1.0 --hash=sha256:{sdist_hash} --hash=sha256:{wheel_hash}
             base==0.1.0 --hash=sha256:{sdist_hash}
@@ -359,7 +358,6 @@ def test_new_resolver_hash_with_extras(script: CpipTestEnvironment) -> None:
     )
     child_hash = hashlib.sha256(child_path.read_bytes()).hexdigest()
 
-    # Newer release
     create_basic_wheel_for_package(
         script,
         "child",

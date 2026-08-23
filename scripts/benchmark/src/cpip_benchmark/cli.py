@@ -302,11 +302,6 @@ def build_commands(
             ),
         ]
     if benchmark == "startup-fast-lock":
-        # Isolates per-invocation overhead (process start, arg parsing,
-        # provider setup) from graph-resolution cost: a single dependency-free
-        # package against an already-warm cache, versus lock-warm's full
-        # offline graph. If this doesn't scale with lock-warm as the graph
-        # grows, the difference is resolution work, not fixed overhead.
         if wheelhouse is None:
             raise ValueError("startup-fast-lock requires the offline workload")
         trivial_requirements = workspace / "trivial.in"
@@ -344,9 +339,6 @@ def build_commands(
             uv_step(cleanup_command([uv_output]), uv_args),
         ]
     if benchmark == "startup-fast-install":
-        # Same isolation as startup-fast-lock, for the install path: one
-        # dependency-free wheel against an already-warm cache, versus
-        # install-warm's full offline requirement set.
         if wheelhouse is None:
             raise ValueError("startup-fast-install requires the offline workload")
         trivial_install = workspace / "trivial-install.txt"

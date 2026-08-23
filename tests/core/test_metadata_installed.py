@@ -95,8 +95,6 @@ def test_installed_distribution_dependencies_reuse_parsed_headers(
     [distribution] = iter_installed_distributions(paths=[str(site_packages)])
     assert distribution._fast_headers is not None
 
-    # Corrupt the on-disk file: if dependencies() re-read it, this would blow
-    # up or silently disagree with the cached name/version already reported.
     (site_packages / "widget-1.0.dist-info" / "METADATA").write_text(
         "not valid metadata at all",
         encoding="utf-8",
@@ -163,7 +161,6 @@ def test_find_installed_reads_metadata_once_per_environment(
     paths = [str(site_packages)]
     for name in ("pkg0", "pkg3", "pkg4", "nope", "pkg0"):
         find_installed(name, paths)
-    # One scan: five METADATA files, read once each, for five lookups.
     assert len(opened) == 5
 
 
@@ -183,8 +180,6 @@ def test_find_installed_notices_a_new_distribution(tmp_path: Path) -> None:
         "gadget-2.0.dist-info",
         "Metadata-Version: 2.1\nName: gadget\nVersion: 2.0\n",
     )
-    # Creating the dist-info directory bumps site-packages' mtime; make the
-    # bump unambiguous for coarse filesystem clocks.
     later = time.time() + 2
     os.utime(site_packages, (later, later))
     found = find_installed("gadget", paths)
@@ -217,7 +212,6 @@ def test_find_installed_accepts_a_generator_of_paths(tmp_path: Path) -> None:
     found = find_installed("widget", (path for path in [str(site_packages)]))
     assert found is not None
     assert found.raw_version == "1.2.3"
-    # And the cached index built from that generator is the full one.
     assert find_installed("widget", [str(site_packages)]) is found
 
 
@@ -229,29 +223,28 @@ def test_default_and_explicit_scans_are_cached_separately(
     stand in for the other."""
     import sys
 
-    from cpip.core import metadata as metadata_module
+    from cpip.core import metadata
 
-    metadata_module.clear_installed_index()
+    metadata.clear_installed_index()
     calls: list[object] = []
-    real = metadata_module._iter_raw_distributions
+    real = metadata._iter_raw_distributions
 
     def recording(paths):  # noqa: ANN001, ANN202
         calls.append("<default>" if paths is None else list(paths))
         return real(paths)
 
-    monkeypatch.setattr(metadata_module, "_iter_raw_distributions", recording)
+    monkeypatch.setattr(metadata, "_iter_raw_distributions", recording)
     explicit = list(sys.path)
     for order in ((None, explicit), (explicit, None)):
-        metadata_module.clear_installed_index()
+        metadata.clear_installed_index()
         calls.clear()
         for paths in order:
-            metadata_module.find_installed("not-installed-anywhere", paths)
+            metadata.find_installed("not-installed-anywhere", paths)
         assert len(calls) == 2
         assert "<default>" in calls
         assert any(call != "<default>" for call in calls)
-        # Repeats hit the respective cached index.
         for paths in order:
-            metadata_module.find_installed("not-installed-anywhere", paths)
+            metadata.find_installed("not-installed-anywhere", paths)
         assert len(calls) == 2
 
 
@@ -284,14 +277,12 @@ def _cpip_view(paths: list[str]) -> list[tuple[str, str, str]]:
 
 def _populate_mixed_root(root: Path) -> None:
     _write_dist_info(root, "demo-1.0.dist-info", "Name: demo\nVersion: 1.0\n")
-    _write_dist_info(
-        root, "Up-3.0.DIST-INFO", "Name: Up\nVersion: 3.0\n"
-    )  # suffix match is case-insensitive
+    _write_dist_info(root, "Up-3.0.DIST-INFO", "Name: Up\nVersion: 3.0\n")
     _write_dist_info(
         root, "legacy-0.1.egg-info", "Name: legacy\nVersion: 0.1\n", filename="PKG-INFO"
     )
     (root / "flat-2.0.egg-info").write_text("Name: flat\nVersion: 2.0\n")
-    (root / "empty-4.0.dist-info").mkdir()  # no metadata file: skipped by both
+    (root / "empty-4.0.dist-info").mkdir()
     (root / "notes.txt").write_text("not a distribution\n")
     (root / "package").mkdir()
 
@@ -316,7 +307,6 @@ def test_directory_scan_matches_stdlib_for_every_root_spelling(
         assert view == _stdlib_view([spelling]), spelling
         assert sorted(name for name, _, _ in view) == ["Up", "demo", "flat", "legacy"]
 
-    # "" is the current directory, as for the stdlib (and `python -m`).
     monkeypatch.chdir(root)
     assert _cpip_view([""]) == _stdlib_view([""])
     assert len(_cpip_view([""])) == 4
@@ -380,7 +370,6 @@ def test_default_scan_honours_other_distribution_finders(
         found = find_installed("finder-only")
         assert found is not None
         assert found.raw_version == "1.0"
-        # An explicit path list consults only the path finder, as before.
         assert find_installed("finder-only", [str(tmp_path)]) is None
     finally:
         clear_installed_index()
@@ -486,16 +475,11 @@ def test_header_cache_serves_unchanged_metadata_without_reading_it(
 
     first = {d.name: d for d in iter_installed_distributions(paths=[str(root)])}
     assert sorted(first) == ["legacy", "widget"]
-    # Only a METADATA file has an identity; PKG-INFO-only entries are read
-    # as before and never cached. The key is the wheel store's own shape.
     identity = metadata_identity(metadata_file)
     assert header_cache.puts == [identity]
     assert header_cache.prefetched == [[identity]]
     assert [str(dep) for dep in first["widget"].dependencies()] == ["gadget>=1.0"]
 
-    # Same size and mtime: the cached headers are trusted and the file is
-    # not read, so a same-size in-place rewrite is invisible (as documented
-    # for the in-process index).
     stat = metadata_file.stat()
     metadata_file.write_text("Name: widget\nVersion: 9.9\nRequires-Dist: gadget>=1.0\n")
     os.utime(metadata_file, ns=(stat.st_atime_ns, stat.st_mtime_ns))
@@ -504,7 +488,6 @@ def test_header_cache_serves_unchanged_metadata_without_reading_it(
     assert header_cache.puts == [identity]
     assert [str(dep) for dep in second["widget"].dependencies()] == ["gadget>=1.0"]
 
-    # A different mtime is a different identity: read and cached afresh.
     os.utime(metadata_file, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
     third = {d.name: d for d in iter_installed_distributions(paths=[str(root)])}
     assert third["widget"].raw_version == "9.9"

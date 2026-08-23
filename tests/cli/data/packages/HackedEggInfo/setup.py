@@ -1,10 +1,10 @@
+import setuptools.command.egg_info
 from setuptools import setup
-from setuptools.command import egg_info as orig_egg_info
 
 
-class egg_info(orig_egg_info.egg_info):
+class egg_info(setuptools.command.egg_info.egg_info):
     def run(self):
-        orig_egg_info.egg_info.run(self)
+        setuptools.command.egg_info.egg_info.run(self)
 
 
 setup(

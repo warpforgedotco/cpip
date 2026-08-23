@@ -32,8 +32,6 @@ def run_check(args: list[str]) -> int:
         return 1
 
     def supported_tags():  # noqa: ANN202
-        # Deferred: the tag machinery (core.wheel, sysconfig, platform) only
-        # for an environment holding a wheel that is not py3-none-any.
         from cpip.core import target_python
 
         return target_python.get_supported()

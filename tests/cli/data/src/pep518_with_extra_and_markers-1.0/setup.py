@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 from setuptools import setup
 
-# ensure dependencies are installed
 import simple
 import simplewheel
 

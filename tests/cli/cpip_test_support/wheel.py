@@ -24,7 +24,6 @@ from zipfile import ZipFile
 from cpip.build.metadata import MetadataDistribution
 from packaging.utils import canonicalize_name
 
-# As would be used in metadata
 HeaderValue = str | list[str]
 
 
@@ -48,7 +47,6 @@ default_internal = Default.token
 
 T = TypeVar("T")
 
-# A type which may be defaulted.
 Defaulted = Union[Default, T]
 
 

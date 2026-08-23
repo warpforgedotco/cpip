@@ -173,20 +173,9 @@ class InstallTransaction:
                     f"staged file does not exist: {item.source_text}",
                 )
             destination_text = item.destination_text
-            # One lstat answers everything except the symlink case: absent
-            # means absent (the old stat + lexists fallback paid a second
-            # syscall per file to learn that on every fresh install), and a
-            # regular file or directory stats identically through lstat.
-            # Only a symlink needs the follow-the-link stat to learn what
-            # it points at (or that it dangles).
             try:
                 destination_lstat = os.lstat(destination_text)
             except (FileNotFoundError, NotADirectoryError):
-                # Only genuine absence (nothing there, or a parent path
-                # component is a plain file) may be recorded as absent --
-                # that record is what lets backup_if_needed skip the backup,
-                # so a permission or I/O failure here must propagate rather
-                # than silently authorize an unprotected overwrite later.
                 destination_exists = False
                 destination_visible = False
                 destination_is_file = False
@@ -241,11 +230,6 @@ class InstallTransaction:
             replace = os.replace
             chmod = os.chmod
             append_created = self.created_internal.append
-            # Reading the umask means momentarily setting it; probe with
-            # all-bits-masked rather than the customary os.umask(0) so a
-            # concurrent thread creating a file inside the two-call window
-            # gets an over-restricted mode (a visible glitch) instead of an
-            # under-restricted one (a silent security hole).
             umask = os.umask(0o777)
             os.umask(umask)
             for item in self.staged_internal:
@@ -267,28 +251,16 @@ class InstallTransaction:
                             if exc.errno != errno.EXDEV:
                                 raise
                             shutil.move(item.source_text, item.destination_text)
-                    # Record before chmod: if chmod raises, the destination
-                    # is already installed and rollback must know to remove
-                    # it (and restore any backup underneath).
                     append_created(item.destination_text)
                     if item.mode is not None:
                         chmod(item.destination_text, item.mode)
                 else:
-                    # Mark the path before writing: a short write must still
-                    # be removed by rollback before any backup is restored.
                     append_created(item.destination_text)
                     _write_contents(
                         item.destination_text,
                         item.contents,
                         0o666 if item.mode is None else item.mode,
                     )
-                    # os.open creates the file with ``mode & ~umask``, so
-                    # when the umask strips none of the requested bits the
-                    # file already has exactly the wanted mode and the
-                    # follow-up chmod is a per-file syscall for nothing --
-                    # the overwhelmingly common case (0o644/0o755 under
-                    # umask 022). backup_if_needed moved any pre-existing
-                    # destination aside first, so the open always creates.
                     if item.mode is not None and item.mode & umask:
                         chmod(item.destination_text, item.mode)
             for path in sorted(self.deletions):

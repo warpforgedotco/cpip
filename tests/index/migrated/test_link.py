@@ -66,11 +66,7 @@ class TestLink:
             ("http://yo/wheel.whl", "wheel.whl"),
             ("http://yo/wheel", "wheel"),
             ("https://example.com/path/page.html", "page.html"),
-            # Test a quoted character.
             ("https://example.com/path/page%231.html", "page#1.html"),
-            # A doubly-encoded separator must stay encoded: the path is decoded
-            # exactly once, so the file name keeps its literal "%2F" instead of
-            # collapsing into a "/".
             (
                 "https://example.com/a%252Fb.whl",
                 "a%2Fb.whl",
@@ -79,12 +75,9 @@ class TestLink:
                 "http://yo/myproject-1.0%2Bfoobar.0-py2.py3-none-any.whl",
                 "myproject-1.0+foobar.0-py2.py3-none-any.whl",
             ),
-            # Test a path that ends in a slash.
             ("https://example.com/path/", "path"),
             ("https://example.com/path//", "path"),
-            # Test a url with no filename.
             ("https://example.com/", "example.com"),
-            # Test a url with no filename and with auth information.
             (
                 "https://user:password@example.com/",
                 "example.com",
@@ -103,9 +96,6 @@ class TestLink:
         ],
     )
     def test_filename_decoded_once_stays_single_component(self, url: str) -> None:
-        # The path is decoded exactly once, so an encoded separator stays
-        # encoded and the file name remains a single path component rather
-        # than collapsing into a "/"-separated path.
         filename = Link(url).filename
         assert not posixpath.isabs(filename)
         assert posixpath.basename(filename) == filename
@@ -119,24 +109,17 @@ class TestLink:
         ],
     )
     def test_filename_parent_reference_falls_back_to_netloc(self, url: str) -> None:
-        # A path that is only a "." or ".." reference has no usable file name,
-        # so filename falls back to the netloc rather than handing back a
-        # traversal component that could escape a download directory.
         assert Link(url).filename == "example.com"
 
     @pytest.mark.parametrize(
         "url",
         [
-            # A path-less URL whose authority looks like a traversal: the netloc
-            # fallback must still reduce to a single path component.
             "http://..\\..\\..\\evil.whl",
             "http://../",
             "http://..",
         ],
     )
     def test_filename_is_always_a_path_component(self, url: str) -> None:
-        # filename must never carry a separator or parent reference, so joining
-        # it onto a directory can never escape that directory.
         name = Link(url).filename
         assert os.path.basename(name) == name
         assert name not in (os.curdir, os.pardir)
@@ -176,12 +159,9 @@ class TestLink:
     @pytest.mark.parametrize(
         "fragment",
         [
-            # Package names in egg fragments must be in PEP 508 form.
             "~invalid~package~name~",
-            # Version specifiers are not valid in egg fragments.
             "eggname==1.2.3",
             "eggname>=1.2.3",
-            # Extras are also prohibited.
             "eggname[!]",
             "eggname[extra]",
             "eggname[extra1,extra2]",
@@ -200,8 +180,6 @@ class TestLink:
         with pytest.raises(InvalidEggFragment) as exc_info:
             Link(url)
 
-        # The hint should suggest Direct URL syntax, not just "remove version
-        # specifiers" because the extras require Direct URL syntax anyway.
         hint = str(exc_info.value.hint_stmt)
         assert r"name\[extra] @ URL" in hint
         assert "Version specifiers are silently ignored" in hint
@@ -224,14 +202,10 @@ class TestLink:
     @pytest.mark.parametrize(
         "hash_name, hex_digest, expected",
         [
-            # Test a value that matches but with the wrong hash_name.
             ("sha384", 128 * "a", False),
-            # Test matching values, including values other than the first.
             ("sha512", 128 * "a", True),
             ("sha512", 128 * "b", True),
-            # Test a matching hash_name with a value that doesn't match.
             ("sha512", 128 * "c", False),
-            # Test a link without a hash value.
             ("sha512", "", False),
         ],
     )
@@ -261,7 +235,6 @@ class TestLink:
         "hashes, expected",
         [
             (None, False),
-            # Also test a success case to show the test is correct.
             (Hashes({"sha512": [128 * "a"]}), True),
         ],
     )
@@ -294,7 +267,6 @@ class TestLink:
     [
         "wheel.whl",
         "myproject-1.0+foobar.0-py2.py3-none-any.whl",
-        # A literal "%2F" is a normal file name, not a separator.
         "a%2Fb.whl",
     ],
 )
@@ -311,8 +283,6 @@ def test_as_path_component_keeps_plain_name(name: str) -> None:
     ],
 )
 def test_as_path_component_reduces_to_basename(name: str) -> None:
-    # A name carrying directory components is reduced to its basename, so the
-    # result always stays inside the directory it is later joined onto.
     assert PathComponent.from_name(name, required=True) == os.path.basename(name)
 
 
@@ -326,13 +296,10 @@ def test_as_path_component_rejects_empty_or_parent_reference(name: str) -> None:
     "name",
     [
         "pkg.whl",
-        # A literal "%2F" is a normal file name, not a separator.
         "a%2Fb.whl",
     ],
 )
 def test_join_within_directory_stays_inside(name: str) -> None:
-    # The component is joined onto the directory as its final element, so the
-    # result stays inside the directory.
     directory = os.path.join("base", "downloads")
     joined = PathComponent.from_name(name, required=True).join(directory)
     assert joined == os.path.join(directory, name)

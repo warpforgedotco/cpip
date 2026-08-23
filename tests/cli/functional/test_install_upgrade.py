@@ -304,7 +304,6 @@ def test_install_with_ignoreinstalled_requested(script: CpipTestEnvironment) -> 
     script.cpip_install_local("simplewheel==1.0")
     result = script.cpip_install_local("-I", "simplewheel==2.0")
     assert result.files_created, "cpip install -I did not install"
-    # both the old and new metadata should be present.
     assert os.path.exists(script.site_packages_path / "simplewheel-1.0.dist-info")
     assert os.path.exists(script.site_packages_path / "simplewheel-2.0.dist-info")
 
@@ -329,8 +328,6 @@ def test_upgrade_vcs_req_with_no_dists_found(
 @pytest.mark.network
 def test_upgrade_vcs_req_with_dist_found(script: CpipTestEnvironment) -> None:
     """It can upgrade a VCS requirement that has distributions on the index."""
-    # TODO(pnasrat) Using local_checkout fails on windows - oddness with the
-    # test path urls/git.
     req = "{url}#egg=pretend".format(
         url=(
             "git+https://github.com/alex/pretend@e7f26ad7dbcb4a02a4995aade4"
@@ -359,13 +356,11 @@ def test_install_find_existing_package_canonicalize(
     """Ensure an already-installed dist is found no matter how the dist name
     was normalized on installation. (pypa/cpip#8645)
     """
-    # Create and install a package that's not available in the later stage.
     req_container = script.scratch_path.joinpath("foo-bar")
     req_container.mkdir()
     req_path = make_wheel("foo_bar", "1.0").save_to_dir(req_container)
     script.cpip("install", "--no-index", req_path)
 
-    # Depend on the previously installed, but now unavailable package.
     pkg_container = script.scratch_path.joinpath("pkg")
     pkg_container.mkdir()
     make_wheel(
@@ -374,8 +369,6 @@ def test_install_find_existing_package_canonicalize(
         metadata_updates={"Requires-Dist": req2},
     ).save_to_dir(pkg_container)
 
-    # Ensure the previously installed package can be correctly used to match
-    # the dependency.
     result = script.cpip(
         "install",
         "--no-index",

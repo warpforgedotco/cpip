@@ -55,8 +55,6 @@ def parse_entry_points(text: str | None) -> list[SimpleNamespace]:
     if not text:
         return []
 
-    # Only reached when a distribution actually declares entry points, so
-    # keep configparser off the common metadata-loading path.
     import configparser
 
     parser = configparser.ConfigParser(delimiters=("=",), strict=False)

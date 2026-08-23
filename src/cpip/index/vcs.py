@@ -56,8 +56,6 @@ def materialize_vcs(
     emit_resolution: bool = True,
     prompting: bool = True,
 ) -> str:
-    # Only VCS-sourced candidates reach this; most lock/install requests
-    # never need subprocess.
     import subprocess
 
     reference = vcs_reference(url)

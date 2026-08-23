@@ -235,7 +235,6 @@ class MemberPaths:
         try:
             prefix = validate_member_parts(directory)
         except InstallationError:
-            # Let the per-member path raise, with the member's full name.
             return None
         if prefix and prefix[0].endswith(".data"):
             if len(prefix) < 2 or prefix[1] not in _DATA_KINDS:

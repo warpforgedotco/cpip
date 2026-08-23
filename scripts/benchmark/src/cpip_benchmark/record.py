@@ -122,9 +122,6 @@ def preflight_failures(
     """
     failures = []
     if load is None:
-        # Refusing is the same call the rest of this module makes: an
-        # unverifiable machine is exactly the one whose numbers look
-        # authoritative and are not.
         failures.append(
             "this platform reports no load average, "
             "so a busy machine cannot be ruled out",

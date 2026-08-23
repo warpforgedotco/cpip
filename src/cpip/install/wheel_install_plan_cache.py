@@ -34,14 +34,8 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from cpip.resolution.models import ResolutionResult
 
-# Every caller today already folds interpreter/platform identity into the
-# key's context tuple (see cli/install.py:cached_remote_plan_key and
-# cli/fast_install.py), but the cache should not depend on every future
-# caller remembering that -- receipts are cheap to regenerate, so scope the
-# bucket itself and make it a guarantee rather than a convention.
 RESOLUTION_CACHE_BUCKET = f"resolution-{CACHE_INTERPRETER_TAG}"
 
-# First element of the key context every remote exact-pin caller builds.
 REMOTE_EXACT_CONTEXT = "remote-exact"
 
 RESOLUTION_CACHE_TTL_SECONDS = 600.0
@@ -123,8 +117,6 @@ def exact_install_plan_key_from_strings(
 def _normalized_exact_requirement(
     requirement: object,
 ) -> tuple[str, str, tuple[str, ...]] | None:
-    # A URL or a local path locates one artifact; a plan keyed by name and
-    # version alone must never be reused for (or from) it.
     if getattr(requirement, "url", None) is not None or getattr(
         requirement, "is_unnamed_direct", False
     ):
@@ -164,7 +156,6 @@ def _exact_install_plan_key(
     if not normalized:
         return None
 
-    # Deferred: json only when a receipt key is built.
     import json
 
     payload = json.dumps(
@@ -247,7 +238,6 @@ def save_cached_install_plan(
 
         os.makedirs(directory, exist_ok=True)
 
-        # Deferred: tempfile only when a receipt is written.
         import tempfile
 
         descriptor, temporary = tempfile.mkstemp(prefix=f".{key[:12]}-", dir=directory)
@@ -412,8 +402,6 @@ def load_cached_install_plan(
             ):
                 return None
 
-    # Deferred: resolution.models is imported only when a receipt is actually
-    # loaded, not by every path that can prepare an archive.
     from cpip.resolution.models import ResolutionResult
 
     return ResolutionResult(

@@ -350,7 +350,6 @@ def test_wheel_shipping_its_own_generated_pyc_is_rejected_under_compilation(
             pycompile=True,
         )
 
-    # Without compilation the .pyc is just a member; nothing collides.
     installed = install_wheels_from_archive_cache(
         [(wheel, True, None)],
         (candidate,),
@@ -372,8 +371,6 @@ def test_unowned_target_pyc_declines_the_clone_route(tmp_path: Path) -> None:
     wheel = _make_wheel_with_members(tmp_path, "pkg_new", {"newmod.py": "x = 1\n"})
     (candidate,) = _prevalidated_candidates_for(tmp_path, cache_dir, wheel)
 
-    # A populated target holding an unrelated distribution and a stray file
-    # exactly where newmod's bytecode would land.
     target = tmp_path / "target"
     (target / "other-9.9.dist-info").mkdir(parents=True)
     (target / "other-9.9.dist-info" / "RECORD").write_text("")
@@ -391,5 +388,4 @@ def test_unowned_target_pyc_declines_the_clone_route(tmp_path: Path) -> None:
         pycompile=True,
     )
     assert declined is None
-    # The stray file is untouched: the route did not clone-and-swap.
     assert stray.read_text() == "not ours\n"

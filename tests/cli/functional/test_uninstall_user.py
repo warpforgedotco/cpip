@@ -59,14 +59,11 @@ class Tests_UninstallUserSite:
         )
         result3 = script.cpip("uninstall", "-vy", "pkg")
 
-        # uninstall console is mentioning user scripts, but not global scripts
         assert normcase(script.user_bin_path) in result3.stdout, str(result3)
         assert normcase(script.bin_path) not in result3.stdout, str(result3)
 
-        # uninstall worked
         assert_all_changes(result2, result3, [script.venv / "build", "cache"])
 
-        # site still has 0.2 (can't look in result1; have to check)
         dist_info_folder = script.base_path / script.site_packages / "pkg-0.1.dist-info"
         assert isdir(dist_info_folder)
 
@@ -78,7 +75,6 @@ class Tests_UninstallUserSite:
         """Test uninstall editable local user install"""
         assert script.user_site_path.exists()
 
-        # install
         to_install = data.packages.joinpath("FSPkg")
         result1 = script.run(
             "python",
@@ -91,7 +87,6 @@ class Tests_UninstallUserSite:
         egg_link = script.user_site / "FSPkg.egg-link"
         result1.did_create(egg_link)
 
-        # uninstall
         result2 = script.cpip("uninstall", "-y", "FSPkg")
         assert not isfile(script.base_path / egg_link)
 

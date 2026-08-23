@@ -191,8 +191,6 @@ def test_make_wheel_default_record() -> None:
         for name, values in expected.items():
             assert records[name] == values, name
 
-        # WHEEL and METADATA aren't constructed in a stable way, so just spot
-        # check.
         expected_variable = {
             "simple-0.1.0.dist-info/METADATA": "51",
             "simple-0.1.0.dist-info/WHEEL": "104",

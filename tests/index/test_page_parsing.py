@@ -29,10 +29,6 @@ BASES = (
     "",
 )
 
-# Every shape that decides whether ``urljoin`` returns an absolute URL
-# unchanged: clean absolute URLs, each delimiter-with-empty-component
-# variant, scheme casing, whitespace and control characters, empty netlocs,
-# bracketed hosts (valid and malformed), and relative references.
 HREFS = (
     "https://files.pythonhosted.org/packages/a/b/c-1.0-py3-none-any.whl",
     "https://files.pythonhosted.org/packages/c-1.0.tar.gz#sha256=abc",

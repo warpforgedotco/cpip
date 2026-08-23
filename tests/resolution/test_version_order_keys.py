@@ -12,7 +12,7 @@ import random
 from cpip.core.versions import Version
 from cpip.index.links import Link
 from cpip.index.source_models import CandidateRecord
-from packaging.version import Version as TheirVersion
+from packaging import version
 
 
 def _random_versions(rng: random.Random, count: int) -> list[Version]:
@@ -37,8 +37,7 @@ def test_version_sorts_like_the_reference_implementation() -> None:
     rng = random.Random(20260820)
     versions = _random_versions(rng, 3000)
     ours = [str(v) for v in sorted(versions)]
-    theirs = [str(v) for v in sorted(TheirVersion(str(v)) for v in versions)]
-    # Equal versions have no defined relative order; compare by text.
+    theirs = [str(v) for v in sorted(version.Version(str(v)) for v in versions)]
     assert ours == theirs
 
 
@@ -54,7 +53,6 @@ def test_summary_key_orders_like_the_version() -> None:
         versions,
         reverse=True,
     )
-    # Equal versions ("1.0" and "1.0.0") keep their input order under both.
     pairs = [Version("1.0"), Version("1.0.0"), Version("1"), Version("1.0.0.0")]
     assert [str(v) for v in sorted(pairs, key=_wire_key)] == [
         str(v) for v in sorted(pairs)

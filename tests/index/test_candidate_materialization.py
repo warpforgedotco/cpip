@@ -244,7 +244,7 @@ def test_materialized_candidate_keeps_the_resolver_layout(tmp_path: Path) -> Non
     candidate: it is what lets the installer open the wheel again without
     another central-directory scan."""
     from cpip.install.wheel_archive_runtime import RawWheelArchive, open_wheel_archive
-    from cpip.platform import archive as archive_module
+    from cpip.platform import archive
 
     wheel = _write_wheel_with_script(tmp_path, "layout-pkg", "1.0")
     provider = CandidateProvider.from_options(find_links=[str(tmp_path)], no_index=True)
@@ -256,28 +256,26 @@ def test_materialized_candidate_keeps_the_resolver_layout(tmp_path: Path) -> Non
     assert members
     assert all(len(member) == 7 for member in members)
     assert root_is_purelib is True
-    # The seventh field is the member's external attributes, exactly as
-    # zipfile reports them -- including the script's 0755.
-    with zipfile.ZipFile(wheel) as archive:
-        expected = {info.filename: info.external_attr for info in archive.infolist()}
+    with zipfile.ZipFile(wheel) as zip_file:
+        expected = {info.filename: info.external_attr for info in zip_file.infolist()}
     assert {member[0]: member[6] for member in members} == expected
     script_mode = expected["layout_pkg-1.0.data/scripts/layout-pkg-tool"] >> 16
     assert script_mode & 0o777 == 0o755
 
     scans = []
-    original = archive_module.WheelArchive.read_central_directory
+    original = archive.WheelArchive.read_central_directory
 
     def counting(self):  # noqa: ANN001, ANN202
         scans.append(1)
         return original(self)
 
-    archive_module.WheelArchive.read_central_directory = counting
+    archive.WheelArchive.read_central_directory = counting
     try:
-        with open_wheel_archive(candidate.path, candidate) as archive:
-            assert isinstance(archive, RawWheelArchive)
-            assert f"{dist_info}/METADATA" in archive.namelist()
+        with open_wheel_archive(candidate.path, candidate) as opened:
+            assert isinstance(opened, RawWheelArchive)
+            assert f"{dist_info}/METADATA" in opened.namelist()
     finally:
-        archive_module.WheelArchive.read_central_directory = original
+        archive.WheelArchive.read_central_directory = original
     assert scans == []
 
 

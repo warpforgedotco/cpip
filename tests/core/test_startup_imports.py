@@ -7,9 +7,9 @@ from pathlib import Path
 from import_harness import ROOT, baseline_modules, imported_modules, run_cpip
 
 if sys.version_info >= (3, 11):
-    import tomllib
+    from tomllib import loads
 else:
-    from cpip._vendor import tomli as tomllib
+    from cpip._vendor.tomli import loads
 
 
 PACKAGES = ROOT / "tests" / "cli" / "data" / "packages"
@@ -19,7 +19,7 @@ SIMPLEWHEEL = PACKAGES / "simplewheel-2.0-py2.py3-none-any.whl"
 def test_literal_version_matches_project_metadata() -> None:
     import cpip
 
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert cpip.__version__ == project["project"]["version"]
 
 
@@ -89,9 +89,6 @@ def test_fast_lock_produces_output_on_cache_hit(tmp_path: Path) -> None:
     assert output.is_file()
 
 
-# Modules the local fast install path must not import: each is several
-# milliseconds of interpreter work the path never uses, and together they
-# were a third of its startup cost.
 FAST_INSTALL_FORBIDDEN = frozenset(
     {
         "dataclasses",
@@ -115,8 +112,6 @@ FAST_INSTALL_FORBIDDEN = frozenset(
 def test_fast_local_install_stays_import_light(tmp_path: Path) -> None:
     import shutil
 
-    # A wheelhouse holding only wheels: the narrow resolver declines a
-    # directory with anything else in it, and then the normal path would run.
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
     shutil.copy2(SIMPLEWHEEL, wheelhouse / SIMPLEWHEEL.name)
@@ -168,7 +163,6 @@ def test_default_install_scans_installed_state_without_importlib_metadata(
 
     first = imported_modules(args, cwd=tmp_path, env=env) - baseline_modules()
     assert next(target.glob("simplewheel-2.0.dist-info"), None) is not None
-    # The second run finds simplewheel already installed in the target.
     second = imported_modules(args, cwd=tmp_path, env=env) - baseline_modules()
 
     for modules in (first, second):
@@ -239,7 +233,6 @@ def test_already_satisfied_install_answers_before_startup(tmp_path: Path) -> Non
         set(snapshot.modules) & SATISFIED_INSTALL_FORBIDDEN
     )
 
-    # A specifier the installed version does not meet is the normal path's.
     snapshot = import_snapshot(
         ["install", "--no-index", "--find-links", str(wheelhouse), "simplewheel>=3"],
         cwd=tmp_path,
@@ -251,10 +244,6 @@ def test_already_satisfied_install_answers_before_startup(tmp_path: Path) -> Non
     assert "cpip.cli.install" in snapshot.modules
 
 
-# Modules a local wheelhouse install on the normal path (no --no-compile, so
-# the fast path declines) must not import: each serves a shape this install
-# does not have -- installed-state scans, HTML index pages, --group files,
-# source builds -- and they cost ~20 ms together.
 NORMAL_INSTALL_FORBIDDEN = frozenset(
     {
         "dataclasses",
@@ -268,8 +257,6 @@ NORMAL_INSTALL_FORBIDDEN = frozenset(
         "cpip.build.build_backend",
         "email.message",
         "configparser",
-        # Not subprocess: cpip's own wrappers defer it, but the stdlib's
-        # platform module imports it on Python 3.10.
     },
 )
 
@@ -299,14 +286,10 @@ def test_normal_local_install_stays_import_light(tmp_path: Path) -> None:
     assert "cpip.cli.install" in modules
     forbidden = NORMAL_INSTALL_FORBIDDEN
     if sys.version_info >= (3, 14):
-        # ``typing`` imports ``dataclasses`` on 3.14; the normal resolver path
-        # necessarily imports typing constructs even when no build is needed.
         forbidden = forbidden - {"dataclasses"}
     assert not (modules & forbidden), sorted(modules & forbidden)
 
 
-# The list fast path reads dist-info directories and prints; it must not
-# import the typing machinery, the install fast path or the packaging core.
 FAST_LIST_FORBIDDEN = frozenset(
     {
         "typing",
@@ -335,7 +318,6 @@ def test_plain_freeze_stays_import_light(tmp_path: Path) -> None:
     )
     env = {"PYTHONPATH": f"{site}{os.pathsep}{SRC}"}
 
-    # --exclude-editable: the harness's own environment may hold editables.
     snapshot = import_snapshot(["freeze", "--exclude-editable"], cwd=tmp_path, env=env)
     assert "demo-pkg==1.2\n" in snapshot.stdout, snapshot.describe()
     forbidden = FAST_LIST_FORBIDDEN | {

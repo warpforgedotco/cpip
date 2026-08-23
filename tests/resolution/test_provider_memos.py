@@ -77,7 +77,6 @@ def test_version_memo_recomputes_for_a_replaced_requirement(
 
     monkeypatch.setattr(provider, "_versions_uncached", counting_uncached)
 
-    # Same object: the memo answers.
     assert len(provider._versions("demo")) == len(VERSIONS)
     assert computed == 0
 

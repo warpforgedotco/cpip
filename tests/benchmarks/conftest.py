@@ -115,8 +115,6 @@ def candidate_scan_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
             wheelhouse,
             "candidate-scan",
             f"1.{index}.0",
-            # Keep the newest quarter out of this interpreter's candidate set
-            # so the scan includes realistic Requires-Python rejection.
             requires_python=">=99" if index >= 96 else ">=3.9",
         )
     return wheelhouse

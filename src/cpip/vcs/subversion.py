@@ -47,13 +47,12 @@ class Subversion(VersionControl):
     @classmethod
     def get_revision(cls, location: str) -> str:
         """Return the maximum revision for all files under a given location"""
-        # Note: taken from setuptools.command.egg_info
         revision = 0
 
         for base, dirs, _ in os.walk(location):
             if cls.dirname not in dirs:
                 dirs[:] = []
-                continue  # no sense walking uncontrolled subdirs
+                continue
             dirs.remove(cls.dirname)
             dirurl, localrev = cls.get_svn_url_rev(base)
             if dirurl is None:
@@ -61,10 +60,10 @@ class Subversion(VersionControl):
 
             if base == location:
                 assert dirurl is not None
-                base = dirurl + "/"  # save the root url
+                base = dirurl + "/"
             elif not dirurl or not dirurl.startswith(base):
                 dirs[:] = []
-                continue  # not part of the same svn tree, skip it
+                continue
             revision = max(revision, localrev)
         return str(revision)
 
@@ -78,15 +77,12 @@ class Subversion(VersionControl):
         --username and --password options instead of via the URL.
         """
         if scheme == "ssh":
-            # The --username and --password options can't be used for
-            # svn+ssh URLs, so keep the auth information in the URL.
             return super().get_netloc_and_auth(netloc, scheme)
 
         return split_auth_from_netloc(netloc)
 
     @classmethod
     def get_url_rev_and_auth(cls, url: str) -> tuple[str, str | None, AuthInfo]:
-        # hotfix the URL scheme after removing svn+ from svn+ssh:// re-add it
         url, rev, user_pass = super().get_url_rev_and_auth(url)
         if url.startswith("ssh://"):
             url = "svn+" + url
@@ -104,15 +100,11 @@ class Subversion(VersionControl):
 
     @classmethod
     def get_remote_url(cls, location: str) -> str:
-        # In cases where the source is in a subdirectory, we have to look up in
-        # the location until we find a valid project root.
         orig_location = location
         while not is_installable_dir(location):
             last_location = location
             location = os.path.dirname(location)
             if location == last_location:
-                # We've traversed up to the root of the filesystem without
-                # finding a Python project.
                 logger.warning(
                     "Could not find Python project for directory %s (tried all "
                     "parent directories)",
@@ -133,29 +125,22 @@ class Subversion(VersionControl):
             with open(entries_path) as f:
                 data = f.read()
         except FileNotFoundError:
-            # subversion >= 1.7 does not have the 'entries' file
             data = ""
 
         url = None
         if data.startswith(("8", "9", "10")):
             entries = list(map(str.splitlines, data.split("\n\x0c\n")))
-            del entries[0][0]  # get rid of the '8'
+            del entries[0][0]
             url = entries[0][3]
             revs = [int(d[9]) for d in entries if len(d) > 9 and d[9]] + [0]
         elif data.startswith("<?xml"):
             match = svn_xml_url_re.search(data)
             if not match:
                 raise ValueError(f"Badly formatted data: {data!r}")
-            url = match.group(1)  # get repository URL
+            url = match.group(1)
             revs = [int(m.group(1)) for m in svn_rev_re.finditer(data)] + [0]
         else:
             try:
-                # subversion >= 1.7
-                # Note that using get_remote_call_options is not necessary here
-                # because `svn info` is being run against a local directory.
-                # We don't need to worry about making sure interactive mode
-                # is being used to prompt for passwords, because passwords
-                # are only potentially needed for remote server requests.
                 xml = cls.run_command(
                     ["info", "--xml", location],
                     show_stdout=False,
@@ -180,11 +165,6 @@ class Subversion(VersionControl):
             use_interactive = sys.stdin is not None and sys.stdin.isatty()
         self.use_interactive = use_interactive
 
-        # This member is used to cache the fetched version of the current
-        # ``svn`` client.
-        # Special value definitions:
-        #   None: Not evaluated yet.
-        #   Empty tuple: Could not parse version.
         self.vcs_version_internal: tuple[int, ...] | None = None
 
         super().__init__()
@@ -196,13 +176,6 @@ class Subversion(VersionControl):
             ``()`` if the version returned from ``svn`` could not be parsed.
         :raises: BadCommand: If ``svn`` is not installed.
         """
-        # Example versions:
-        #   svn, version 1.10.3 (r1842928)
-        #      compiled Feb 25 2019, 14:20:39 on x86_64-apple-darwin17.0.0
-        #   svn, version 1.7.14 (r1542130)
-        #      compiled Mar 28 2018, 08:49:13 on x86_64-pc-linux-gnu
-        #   svn, version 1.12.0-SlikSvn (SlikSvn/1.12.0)
-        #      compiled May 28 2019, 13:44:56 on x86_64-microsoft-windows6.2
         version_prefix = "svn, version "
         version = self.run_command(["--version"], show_stdout=False, stdout_only=True)
         if not version.startswith(version_prefix):
@@ -228,9 +201,6 @@ class Subversion(VersionControl):
         :raises: BadCommand: If ``svn`` is not installed.
         """
         if self.vcs_version_internal is not None:
-            # Use cached version, if available.
-            # If parsing the version failed previously (empty tuple),
-            # do not attempt to parse it again.
             return self.vcs_version_internal
 
         vcs_version = self.call_vcs_version()
@@ -250,19 +220,9 @@ class Subversion(VersionControl):
         :return: A list of command line arguments to pass to ``svn``.
         """
         if not self.use_interactive:
-            # --non-interactive switch is available since Subversion 0.14.4.
-            # Subversion < 1.8 runs in interactive mode by default.
             return ["--non-interactive"]
 
         svn_version = self.get_vcs_version()
-        # By default, Subversion >= 1.8 runs in non-interactive mode if
-        # stdin is not a TTY. Since that is how cpip invokes SVN, in
-        # call_subprocess(), cpip must pass --force-interactive to ensure
-        # the user can be prompted for a password, if required.
-        #   SVN added the --force-interactive option in SVN 1.8. Since
-        # e.g. RHEL/CentOS 7, which is supported until 2024, ships with
-        # SVN 1.7, cpip should continue to support SVN 1.7. Therefore, cpip
-        # can't safely add the option if the SVN version is < 1.8 (or unknown).
         if svn_version >= (1, 8):
             return ["--force-interactive"]
 

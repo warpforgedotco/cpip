@@ -72,8 +72,6 @@ def create_isolated_venv(env_path: str) -> CreatedVenv:
     project builder used by ``cpip build``/``cpip wheel`` and metadata-only
     resolution reads) to get "a working isolated venv at this path".
     """
-    # We defer these imports because certain distributions of Python do not
-    # include a functional venv out of the box.
     context: Any = None
     try:
         import virtualenv
@@ -83,8 +81,6 @@ def create_isolated_venv(env_path: str) -> CreatedVenv:
         except ImportError:
             raise VenvImportError
 
-        # Only the stdlib-venv fallback (no virtualenv package installed)
-        # needs subprocess, to bootstrap pip into the new environment.
         import subprocess
 
         env = venv.EnvBuilder(symlinks=(os.name != "nt"), with_pip=False)
@@ -124,22 +120,15 @@ def create_isolated_venv(env_path: str) -> CreatedVenv:
             raise VenvCreationError(str(e))
 
     if sys.version_info >= (3, 12) and context is not None:
-        # The context object was only documented in Python 3.12.  The
-        # virtualenv backend does not return one from ``cli_run``.
         lib_dirs = [context.lib_path]
         bin_path = context.bin_path
     elif sys.version_info >= (3, 12):
-        # Derive the same paths when virtualenv created the environment.
-        # This also keeps cpip compatible with virtualenv versions that
-        # intentionally return no context from their CLI entry point.
         lib_dirs = [get_venv_path_from_sysconfig("purelib", env_path)]
         bin_path = get_venv_path_from_sysconfig("scripts", env_path)
     elif sys.version_info[:2] == (3, 11):
-        # On Python 3.11, we can use sysconfig.
         lib_dirs = [get_venv_path_from_sysconfig("purelib", env_path)]
         bin_path = get_venv_path_from_sysconfig("scripts", env_path)
     else:
-        # Otherwise, we need to manually construct all the paths... sigh.
         if sys.platform == "win32":
             libpath = os.path.join(env_path, "Lib", "site-packages")
         else:
@@ -151,19 +140,12 @@ def create_isolated_venv(env_path: str) -> CreatedVenv:
                 "site-packages",
             )
         lib_dirs = [libpath]
-        # Same reasoning for try-except as for python_executable below.
         try:
             bin_path = context.bin_path
         except AttributeError:
             scripts_dir = "Scripts" if os.name == "nt" else "bin"
             bin_path = os.path.join(env_path, scripts_dir)
 
-    # There are enough ways trying to construct the Python executable path can go
-    # wrong that we're better off assuming that the context object has the right
-    # attributes, and only when they don't exist do we try to guess.
-    #
-    # These attributes seem to exist in every CPython version after 3.10.1 and
-    # are documented to exist on 3.12 and higher.
     try:
         python_executable = context.env_exec_cmd
     except AttributeError:

@@ -477,11 +477,6 @@ def test_get_url_from_path(
     args: tuple[str, str],
     expected: None,
 ) -> None:
-    # Every case here resolves to `expected` because the path does not
-    # exist, not because of what it looks like -- patch the real stat
-    # lookup rather than os.path.isdir/isfile so the mock actually controls
-    # the code path under test (get_url_from_path_with_mode calls
-    # cpip.resolution.input_paths._stat_mode, not os.path.isdir/isfile).
     with mock.patch(
         "cpip.resolution.input_paths._stat_mode",
         return_value=None,

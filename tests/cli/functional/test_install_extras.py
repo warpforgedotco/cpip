@@ -71,7 +71,6 @@ def test_no_extras_uninstall(script: CpipTestEnvironment) -> None:
     result.did_create(join(script.site_packages, "paste"))
     result.did_create(join(script.site_packages, "openid"))
     result2 = script.cpip("uninstall", "Paste", "-y")
-    # openid should not be uninstalled
     initools_folder = script.site_packages / "openid"
     assert initools_folder not in result2.files_deleted, result.files_deleted
 
@@ -215,7 +214,6 @@ def test_install_extra_merging(
     extra_to_install: str,
     simple_version: str,
 ) -> None:
-    # Check that extra specifications in the extras section are honoured.
     pkga_path = script.scratch_path / "pkga"
     pkga_path.mkdir()
     pkga_path.joinpath("setup.py").write_text(

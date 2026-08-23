@@ -27,7 +27,6 @@ def test_installer_and_direct_url_are_read_once(tmp_path: Path) -> None:
     assert dist.editable
     assert dist.editable_project_location == "/src/pkg"
 
-    # The answer is the instance's; a later rewrite is not re-read.
     (info / "INSTALLER").write_text("other\n")
     (info / "direct_url.json").unlink()
     assert dist.installer == "cpip"

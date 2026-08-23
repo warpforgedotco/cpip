@@ -19,9 +19,6 @@ from cpip.core.versions import Version
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
-    # typing is imported only by the type checker: the structural type and
-    # the alias below are annotations, and typing is ~1 ms of import on
-    # every show/check/list/inspect run.
     from typing import Any, NamedTuple, Protocol
 
     from cpip.core.wheel import WheelTag
@@ -177,8 +174,6 @@ def iter_installed_package_info(
         homepage = dist.metadata.get("Home-page") or ""
         if not homepage:
             for project_url in project_urls:
-                # A third-party wheel can ship a Project-URL with no comma;
-                # that is malformed, not a reason for ``cpip show`` to fail.
                 label, separator, url = project_url.partition(",")
                 if not separator:
                     continue
@@ -264,8 +259,6 @@ def format_list_columns(
         except FileNotFoundError:
             build_tags.append(None)
         else:
-            # The same first-value read email.parser would give, without
-            # importing the email package for one header per WHEEL file.
             build_tags.append(parse_metadata_text(wheel_text).get("Build"))
 
     if any(build_tags):
@@ -334,9 +327,6 @@ def format_list_json(
 
         data.append(info)
 
-    # Deferred: `json` is a three-module package, and this is the only caller
-    # in a module that `show`, `check` and `list` all import for their
-    # installed-distribution queries.
     import json
 
     return json.dumps(data)
@@ -421,8 +411,6 @@ def check_package_set(
                     missing_entry.append((canonical, requirement))
                 continue
             if dependency.version is None:
-                # Installed, but with a version no specifier can be compared
-                # against. Reporting a conflict would be a guess.
                 continue
             if not requirement.is_satisfied_by(dependency.version):
                 conflicting_entry = conflicting.get(name)
@@ -471,8 +459,6 @@ def package_set_from_dependencies(
         try:
             version = Version(dist.raw_version)
         except ValueError:
-            # A legacy or vendor-patched distribution can carry a non-PEP 440
-            # version. It is still installed, so keep it in the set.
             version = None
 
         package_set[dist.canonical_name] = PackageDetails.from_dependencies(

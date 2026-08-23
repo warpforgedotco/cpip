@@ -27,10 +27,6 @@ def test_path_to_url_win(path: str, url: str) -> None:
 
 @pytest.mark.skipif("sys.platform != 'win32'")
 def test_unc_path_to_url_win() -> None:
-    # The two and four slash forms are both acceptable for our purposes. CPython's
-    # behaviour has changed several times here, so blindly accept either.
-    # - https://github.com/python/cpython/issues/78457
-    # - https://github.com/python/cpython/issues/126205
     url = path_to_url(r"\\unc\as\path")
     assert url in ["file://unc/as/path", "file:////unc/as/path"]
 

@@ -69,7 +69,6 @@ class InstalledWheelDistribution:
 
         self.raw_version = version
 
-        # None for a legacy, non-PEP 440 version: never \"the same version\".
         self.version = version_of(version)
 
         self.canonical_name = _canonicalize_installed_name(name)
@@ -195,8 +194,6 @@ def discover_installed_wheels(
                     canonical_name = _canonicalize_installed_name(name)
 
                     if requested is not None and canonical_name not in requested:
-                        # A matching filename with different metadata is ambiguous.
-
                         return None
 
                     if canonical_name in result:

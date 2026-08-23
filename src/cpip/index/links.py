@@ -40,8 +40,6 @@ SUPPORTED_EXTENSIONS = (WHEEL_EXTENSION, *SOURCE_ARCHIVE_SUFFIXES)
 
 REQ_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 EGG_FRAGMENT_RE = re.compile(r"[#&]egg=([^&]*)")
-# Characters urllib.parse.quote(safe="/:") leaves untouched, minus the
-# separators: a name made only of these is its own quoted form.
 _URL_SAFE_NAME = re.compile(r"[A-Za-z0-9_.~-]+")
 HASH_URL_FRAGMENT_RE = re.compile(
     r"[#&]({choices})=([^&]*)".format(
@@ -51,12 +49,6 @@ HASH_URL_FRAGMENT_RE = re.compile(
 
 
 def hash_from_url_fragment(url: str) -> tuple[str, str] | None:
-    # Uncached on purpose: every link on an index page is a distinct URL,
-    # so an lru_cache here never hit (600 misses, 0 hits on a 600-link
-    # page) and only added an insert and an eviction per call. The pattern
-    # needs a ``#`` or ``&`` to anchor on; PEP 691 JSON pages carry hashes
-    # in their own field rather than a URL fragment, so most URLs skip the
-    # regex entirely.
     if "#" not in url and "&" not in url:
         return None
     match = HASH_URL_FRAGMENT_RE.search(url)
@@ -128,7 +120,6 @@ class Link:
                     else None
                 )
             except ValueError:
-                # Preserve deferred validation for non-local file URLs.
                 self.file_path_internal = None
         link_hash = hash_from_url_fragment(url)
         hashes_from_link = {} if link_hash is None else {link_hash[0]: link_hash[1]}
@@ -253,7 +244,7 @@ class Link:
         link.parsed_url_internal = urllib.parse.SplitResult(
             "file",
             "",
-            url[7:],  # after "file://"
+            url[7:],
             "",
             "",
         )
@@ -299,12 +290,7 @@ class Link:
                 f"stat:{path_stat.st_dev}:{path_stat.st_ino}:"
                 f"{path_stat.st_size}:{path_stat.st_mtime_ns}"
             )
-        # Keep the lexical path used by the caller.  Re-resolving temporary
-        # paths through a file URL can rewrite `/var` to `/private/var` on
-        # macOS, losing access to the project metadata.
         local_path = os.path.abspath(path_text) if is_dir else path_text
-        # One basename: it feeds both the display text and (for files) the
-        # artifact-kind sniff, called once per find-links entry.
         base_name = os.path.basename(path_text)
         return cls(
             path_to_url(local_path),
@@ -381,8 +367,6 @@ class Link:
         cached = self.filename_internal
         if cached is not None:
             return cached
-        # posixpath.basename inlined (it is exactly this rfind slice for a
-        # str); from_name applies the platform basename on top, as before.
         path = self.path_internal.rstrip("/")
         name = PathComponent.from_name(path[path.rfind("/") + 1 :])
         filename = name or PathComponent.from_name(
@@ -475,9 +459,6 @@ class Link:
     def egg_fragment_internal(self) -> str | None:
         url = self.url
 
-        # ``egg=`` fragments are a legacy VCS-URL feature and rare in
-        # practice; skipping the regex for the common case where the
-        # substring is absent avoids firing the engine on every link.
         if "egg=" not in url:
             return None
 

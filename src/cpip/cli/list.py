@@ -54,16 +54,13 @@ def run_list(args: list[str]) -> int:
     latest: dict[str, tuple[Any, str]] = {}
 
     if options.outdated or options.uptodate:
-        # Only --outdated/--uptodate consult an index, and that branch is what
-        # drags in the candidate provider and everything under it.  A plain
-        # listing should not pay for a subsystem it never reaches.
         from cpip.cli import config
         from cpip.core import format_control, packaging
-        from cpip.index import provider as index_provider
+        from cpip.index import provider
 
         sources = config.resolve_sources(options, config.load_source_config("list"))
 
-        provider = index_provider.CandidateProvider.from_options(
+        candidate_provider = provider.CandidateProvider.from_options(
             find_links=sources.find_links,
             index_url=sources.index_url,
             extra_index_urls=sources.extra_index_urls,
@@ -71,20 +68,20 @@ def run_list(args: list[str]) -> int:
             format_control=format_control.FormatControl(),
         )
 
-        assert provider.release_control is not None
+        assert candidate_provider.release_control is not None
 
         for value in options.all_releases:
-            provider.release_control.apply("all_releases", value)
+            candidate_provider.release_control.apply("all_releases", value)
 
         for value in options.only_final:
-            provider.release_control.apply("only_final", value)
+            candidate_provider.release_control.apply("only_final", value)
 
         for dist in distributions:
-            candidates = provider.evaluate_links(
+            candidates = candidate_provider.evaluate_links(
                 packaging.parse_requirement(dist.raw_name),
             ).accepted
 
-            allow_prereleases = provider.release_control.allows_prereleases(
+            allow_prereleases = candidate_provider.release_control.allows_prereleases(
                 dist.raw_name,
             )
 

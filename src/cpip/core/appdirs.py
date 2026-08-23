@@ -21,8 +21,6 @@ def user_cache_dir(appname: str) -> str:
     return os.path.join(home, ".cache", appname)
 
 
-# Bucket names under the versioned cache directory that the CLI needs to
-# name without importing the stores that fill them.
 HTTP_CACHE_BUCKET = "http"
 WHEEL_CACHE_BUCKET = "wheels"
 

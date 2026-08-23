@@ -122,9 +122,6 @@ class InstallationCandidate(CandidateRecord):
                 "source tree is not local",
             )
 
-        # Only local source-tree candidates reach this; wheel/sdist-archive
-        # candidates (the common case) never need build_backend's much
-        # heavier import chain.
         from cpip.build.build_backend import prepare_project_metadata
 
         try:

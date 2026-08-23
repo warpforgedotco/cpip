@@ -170,8 +170,6 @@ class WheelMetadataCache(SqliteBackedCache):
             except sqlite3.Error:
                 return None
         if row is None or not _valid_sha256(row[0]):
-            # A malformed persisted value is a miss, not a digest: returning
-            # it would key the archive cache on a non-hash.
             return None
         self.digests[identity] = row[0]
         return row[0]
@@ -251,8 +249,5 @@ def get_wheel_metadata_cache(
     key = os.path.abspath(os.fspath(cache_dir))
     cache = _CACHE_INSTANCES.get(key)
     if cache is None:
-        # Threads preparing a batch may all ask at once; setdefault is one
-        # atomic step, so a loser's instance is dropped before it holds any
-        # entry that would otherwise never be flushed.
         cache = _CACHE_INSTANCES.setdefault(key, WheelMetadataCache(key))
     return cache

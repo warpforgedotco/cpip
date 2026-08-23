@@ -13,7 +13,7 @@ def test_install_pylock(
         "install",
         "--no-index",
         "--find-links",
-        data.common_wheels,  # to obtain build backend to build sdist
+        data.common_wheels,
         "--quiet",
         "--report",
         "-",
@@ -34,9 +34,9 @@ def test_install_pylock(
         )
         for r in installed
     ] == [
-        ("simple", "2.0", False, True),  # sdist
-        ("simple2", "3.0", True, True),  # archive (direct URL)
-        ("simplewheel", "2.0", False, True),  # wheel
+        ("simple", "2.0", False, True),
+        ("simple2", "3.0", True, True),
+        ("simplewheel", "2.0", False, True),
     ]
 
 
@@ -49,7 +49,7 @@ def test_install_pylock_wheel_cache(
     args: list[str | Path] = [
         "--no-index",
         "--find-links",
-        data.common_wheels,  # to obtain build backend to build sdist
+        data.common_wheels,
         "-r",
         pylock_path,
     ]
@@ -76,7 +76,7 @@ def test_install_pylock_directory(
         "install",
         "--no-index",
         "--find-links",
-        data.common_wheels,  # to obtain build backend to build sdist
+        data.common_wheels,
         "-r",
         pylock_path,
         allow_stderr_warning=True,
@@ -228,7 +228,7 @@ def test_install_pylock_only_binary_ignored_for_archives(
         "install",
         "--no-index",
         "--find-links",
-        data.common_wheels,  # to obtain build backend to build sdist
+        data.common_wheels,
         "--dry-run",
         "-r",
         pylock_path,

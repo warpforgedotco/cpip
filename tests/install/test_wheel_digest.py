@@ -31,8 +31,6 @@ def hashed(monkeypatch: pytest.MonkeyPatch) -> list[None]:
         calls.append(None)
         return original(*args, **kwargs)
 
-    # Replace the module's reference, not hashlib itself: make_wheel hashes
-    # RECORD entries through its own import and must not be counted.
     monkeypatch.setattr(
         wheel_archive_cache,
         "hashlib",

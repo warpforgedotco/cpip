@@ -147,8 +147,6 @@ def remove_matches_http(http_cache_dir: str) -> RemoveMatches:
     ) -> bool:
         lines = result.stdout.splitlines()
 
-        # The "/arbitrary/pathname/" bit is an implementation detail of how
-        # the `populate_http_cache` fixture is implemented.
         path = os.path.join(
             http_cache_dir,
             "arbitrary",
@@ -175,8 +173,6 @@ def remove_matches_wheel(wheel_cache_dir: str) -> RemoveMatches:
 
         wheel_filename = f"{wheel_name}-py3-none-any.whl"
 
-        # The "/arbitrary/pathname/" bit is an implementation detail of how
-        # the `populate_wheel_cache` fixture is implemented.
         path = os.path.join(
             wheel_cache_dir,
             "arbitrary",
@@ -200,8 +196,6 @@ def test_cache_dir_too_many_args(script: CpipTestEnvironment, cache_dir: str) ->
 
     assert result.stdout == ""
 
-    # This would be `result.stderr == ...`, but cpip prints deprecation
-    # warnings on Python 2.7, so we check if the _line_ is in stderr.
     assert "ERROR: Too many arguments" in result.stderr.splitlines()
 
 
@@ -409,9 +403,9 @@ def test_cache_purge_removes_fast_install_snapshots(
     script: CpipTestEnvironment,
     cache_dir: str,
 ) -> None:
-    from cpip.cli.fast_install import NAME as FAST_INSTALL_SNAPSHOT_NAME
+    from cpip.cli import fast_install
 
-    snapshot = os.path.join(versioned_cache_dir(cache_dir), FAST_INSTALL_SNAPSHOT_NAME)
+    snapshot = os.path.join(versioned_cache_dir(cache_dir), fast_install.NAME)
     tree_file = os.path.join(
         versioned_cache_dir(cache_dir),
         TREE_CACHE_BUCKET,
@@ -554,11 +548,8 @@ def test_cache_purge_too_many_args(
     result = script.cpip("cache", "purge", "aaa", "--verbose", expect_error=True)
     assert result.stdout == ""
 
-    # This would be `result.stderr == ...`, but cpip prints deprecation
-    # warnings on Python 2.7, so we check if the _line_ is in stderr.
     assert "ERROR: Too many arguments" in result.stderr.splitlines()
 
-    # Make sure nothing was deleted.
     for filename in http_cache_files + wheel_cache_files:
         assert os.path.exists(filename)
 
@@ -620,21 +611,18 @@ def test_cache_purge_removes_empty_dirs(
     """
     metadata_dir = os.path.join(wheel_cache_dir, "metadata_only")
 
-    # Verify setup
     assert os.path.exists(metadata_dir)
     assert os.path.exists(os.path.join(http_cache_dir, "empty1"))
     assert os.path.exists(os.path.join(http_cache_dir, "empty3"))
 
     result = script.cpip("cache", "purge", "--verbose", allow_stderr_warning=True)
 
-    # Verify all cleanup happened
     assert not os.path.exists(metadata_dir)
     assert not os.path.exists(os.path.join(wheel_cache_dir, "completely_empty"))
     assert not os.path.exists(os.path.join(http_cache_dir, "empty1"))
     assert not os.path.exists(os.path.join(http_cache_dir, "empty3"))
     assert "Directories removed:" in result.stdout
 
-    # Verify directory count is positive
     dir_count = int(re.findall(r"Directories removed: (\d+)", result.stdout)[0])
     assert dir_count > 0
 
@@ -645,18 +633,15 @@ def test_cache_purge_with_mixed_content(
     wheel_cache_dir: str,
 ) -> None:
     """Test purge removes both wheel files and empty directories."""
-    # Add an empty directory alongside the wheels
     empty_dir = os.path.join(wheel_cache_dir, "empty_subdir")
     os.makedirs(empty_dir)
 
     result = script.cpip("cache", "purge", "--verbose")
 
-    # Verify wheels and empty directory were removed
     for name_internal, filepath in populate_wheel_cache:
         assert not os.path.exists(filepath)
     assert not os.path.exists(empty_dir)
 
-    # Verify counts in output
     assert "Files removed:" in result.stdout
     assert "Directories removed:" in result.stdout
     files_removed = int(re.findall(r"Files removed: (\d+)", result.stdout)[0])

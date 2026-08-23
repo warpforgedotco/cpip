@@ -32,8 +32,6 @@ def test_download_http_url__no_directory_traversal(
     resp.url = mock_url
     resp.headers.update(
         {
-            # Set the content-type to a random value to prevent
-            # mimetypes.guess_extension from guessing the extension.
             "content-type": "random",
             "content-disposition": 'attachment;filename="../out_dir_file"',
         },
@@ -44,7 +42,6 @@ def test_download_http_url__no_directory_traversal(
     download_dir = os.fspath(tmp_path.joinpath("download"))
     os.mkdir(download_dir)
     file_path, content_type = download(link, download_dir)
-    # The file should be downloaded to download_dir.
     actual = os.listdir(download_dir)
     assert actual == ["out_dir_file"]
     mock_raise_for_status.assert_called_once_with(resp)
@@ -73,8 +70,6 @@ class TestCheckSidecarMatchesWheel:
     """
 
     def req_internal(self) -> Mock:
-        # The helper only uses the ``req`` argument to build the resulting
-        # exception, so a stand-in object is enough.
         return Mock()
 
     def test_matching_metadata_does_not_raise(self) -> None:
@@ -93,10 +88,6 @@ class TestCheckSidecarMatchesWheel:
         check_sidecar_matches_wheel(self.req_internal(), sidecar, wheel)
 
     def test_folded_requires_dist_header_is_tolerated(self) -> None:
-        # For a folded Requires-Dist header, the email parser preserves a
-        # leading newline in the raw value on Python versions without the
-        # python/cpython#124452 fix (3.10, 3.11, <3.12.8, 3.13.0). The check
-        # must strip it, like iter_dependencies() does.
         dist = make_distribution(
             metadata_internal(
                 "Requires-Dist:",

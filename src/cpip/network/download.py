@@ -50,10 +50,6 @@ def get_http_response_size(resp: HttpResponse) -> int | None:
     except (ValueError, KeyError, TypeError):
         return None
 
-    # A negative length would make _FileDownload.is_incomplete() report a
-
-    # truncated download as complete, so treat it as unknown instead.
-
     if size < 0:
         return None
 
@@ -127,10 +123,6 @@ def parse_content_disposition(content_disposition: str, default_filename: str) -
     filename = m.get_param("filename")
 
     if filename:
-        # We need to sanitize the filename to prevent directory traversal
-
-        # in case the filename contains ".." path parts.
-
         filename = sanitize_content_filename(str(filename))
 
     return filename or default_filename
@@ -149,9 +141,7 @@ def get_http_response_filename(resp: HttpResponse, link: Link) -> PathComponent:
 
     """
 
-    filename: str = link.filename  # fallback
-
-    # Have a look at the Content-Disposition header for a better guess
+    filename: str = link.filename
 
     content_disposition = resp.headers.get("content-disposition")
 
@@ -277,8 +267,6 @@ class Downloader:
                 download.write_chunk(chunk)
 
         except OSError as e:
-            # If the download size is not known, then give up downloading the file.
-
             if download.size is None:
                 raise e
 
@@ -319,12 +307,6 @@ class Downloader:
             try:
                 resume_resp = self.http_get_resume(download, should_match=first_resp)
 
-                # Fallback: if the server responded with 200 (i.e., the file has
-
-                # since been modified or range requests are unsupported) or any
-
-                # other unexpected status, restart the download from the beginning.
-
                 must_restart = resume_resp.status_code != HTTPStatus.PARTIAL_CONTENT
 
                 if must_restart:
@@ -335,10 +317,6 @@ class Downloader:
                     first_resp = resume_resp
 
                 else:
-                    # If the resume request starts at the wrong location, fail
-
-                    # outright since the server is misbehaving.
-
                     content_range = resume_resp.headers.get("Content-Range", "")
 
                     resumed_at = content_range.lower().partition("bytes ")[2]
@@ -357,21 +335,7 @@ class Downloader:
                 SSLVerificationError,
                 OSError,
             ):
-                # The error handling here is tricky, a few notes:
-
-                #
-
-                # - Diagnostic connection errors are raised by the transport's
-
-                #   connection exception handler.
-
-                # - Streaming errors occur after the response is returned and
-
-                #   therefore bypass that connection-level handler.
-
                 continue
-
-        # No more resume attempts. Raise an error if the download is still incomplete.
 
         if download.is_incomplete():
             os.remove(download.output_file.name)
@@ -416,17 +380,9 @@ class Downloader:
     ) -> HttpResponse:
         """Issue a HTTP range request to resume the download."""
 
-        # To better understand the download resumption logic, see the mdn web docs:
-
-        # https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Range_requests
-
         headers = HEADERS.copy()
 
         headers["Range"] = f"bytes={download.bytes_received}-"
-
-        # If possible, use a conditional range request to avoid corrupted
-
-        # downloads caused by the remote file changing in-between.
 
         if identifier := get_http_response_etag_or_last_modified(should_match):
             headers["If-Range"] = identifier

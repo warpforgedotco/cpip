@@ -31,14 +31,6 @@ from cpip.resolution.nab_types import (
 _MISSING = object()
 
 
-# Sorting Versions through their comparison keys gives the order
-# Version.__lt__ defines, with the tuple comparison done in C instead of a
-# Python-level dunder per comparison.
-
-# SpecifierSet's mutable state is all memo caches, so one empty instance can
-# stand in for every "any version" requirement.
-
-
 class NabProvider:
     """Native NAB provider backed by cpip candidate discovery."""
 
@@ -60,20 +52,11 @@ class NabProvider:
         self.display_requirements: dict[str, Requirement] = {}
         self._unpinned_requirements: dict[str, tuple[Requirement, Requirement]] = {}
         self._version_cache: dict[tuple[object, ...], tuple[Version, ...]] = {}
-        # Fast paths in front of ``_version_cache``, whose key costs more to
-        # build than the lookup it guards. A package's entry in
-        # ``self.requirements`` is replaced, never mutated, so an identity
-        # check is enough to notice that the answer may have moved; a miss
-        # just falls through to the content-keyed cache below.
         self._version_memo: dict[str, tuple[Requirement, tuple[Version, ...]]] = {}
         self._priority_memo: dict[
             str, tuple[Requirement, int, tuple[int, int, str]]
         ] = {}
         self._installed_cache: dict[str, InstalledCandidate | None] = {}
-        # Forward-check memos. The catalog ones are keyed on facts that do not
-        # move during a resolution. The verdict is not: it depends on the
-        # package's active extras, which widen as extras are merged, so those
-        # are part of its key.
         self._preflight_cache: dict[tuple[str, Version, tuple[str, ...]], bool] = {}
         self._catalog_candidate_cache: dict[tuple[str, Version], object | None] = {}
         self._catalog_by_version_cache: dict[str, dict[Version, object | None]] = {}
@@ -167,8 +150,6 @@ class NabProvider:
         if installed is not None and installed.version not in versions:
             versions += (installed.version,)
         if not versions and requirement.url is None:
-            # Nothing matched under the active policy. Look again with yanked
-            # releases admitted so the package is at least known to exist.
             fallback_provider = self._provider_with_yanked()
             fallback_candidates = tuple(
                 fallback_provider.find_candidates(parse_requirement(package))
@@ -244,9 +225,6 @@ class NabProvider:
             return None
         candidate_requirement = requirement
         if len(url_constraints) == 1 and requirement.url is None:
-            # A URL constraint is an artifact identity constraint, not merely
-            # an empty version specifier.  Discover its version and use the
-            # URL requirement when materializing the selected candidate.
             candidate_requirement = url_constraints[0]
         if requirement.url is None and (
             not requirement.specifier.is_pinned
@@ -255,10 +233,6 @@ class NabProvider:
             if not isinstance(self.provider, CandidateProvider):
                 candidate_requirement = parse_requirement(package)
             else:
-                # The same name-only requirement is needed on every decision
-                # for this package; a package's entry in self.requirements
-                # is replaced, never mutated, so identity tells when the
-                # memoized one no longer matches.
                 memo = self._unpinned_requirements.get(package)
                 if memo is None or memo[0] is not requirement:
                     memo = (
@@ -436,8 +410,6 @@ class NabProvider:
         conservative check.
         """
         if len(matching) == 1:
-            # Nothing to choose between, so looking ahead cannot change the
-            # answer -- and the metadata it would read is not free.
             return matching[0]
 
         newest_first = sorted(matching, reverse=True)
@@ -454,9 +426,6 @@ class NabProvider:
         provable emptiness -- two pins whose dependency requirements share a
         package but no version -- answers ``True``.
         """
-        # Extras gate which dependencies apply, and merging one in widens the
-        # set. A verdict reached under narrower extras must not be reused
-        # after they grow, or a viable version gets skipped.
         extras = tuple(sorted(self.requirements[package].extras))
         cache_key = (package, version, extras)
         cached = self._preflight_cache.get(cache_key)
@@ -480,9 +449,6 @@ class NabProvider:
         if candidate is None:
             return False
 
-        # Two pins are the minimum that can disagree, so count them before
-        # reading any child metadata. Requirements are already parsed, making
-        # this the cheap half of the check and the common exit.
         dependencies = _dependencies_or_none(candidate)
         if dependencies is None:
             return False
@@ -492,7 +458,6 @@ class NabProvider:
             if not marker_applies(dependency.marker, extras=extras):
                 continue
             if dependency.url is not None:
-                # A direct URL is an artifact identity, not a version domain.
                 return False
             pinned = dependency.specifier.exact_version
             if pinned is None:
@@ -507,8 +472,6 @@ class NabProvider:
         for dependency, pinned in pins:
             child = self._catalog_candidate(_key(dependency), pinned)
             if child is None:
-                # The pin names a release the catalog does not offer. The
-                # resolver reports that far better than a silent skip would.
                 return False
 
             grandchildren = _dependencies_or_none(child)
@@ -552,7 +515,6 @@ class NabProvider:
         try:
             records = self.provider.release_candidates(requirement, version)
         except Exception:
-            # Metadata that will not load is the resolver's problem to report.
             records = ()
 
         if records is None:
@@ -585,13 +547,11 @@ class NabProvider:
         try:
             found = tuple(self.provider.find_candidates(parse_requirement(package)))
         except Exception:
-            # Metadata that will not load is the resolver's problem to report.
             found = ()
 
         index: dict[Version, object | None] = {}
         for candidate in found:
             version = candidate.version
-            # A release with more than one artifact is ambiguous here.
             index[version] = None if version in index else candidate
 
         self._catalog_by_version_cache[package] = index
@@ -694,8 +654,6 @@ class NabProvider:
         try:
             requires_python = getattr(candidate, "requires_python", None)
         except (OSError, ValueError):
-            # Unreadable metadata is a rejection here too -- callers that
-            # need the real reason check _invalid_metadata_rejects first.
             return True
 
         if (
@@ -708,8 +666,6 @@ class NabProvider:
         try:
             return not CandidateEvaluator.requires_python_matches(requires_python)
         except ValueError:
-            # An unparseable declaration is a rejection, not a crash --
-            # matching how available_versions treats the same metadata.
             return True
 
     def _alternative_for_requires_python(
@@ -952,9 +908,6 @@ class NabProvider:
                     for constraint in self._constraint_for(dependency_key)
                 )
             ]
-            # Keep exact dependency constraints in diagnostics even when no
-            # matching artifact exists; a finite available-version range
-            # would otherwise collapse to ``<empty>`` and hide ``==N``.
             pinned = dependency.specifier.exact_version
             if pinned is not None:
                 dependencies[dependency_key] = Range.singleton(pinned)
@@ -999,9 +952,6 @@ class NabProvider:
         conflict_counts: Mapping[str, int],
         culprit_counts: Mapping[str, int] | None = None,
     ) -> tuple[int, int, str]:
-        # ``choose_package`` runs this for every undecided package on every
-        # decision, so the scan is the hot caller. Only the conflict count
-        # moves between decisions; the version count follows the requirement.
         conflicts = conflict_counts.get(package, 0)
         requirement = self.requirements[package]
         memo = self._priority_memo.get(package)
@@ -1080,10 +1030,6 @@ class NabProvider:
         root_names = {requirement.canonical_name for requirement in requirements}
         merged = list(requirements)
         for requirement in tuple(merged):
-            # Extras merging only needs the best available candidate. Walking
-            # every source candidate here eagerly builds older sdists, which
-            # is both expensive and incorrect for offline resolution when an
-            # older source distribution is intentionally broken.
             candidate = next(
                 iter(self.provider.find_candidates(requirement, allowed_versions=None)),
                 None,
@@ -1093,8 +1039,6 @@ class NabProvider:
             try:
                 dependencies = getattr(candidate, "dependencies", ())
             except (OSError, ValueError):
-                # Malformed metadata belongs to real resolution to diagnose;
-                # this pre-scan is a best-effort extras merge and skips it.
                 continue
             for dependency in dependencies:
                 if dependency.canonical_name not in root_names or not dependency.extras:

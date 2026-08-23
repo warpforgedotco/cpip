@@ -17,10 +17,10 @@ import tarfile
 import tempfile
 
 try:
-    import tomllib
+    from tomllib import loads
 
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
-    from cpip._vendor import tomli as tomllib
+    from cpip._vendor.tomli import loads
 
 import zipfile
 from collections.abc import Callable, Iterable, Iterator
@@ -34,12 +34,6 @@ from cpip.core.versions import InvalidVersion, Version
 from cpip.core.subprocess import call_subprocess
 from cpip.install.build_env.venv import create_isolated_venv
 
-# ``pkg_resources`` was removed from setuptools 82.  Projects that only have a
-# setup.py are still built through setuptools' legacy backend, and a number of
-# otherwise installable projects import pkg_resources from setup.py.  Keep the
-# legacy fallback on the last setuptools line that provides that API.  This is
-# intentionally limited to legacy projects; modern pyproject builds own their
-# build requirements and should be free to select a newer setuptools release.
 
 LEGACY_SETUPTOOLS_REQUIREMENT = "setuptools>=40.8.0,<82"
 
@@ -66,7 +60,7 @@ class BackendSpec:
 
         try:
             with open(pyproject, encoding="utf-8") as file:
-                data = tomllib.loads(file.read())
+                data = loads(file.read())
 
         except OSError:
             try:
@@ -127,12 +121,6 @@ class BackendSpec:
                 for item in requires
             )
         ):
-            # setuptools 82 removed pkg_resources, which is still imported by
-
-            # many setup.py files. Preserve explicit requirements that exclude
-
-            # the compatible range, but constrain open-ended requirements.
-
             requires.append("setuptools<82")
 
         backend_path = build_system.get("backend-path", [])
@@ -203,10 +191,6 @@ class BackendRunner:
 
                 environment.pop("CPIP_CONSTRAINT", None)
 
-                # CPIP_FIND_LINKS is a shell-style, space-separated option.
-                # Splitting it with os.pathsep breaks file:// URLs on macOS
-                # (the colon is part of the scheme).
-
                 local_find_links = shlex.split(environment.get("CPIP_FIND_LINKS", ""))
 
                 install_options = [
@@ -215,10 +199,6 @@ class BackendRunner:
                     if link
                     for option in ("--find-links", link)
                 ]
-
-                # The bootstrap environment may contain setuptools from
-                # ensurecpip. Build requirements must still be resolved and
-                # installed through the configured index/proxy.
 
                 install_options.insert(0, "--ignore-installed")
 
@@ -235,10 +215,6 @@ class BackendRunner:
                     == "setuptools"
                     for requirement in self.spec.requirements
                 ):
-                    # Old setuptools sdists do not provide
-                    # setuptools.build_meta. Prefer the wheel when the
-                    # caller made one available in its local find-links.
-
                     install_options.extend(("--only-binary", "setuptools"))
 
                 try:
@@ -263,14 +239,6 @@ class BackendRunner:
                     detail = "\n".join(
                         part for part in (exc.stdout, exc.stderr) if part
                     )
-
-                    # A missing host setuptools installation can be recovered
-
-                    # from, but a failed constrained build must remain a
-
-                    # failure.  Falling back unconditionally would silently
-
-                    # bypass --build-constraint.
 
                     if (
                         not self.build_constraints
@@ -516,14 +484,6 @@ class ProjectBuilder:
                     and not editable
                     and read_legacy_metadata(self.source_dir) is None
                 ):
-                    # build_wheel() wants to fail fast on bad metadata
-                    # before paying for the full build below, the same as
-                    # calling prepare_metadata() first used to -- but
-                    # through this same environment instead of a second
-                    # one, since its result here is validation-only and
-                    # discarded either way. A backend that skips this
-                    # optional hook is not a failure: the real build_wheel
-                    # call below is authoritative regardless.
                     preflight_path = os.path.join(env_path, "metadata-preflight")
 
                     os.mkdir(preflight_path)
@@ -683,14 +643,6 @@ class ProjectBuilder:
         later (resolution, not a one-off metadata read) can persist it
         somewhere a later build can find.
         """
-
-        # Source distributions commonly carry the exact metadata generated at
-
-        # upload time. Reuse it during resolution instead of executing a
-
-        # potentially old or platform-specific setup.py just to discover
-
-        # dependencies. Wheel builds still invoke the declared backend below.
 
         static_metadata = read_legacy_metadata(self.source_dir)
 
@@ -944,7 +896,7 @@ class ProjectMetadataReader:
 
         try:
             with open(pyproject_path, encoding="utf-8") as file:
-                data = tomllib.loads(file.read())
+                data = loads(file.read())
 
         except OSError:
             data = None

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from cpip._vendor.nab_resolver import decide as decide_module
+from cpip._vendor.nab_resolver import decide
 from cpip.core.errors import ResolutionError
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.api import ResolutionEngine
@@ -54,17 +54,15 @@ def resolve_recording_decisions(
     """Resolve, returning every package chosen to decide, in order."""
     reset_caches()
     chosen: list[Any] = []
-    original = decide_module.choose_package_to_decide
+    original = decide.choose_package_to_decide
 
     def recording(resolver: Any) -> Any:
         package = original(resolver)
         chosen.append(package)
         return package
 
-    monkeypatch.setattr(decide_module, "choose_package_to_decide", recording)
+    monkeypatch.setattr(decide, "choose_package_to_decide", recording)
     if uncached:
-        # What a provider that cannot report its own invalidations gets:
-        # every key rebuilt on every scan.
         monkeypatch.setattr(
             NabProvider,
             "consume_priority_invalidations",
@@ -183,16 +181,6 @@ def test_key_cache_is_cleared_between_resolutions(tmp_path: Path) -> None:
     ]
 
 
-# --- Each invalidation source, in isolation -------------------------------
-#
-# End to end the sources overlap: a conflict backjumps, and the backjump
-# touches the same packages whose counts moved, so disabling any single
-# source above still reproduces the reference decision order.  Only
-# disabling all of them at once is visible there.  These drive the scan
-# directly instead, over a provider whose priority is whatever the test
-# says it is, so each source can be moved on its own.
-
-
 class StubProvider:
     """A provider whose sort key the test controls outright."""
 
@@ -215,7 +203,6 @@ class StubProvider:
         culprit_counts: Any = None,
     ) -> tuple[int, ...]:
         if self.use_range:
-            # An untouched package sorts first, so a derivation moves the key.
             base = 0 if version_range == self.full_range else 1
         else:
             base = self.priorities.get(package, 0)
@@ -251,7 +238,7 @@ def scan_resolver() -> tuple[Any, StubProvider]:
 
 
 def choose(resolver: Any) -> Any:
-    return decide_module.choose_package_to_decide(resolver)
+    return decide.choose_package_to_decide(resolver)
 
 
 def test_a_moved_range_rebuilds_the_key() -> None:
@@ -265,7 +252,6 @@ def test_a_moved_range_rebuilds_the_key() -> None:
     stub.use_range = True
     assert choose(resolver) == "alpha"
 
-    # Narrow alpha so beta's wider range now sorts first.
     cause: Incompatibility[Any, Any] = Incompatibility(
         [], IncompatibilityCause.DEPENDENCY
     )
@@ -293,7 +279,6 @@ def test_a_provider_reported_change_rebuilds_the_key() -> None:
     resolver, stub = scan_resolver()
     assert choose(resolver) == "alpha"
 
-    # Provider-internal state the resolver cannot see on its own.
     stub.priorities["beta"] = -1
     assert choose(resolver) == "alpha", "unreported change must not be picked up"
 
@@ -326,14 +311,14 @@ _ORIGINAL_CONSUME = StubProvider.consume_priority_invalidations
 
 
 def test_a_restart_drops_every_key() -> None:
-    from cpip._vendor.nab_resolver import conflict as conflict_module
+    from cpip._vendor.nab_resolver import conflict
 
     resolver, stub = scan_resolver()
     assert choose(resolver) == "alpha"
     assert resolver.priority_keys
 
     resolver.stats.package_conflict_counts["alpha"] = 99
-    threshold, remaining, restarted = conflict_module.maybe_restart(resolver, 1, 1)
+    threshold, remaining, restarted = conflict.maybe_restart(resolver, 1, 1)
 
     assert restarted
     assert not resolver.priority_keys

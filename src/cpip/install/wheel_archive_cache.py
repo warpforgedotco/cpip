@@ -66,12 +66,6 @@ else:
     WheelRequest = tuple[str, bool, object | None]
 
 
-# _extract_archive replaces an entry_root's tree/ and manifest together as
-# one atomic unit on any miss (see its os.rename below), so scoping the
-# manifest alone to the interpreter -- without also scoping the tree it is
-# published alongside -- would make two interpreters sharing a cache_dir
-# each invalidate and re-extract the other's tree on every run. Scoping the
-# whole bucket keeps each interpreter's cache self-contained instead.
 ARCHIVE_CACHE_BUCKET = f"archive-{CACHE_INTERPRETER_TAG}"
 
 _LOCK_WAIT_SECONDS = 30.0
@@ -80,8 +74,6 @@ _STALE_LOCK_SECONDS = 300.0
 
 INSTALL_WORKERS = 4
 
-
-# relative archive path, RECORD hash, RECORD size, source mode
 
 ArchiveEntry = tuple[str, str, str, int]
 
@@ -141,8 +133,6 @@ def prefetch_wheel_digests(
     cache_dir: str,
 ) -> None:
     """One database read for the recorded digests of a whole batch."""
-    # Deferred: the metadata store (and sqlite3) only for wheels without a
-    # supplied hash.
     from cpip.index.metadata_cache import get_wheel_metadata_cache, metadata_identity
 
     identities = [
@@ -275,8 +265,6 @@ def _entry_lock(path: str, entry_root: str, digest: str) -> Generator[None, None
 
         except FileExistsError:
             if load_archive(entry_root, digest) is not None:
-                # The caller will recheck after entering the no-op lock scope.
-
                 yield
 
                 return
@@ -341,7 +329,6 @@ def _extract_archive(
 ) -> CachedWheelArchive:
     shard = os.path.dirname(entry_root)
 
-    # Deferred: tempfile only when a wheel is actually extracted.
     import tempfile
 
     temporary = tempfile.mkdtemp(prefix=f".{digest[:12]}-", dir=shard)
@@ -351,7 +338,6 @@ def _extract_archive(
     os.mkdir(tree)
 
     try:
-        # Deferred: zipfile only when a wheel is actually extracted.
         import zipfile
 
         with zipfile.ZipFile(candidate.path) as archive:
@@ -495,8 +481,6 @@ def prepare_cached_wheels(
             prepare_cached_wheel(candidate, cache_dir) for candidate in candidates
         )
 
-    # Deferred: concurrent.futures drags in logging and more, and the pure-wheel
-    # fast path imports this module without ever starting a pool.
     from concurrent.futures import ThreadPoolExecutor
 
     with ThreadPoolExecutor(

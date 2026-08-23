@@ -74,17 +74,17 @@ def test_layout_open_does_not_read_the_central_directory(
     wheel: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cpip.platform import archive as archive_module
+    from cpip.platform import archive
 
     candidate = wheel_candidate_from_path(os.fspath(wheel))
 
     def no_scan(self):  # noqa: ANN001, ANN202
         raise AssertionError("central directory re-read despite a layout")
 
-    monkeypatch.setattr(archive_module.WheelArchive, "read_central_directory", no_scan)
+    monkeypatch.setattr(archive.WheelArchive, "read_central_directory", no_scan)
     monkeypatch.setattr(zipfile, "ZipFile", lambda *a, **k: pytest.fail("zipfile used"))
-    with open_wheel_archive(os.fspath(wheel), candidate) as archive:
-        assert archive.read("demo/__init__.py") == b"VALUE = 1\n"
+    with open_wheel_archive(os.fspath(wheel), candidate) as opened:
+        assert opened.read("demo/__init__.py") == b"VALUE = 1\n"
 
 
 @pytest.mark.parametrize("kind", ["big_member", "bzip2"])

@@ -168,8 +168,6 @@ class FindLinksSource:
         if snapshot is not None and snapshot.is_directory:
             directory_url: str | None = None
             if not WINDOWS:
-                # One abspath and one quote pass for the directory; each
-                # entry's link is then assembled from these and its name.
                 directory_path = os.path.abspath(path_text)
                 try:
                     directory_url = path_to_url(path_text)

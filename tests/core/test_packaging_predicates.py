@@ -34,9 +34,6 @@ from cpip.core.packaging import (
 from cpip.core.versions import Version
 
 
-# --- oracles: verbatim copies of the implementations in use at freeze time ---
-
-
 def _oracle_names_exact_version(requirement: Requirement) -> bool:
     return any(
         spec.operator in {"==", "==="} and not spec.version.endswith(".*")
@@ -55,10 +52,6 @@ def _oracle_sole_pinned_version(requirement: Requirement) -> Version | None:
 
 
 def _oracle_explicitly_allows_prereleases(specifier: SpecifierSet) -> bool:
-    # PEP 440 (and pip): a clause naming a prerelease opts the set in, except
-    # ``!=`` (excluding a prerelease is not asking for them) and ``===``; a
-    # wildcard's prefix counts. The pre-rewrite scan also counted ``!=`` and
-    # skipped wildcards; the packaging-library oracle pinned the difference.
     return any(
         clause.operator not in ("===", "!=")
         and Version(
@@ -76,8 +69,6 @@ def _oracle_is_unnamed_direct(requirement: Requirement) -> bool:
         or is_windows_path(requirement.raw)
     )
 
-
-# --- candidates: the canonical home of each meaning ---
 
 CANDIDATES: dict[
     str, tuple[Callable[[Requirement], object], Callable[[Requirement], object]]
@@ -97,8 +88,6 @@ CANDIDATES: dict[
     "is_unnamed_direct": (_oracle_is_unnamed_direct, lambda r: r.is_unnamed_direct),
 }
 
-
-# --- generators ---
 
 PIECES_VERSIONS = (
     "1.0",

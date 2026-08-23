@@ -43,10 +43,6 @@ def _header_end(contents: str) -> int:
 
 def parse_metadata_headers(contents: str) -> MetadataHeaders:
     """Parse only the core metadata fields needed by the resolver."""
-    # Split only the header region: splitlines() on the whole document
-    # would also split a long Description body into a list of lines the
-    # loop below never looks at (it stops at the first blank line, which
-    # is exactly where the header region ends).
     header_end = _header_end(contents)
     fast_headers: MetadataHeaders | None = {}
     for line in contents[:header_end].splitlines():

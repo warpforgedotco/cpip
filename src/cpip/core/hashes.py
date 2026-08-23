@@ -41,7 +41,6 @@ def hash_file(path: str, blocksize: int = 1 << 20) -> tuple[Hash, int]:
     return digest, length
 
 
-# The recommended hash algorithm of the moment.
 FAVORITE_HASH = "sha256"
 
 

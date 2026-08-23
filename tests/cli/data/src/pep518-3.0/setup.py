@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 from setuptools import setup
 
-import simplewheel  # ensure dependency is installed
+import simplewheel
 
 setup(
     name="pep518",

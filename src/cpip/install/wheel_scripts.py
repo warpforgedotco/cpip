@@ -80,13 +80,10 @@ def write_windows_script(path: str, script: str, *, gui: bool) -> None:
 
     launcher_name = f"{'w' if gui else 't'}{bits}{suffix}.exe"
 
-    # Deferred: importlib.resources pulls in inspect, and only a Windows
-    # launcher needs it.
     from importlib.resources import files
 
     launcher = (files("cpip._vendor.launchers") / launcher_name).read_bytes()
 
-    # Deferred: zipfile only for a Windows launcher.
     import zipfile
 
     archive = io.BytesIO()
@@ -171,8 +168,6 @@ def generate_entry_point_files(
             maker.make(f"{name} = {target_ref}", options={"gui": gui})
 
             if os.name == "nt":
-                # Retain the script-text form for callers that inspect it.
-
                 path = os.path.join(destination, name)
 
                 with open(path, "w", encoding="utf-8") as file:

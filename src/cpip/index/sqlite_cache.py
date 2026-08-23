@@ -67,8 +67,6 @@ class SqliteBackedCache:
         try:
             conn = self._open()
         except sqlite3.Error:
-            # A corrupt file is worth one retry from scratch; a second
-            # failure is the caller's to handle.
             try:
                 os.remove(self.path)
             except OSError:

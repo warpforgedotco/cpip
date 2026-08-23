@@ -136,8 +136,6 @@ def test_skipped_yanked_version(
 @pytest.mark.parametrize(
     "specifiers",
     [
-        # result should be the same regardless of the method and order in which
-        # extras are specified
         ("Paste[openid]==1.7.5.1",),
         ("Paste==1.7.5.1", "Paste[openid]==1.7.5.1"),
         ("Paste[openid]==1.7.5.1", "Paste==1.7.5.1"),
@@ -269,8 +267,6 @@ def test_install_report_vcs_and_wheel_cache(
         cpip_test_package_report["download_info"]["vcs_info"]["commit_id"]
         == "5547fa909e83df8bd743d3978d6667497983a4b7"
     )
-    # Now do it again to make sure the cache is used and that the report still contains
-    # the original VCS url.
     report_path.unlink()
     result = script.cpip(
         "install",

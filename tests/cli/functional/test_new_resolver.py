@@ -329,10 +329,8 @@ def test_new_resolver_installs_editable(script: CpipTestEnvironment) -> None:
 @pytest.mark.parametrize(
     "requires_python, ignore_requires_python, dep_version",
     [
-        # Something impossible to satisfy.
         ("<2", False, "0.1.0"),
         ("<2", True, "0.2.0"),
-        # Something guaranteed to satisfy.
         (">=2", False, "0.2.0"),
         (">=2", True, "0.2.0"),
     ],
@@ -507,7 +505,6 @@ def test_new_resolver_only_builds_sdists_when_needed(
         script,
         "dep",
         "0.1.0",
-        # Replace setup.py with something that fails
         extra_files={"setup.py": "assert False"},
     )
     create_basic_sdist_for_package(
@@ -515,7 +512,6 @@ def test_new_resolver_only_builds_sdists_when_needed(
         "dep",
         "0.2.0",
     )
-    # We only ever need to check dep 0.2.0 as it's the latest version
     script.cpip(
         "install",
         "--no-build-isolation",
@@ -527,7 +523,6 @@ def test_new_resolver_only_builds_sdists_when_needed(
     )
     script.assert_installed(base="0.1.0", dep="0.2.0")
 
-    # We merge criteria here, as we have two "dep" requirements
     script.cpip(
         "install",
         "--no-cache-dir",
@@ -553,7 +548,6 @@ def test_new_resolver_install_different_version(script: CpipTestEnvironment) -> 
         "base==0.1.0",
     )
 
-    # This should trigger an uninstallation of base.
     result = script.cpip(
         "install",
         "--no-cache-dir",
@@ -581,8 +575,6 @@ def test_new_resolver_force_reinstall(script: CpipTestEnvironment) -> None:
         "base==0.1.0",
     )
 
-    # This should trigger an uninstallation of base due to --force-reinstall,
-    # even though the installed version matches.
     result = script.cpip(
         "install",
         "--no-cache-dir",
@@ -602,13 +594,9 @@ def test_new_resolver_force_reinstall(script: CpipTestEnvironment) -> None:
 @pytest.mark.parametrize(
     "available_versions, cpip_args, expected_version",
     [
-        # Choose the latest non-prerelease by default.
         (["1.0", "2.0a1"], ["pkg"], "1.0"),
-        # Choose the prerelease if the specifier spells out a prerelease.
         (["1.0", "2.0a1"], ["pkg==2.0a1"], "2.0a1"),
-        # Choose the prerelease if explicitly allowed by the user.
         (["1.0", "2.0a1"], ["pkg", "--pre"], "2.0a1"),
-        # Choose the prerelease if no stable releases are available.
         (["2.0a1"], ["pkg"], "2.0a1"),
     ],
     ids=["default", "exact-pre", "explicit-pre", "no-stable"],
@@ -635,9 +623,7 @@ def test_new_resolver_handles_prerelease(
 @pytest.mark.parametrize(
     "pkg_deps, root_deps",
     [
-        # This tests the marker is picked up from a transitive dependency.
         (["dep; os_name == 'nonexist_os'"], ["pkg"]),
-        # This tests the marker is picked up from a root dependency.
         ([], ["pkg", "dep; os_name == 'nonexist_os'"]),
     ],
 )
@@ -665,8 +651,6 @@ def test_new_resolver_skips_marker(
     "constraints",
     [
         ["pkg<2.0", "constraint_only<1.0"],
-        # This also tests the pkg constraint don't get merged with the
-        # requirement prematurely. (pypa/cpip#8134)
         ["pkg<2.0"],
     ],
 )
@@ -733,7 +717,6 @@ def test_new_resolver_constraint_reject_invalid(
     constraint: str,
     error: str,
 ) -> None:
-    # Make sure CpipDeprecationWarnings don't turn into errors
     script.environ["_CPIP_TEST_ENV"] = ""
     create_basic_wheel_for_package(script, "pkg", "1.0")
     constraints_file = script.scratch_path / "constraints.txt"
@@ -838,7 +821,6 @@ def test_new_resolver_constraint_only_marker_match(script: CpipTestEnvironment) 
 
 
 def test_new_resolver_upgrade_needs_option(script: CpipTestEnvironment) -> None:
-    # Install pkg 1.0.0
     create_basic_wheel_for_package(script, "pkg", "1.0.0")
     script.cpip(
         "install",
@@ -849,10 +831,8 @@ def test_new_resolver_upgrade_needs_option(script: CpipTestEnvironment) -> None:
         "pkg",
     )
 
-    # Now release a new version
     create_basic_wheel_for_package(script, "pkg", "2.0.0")
 
-    # This should not upgrade because we don't specify --upgrade
     result = script.cpip(
         "install",
         "--no-cache-dir",
@@ -865,7 +845,6 @@ def test_new_resolver_upgrade_needs_option(script: CpipTestEnvironment) -> None:
     assert "Requirement already satisfied" in result.stdout, str(result)
     script.assert_installed(pkg="1.0.0")
 
-    # This should upgrade
     result = script.cpip(
         "install",
         "--no-cache-dir",
@@ -873,7 +852,7 @@ def test_new_resolver_upgrade_needs_option(script: CpipTestEnvironment) -> None:
         "--find-links",
         script.scratch_path,
         "--upgrade",
-        "PKG",  # Deliberately uppercase to check canonicalization
+        "PKG",
     )
 
     assert "Uninstalling pkg-1.0.0" in result.stdout, str(result)
@@ -897,7 +876,6 @@ def test_new_resolver_upgrade_strategy(script: CpipTestEnvironment) -> None:
     script.assert_installed(base="1.0.0")
     script.assert_installed(dep="1.0.0")
 
-    # Now release new versions
     create_basic_wheel_for_package(script, "base", "2.0.0", depends=["dep"])
     create_basic_wheel_for_package(script, "dep", "2.0.0")
 
@@ -911,8 +889,6 @@ def test_new_resolver_upgrade_strategy(script: CpipTestEnvironment) -> None:
         "base",
     )
 
-    # With upgrade strategy "only-if-needed" (the default), dep should not
-    # be upgraded.
     script.assert_installed(base="2.0.0")
     script.assert_installed(dep="1.0.0")
 
@@ -928,7 +904,6 @@ def test_new_resolver_upgrade_strategy(script: CpipTestEnvironment) -> None:
         "base",
     )
 
-    # With upgrade strategy "eager", dep should be upgraded.
     script.assert_installed(base="3.0.0")
     script.assert_installed(dep="2.0.0")
 
@@ -1090,8 +1065,6 @@ def test_new_resolver_build_directory_error_zazo_19(
         "pkg-a",
         "pkg-b",
     )
-    # nab prioritizes the compatible highest versions rather than pip's
-    # historical backtracking order.
     script.assert_installed(pkg_a="2.0.0", pkg_b="2.0.0")
 
 
@@ -1145,7 +1118,7 @@ def test_new_resolver_no_deps_checks_requires_python(
         "base",
         "0.1.0",
         depends=["dep"],
-        requires_python="<2",  # Something that always fails.
+        requires_python="<2",
     )
     create_basic_wheel_for_package(
         script,
@@ -1173,7 +1146,6 @@ def test_new_resolver_prefers_installed_in_upgrade_if_latest(
     create_basic_wheel_for_package(script, "pkg", "1")
     local_pkg = create_test_package_with_setup(script, name="pkg", version="2")
 
-    # Install the version that's not on the index.
     script.cpip(
         "install",
         "--no-build-isolation",
@@ -1182,7 +1154,6 @@ def test_new_resolver_prefers_installed_in_upgrade_if_latest(
         local_pkg,
     )
 
-    # nab considers the indexed candidate when upgrading.
     script.cpip(
         "install",
         "--no-build-isolation",
@@ -1201,7 +1172,6 @@ def test_new_resolver_presents_messages_when_backtracking_a_lot(
     script: CpipTestEnvironment,
     N: int,
 ) -> None:
-    # Generate a set of wheels that will definitely cause backtracking.
     for index in range(1, N + 1):
         A_version = f"{index}.0.0"
         B_version = f"{index}.0.0"
@@ -1227,7 +1197,6 @@ def test_new_resolver_presents_messages_when_backtracking_a_lot(
         print("C", C_version)
         create_basic_wheel_for_package(script, "C", C_version)
 
-    # Install A
     result = script.cpip(
         "install",
         "--no-cache-dir",
@@ -1238,7 +1207,6 @@ def test_new_resolver_presents_messages_when_backtracking_a_lot(
     )
 
     script.assert_installed(A="1.0.0", B="1.0.0", C="1.0.0")
-    # These numbers are hard-coded in the code.
     if N >= 1:
         assert "This could take a while." in result.stdout
     if N >= 8:
@@ -1250,13 +1218,8 @@ def test_new_resolver_presents_messages_when_backtracking_a_lot(
 @pytest.mark.parametrize(
     "metadata_version",
     [
-        "0.1.0+local.1",  # Normalized form.
-        "0.1.0+local_1",  # Non-normalized form containing an underscore.
-        # Non-normalized form containing a dash. This is allowed, installation
-        # works correctly, but assert_installed() fails because the test helper
-        # cannot handle it correctly. Nobody is complaining about it right now,
-        # we're probably dropping it for importlib.metadata soon(tm), so let's
-        # ignore it for the time being.
+        "0.1.0+local.1",
+        "0.1.0+local_1",
         pytest.param("0.1.0+local-1", marks=pytest.mark.xfail(strict=False)),
     ],
     ids=["meta_dot", "meta_underscore", "meta_dash"],
@@ -1264,8 +1227,8 @@ def test_new_resolver_presents_messages_when_backtracking_a_lot(
 @pytest.mark.parametrize(
     "filename_version",
     [
-        ("0.1.0+local.1"),  # Tools are encouraged to use this.
-        ("0.1.0+local_1"),  # But this is allowed (version not normalized).
+        ("0.1.0+local.1"),
+        ("0.1.0+local_1"),
     ],
     ids=["file_dot", "file_underscore"],
 )
@@ -1366,7 +1329,6 @@ def test_new_resolver_does_not_reinstall_when_from_a_local_index(
         script.scratch_path,
         "simple",
     )
-    # Should not reinstall!
     assert "Installing collected packages: simple" not in result.stdout, str(result)
     assert "Requirement already satisfied: simple" in result.stdout, str(result)
     script.assert_installed(simple="0.1.0")
@@ -1431,7 +1393,6 @@ def test_new_resolver_lazy_fetch_candidates(
     create_basic_wheel_for_package(script, "myuberpkg", "2")
     create_basic_wheel_for_package(script, "myuberpkg", "3")
 
-    # Install an old version first.
     script.cpip(
         "install",
         "--no-cache-dir",
@@ -1441,7 +1402,6 @@ def test_new_resolver_lazy_fetch_candidates(
         "myuberpkg==1",
     )
 
-    # Now install the same package again, maybe with the upgrade flag.
     if upgrade:
         cpip_upgrade_args = ["--upgrade"]
     else:
@@ -1453,25 +1413,20 @@ def test_new_resolver_lazy_fetch_candidates(
         "--find-links",
         script.scratch_path,
         "myuberpkg",
-        *cpip_upgrade_args,  # Trailing comma fails on Python 2.
+        *cpip_upgrade_args,
     )
 
-    # cpip should install the version preferred by the strategy...
     if upgrade:
         script.assert_installed(myuberpkg="3")
     else:
         script.assert_installed(myuberpkg="1")
 
-    # But should reach there in the best route possible, without trying
-    # candidates it does not need to.
     assert "myuberpkg-2" not in result.stdout, str(result)
 
 
 def test_new_resolver_no_fetch_no_satisfying(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "myuberpkg", "1")
 
-    # Install the package. This should emit a "Processing" message for
-    # fetching the distribution from the --find-links page.
     result = script.cpip(
         "install",
         "--no-cache-dir",
@@ -1482,8 +1437,6 @@ def test_new_resolver_no_fetch_no_satisfying(script: CpipTestEnvironment) -> Non
     )
     assert "Processing " in result.stdout, str(result)
 
-    # Try to upgrade the package. This should NOT emit the "Processing"
-    # message because the currently installed version is latest.
     result = script.cpip(
         "install",
         "--no-cache-dir",
@@ -1584,8 +1537,6 @@ def test_new_resolver_reinstall_link_requirement_with_constraint(
         "-r",
         cr_file,
     )
-    # TODO: strengthen assertion to "second invocation does no work"
-    # I don't think this is true yet, but it should be in the future.
 
     script.assert_installed(installed="0.1.0")
 
@@ -1711,7 +1662,6 @@ def test_new_resolver_fails_with_url_constraint_and_incompatible_version(
 
     script.assert_not_installed("test_pkg")
 
-    # Assert that cpip works properly in the absence of the constraints file.
     script.cpip(
         "install",
         "--no-cache-dir",
@@ -1807,7 +1757,6 @@ def test_new_resolver_fails_on_needed_conflicting_constraints(
 
     script.assert_not_installed("test_pkg")
 
-    # Assert that cpip works properly in the absence of the constraints file.
     script.cpip(
         "install",
         "--no-cache-dir",
@@ -1853,7 +1802,6 @@ def test_new_resolver_fails_on_conflicting_constraint_and_requirement(
 
     script.assert_not_installed("test_pkg")
 
-    # Assert that cpip works properly in the absence of the constraints file.
     script.cpip(
         "install",
         "--no-cache-dir",
@@ -2130,14 +2078,11 @@ def test_new_resolver_direct_url_equivalent(
         depends=[f"pkga@{pkga.as_uri()}{depend_suffix}"],
     )
 
-    # Make pkgb visible via --find-links, but not pkga.
     find_links = tmp_path.joinpath("find_links")
     find_links.mkdir()
     with open(pkgb, "rb") as f:
         find_links.joinpath(pkgb.name).write_bytes(f.read())
 
-    # Install pkgb from --find-links, and pkga directly but from a different
-    # URL suffix as specified in pkgb. This should work!
     script.cpip(
         "install",
         "--no-cache-dir",
@@ -2173,7 +2118,6 @@ def test_new_resolver_direct_url_with_extras(
         depends=["pkg2[ext]"],
     )
 
-    # Make pkg1 and pkg3 visible via --find-links, but not pkg2.
     find_links = tmp_path.joinpath("find_links")
     find_links.mkdir()
     with open(pkg1, "rb") as f:
@@ -2181,8 +2125,6 @@ def test_new_resolver_direct_url_with_extras(
     with open(pkg3, "rb") as f:
         find_links.joinpath(pkg3.name).write_bytes(f.read())
 
-    # Install with pkg2 only available with direct URL. The extra-ed direct
-    # URL pkg2 should be able to provide pkg2[ext] required by pkg3.
     result = script.cpip(
         "install",
         "--no-cache-dir",
@@ -2220,10 +2162,6 @@ def test_new_resolver_modifies_installed_incompatible(
         "b==1",
     )
 
-    # d-1 depends on b and c. b-1 is already installed and therefore first
-    # pinned, but later found to be incompatible since the "a==1" dependency
-    # makes all c versions impossible to satisfy. The resolver should be able to
-    # discard b-1 and backtrack, so b-2 is selected instead.
     script.cpip(
         "install",
         "--no-cache-dir",
@@ -2270,7 +2208,6 @@ def test_new_resolver_transitively_depends_on_unnamed_local(
 
 
 def to_localhost_uri(path: pathlib.Path) -> str:
-    # Something like file://localhost/path/to/package
     return path.as_uri().replace("///", "//localhost/")
 
 
@@ -2457,7 +2394,6 @@ def test_new_resolver_respect_user_requested_if_extra_is_installed(
     create_basic_wheel_for_package(script, "pkg2", "2.0", extras={"ext": ["pkg1"]})
     create_basic_wheel_for_package(script, "pkg3", "1.0", depends=["pkg2[ext]"])
 
-    # Install pkg3 with an older pkg2.
     script.cpip(
         "install",
         "--no-cache-dir",
@@ -2469,8 +2405,6 @@ def test_new_resolver_respect_user_requested_if_extra_is_installed(
     )
     script.assert_installed(pkg3="1.0", pkg2="1.0", pkg1="1.0")
 
-    # Now upgrade both pkg3 and pkg2. pkg2 should be upgraded although pkg2[ext]
-    # is not requested by the user.
     script.cpip(
         "install",
         "--no-cache-dir",
@@ -2498,7 +2432,6 @@ def test_new_resolver_constraint_on_link_with_extra(
     script.cpip(
         "install",
         "--no-cache-dir",
-        # no index, no --find-links: only the explicit path
         "--no-index",
         f"{wheel}[ext]",
         "pkg==1",
@@ -2528,7 +2461,6 @@ def test_new_resolver_constraint_on_link_with_extra_indirect(
     script.cpip(
         "install",
         "--no-cache-dir",
-        # no index, no --find-links: only the explicit path
         wheel_two,
         f"{wheel_one}[ext]",
     )

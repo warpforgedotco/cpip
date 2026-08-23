@@ -30,8 +30,6 @@ class CandidateMetadataCache(SqliteBackedCache):
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         super().__init__(os.path.join(os.fspath(cache_dir), NAME))
 
-        # Every value in ``entries`` has passed ``valid_value``: it came from
-        # ``put`` or from ``_load``.
         self.entries: dict[CacheKey, CacheValue] = {}
         self.decoded: dict[CacheKey, CandidateMetadata] = {}
 
@@ -74,8 +72,6 @@ class CandidateMetadataCache(SqliteBackedCache):
         except Exception:  # noqa: BLE001
             loaded = None
         if not self.valid_value(loaded):
-            # A row of the wrong shape is a miss; delete it on the next
-            # flush so no later process reads and rejects it again.
             self._discard(key)
             return None
         value = cast("CacheValue", loaded)
@@ -134,8 +130,6 @@ class CandidateMetadataCache(SqliteBackedCache):
 
     @staticmethod
     def decode_requirement(raw: str) -> Requirement | None:
-        # parse_requirement interns by text, so a dependency line repeated
-        # across entries costs one lookup per process.
         try:
             return parse_requirement(raw)
         except ValueError:

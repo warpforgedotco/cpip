@@ -129,8 +129,6 @@ def test_parse_gets_unexpected_oserror(
     )
     monkeypatch.chdir(tmp_path)
 
-    # inject an implementation of `tomli.load()` which emits an 'OSError(EPIPE, ...)'
-    # as though we were loading from a fifo or other unusual filetype
     def epipe_toml_load(*args: Any, **kwargs: Any) -> None:
         raise OSError(errno.EPIPE, "Broken pipe")
 

@@ -17,7 +17,6 @@ from cpip_test_support import (
 from cpip_test_support.wheel import WheelBuilder, make_wheel
 
 
-# assert_installed expects a package subdirectory, so give it to them
 def make_wheel_with_file(name: str, version: str, **kwargs: Any) -> WheelBuilder:
     extra_files = kwargs.setdefault("extra_files", {})
     extra_files[f"{name}/__init__.py"] = "# example"
@@ -133,8 +132,6 @@ def test_basic_install_from_wheel_file(
     result.did_not_create(installer_temp)
 
 
-# Installation seems to work, but scripttest fails to check.
-# I really don't care now since we're desupporting it soon anyway.
 def test_basic_install_from_unicode_wheel(
     script: CpipTestEnvironment,
     data: TestData,
@@ -296,7 +293,6 @@ def test_install_from_wheel_installs_deps(
     tmpdir: Path,
 ) -> None:
     """Test can install dependencies of wheels"""
-    # 'requires_source' depends on the 'source' project
     package = data.packages.joinpath("requires_source-1.0-py2.py3-none-any.whl")
     shutil.copy(data.packages / "source-1.0.tar.gz", tmpdir)
     result = script.cpip(
@@ -316,7 +312,6 @@ def test_install_from_wheel_no_deps(
     tmpdir: Path,
 ) -> None:
     """Test --no-deps works with wheel installs"""
-    # 'requires_source' depends on the 'source' project
     package = data.packages.joinpath("requires_source-1.0-py2.py3-none-any.whl")
     shutil.copy(data.packages / "source-1.0.tar.gz", tmpdir)
     result = script.cpip(
@@ -475,7 +470,6 @@ def test_install_from_wheel_gen_uppercase_entrypoint(
         tmpdir,
     )
     if os.name == "nt":
-        # Case probably doesn't make any difference on NT
         wrapper_file = script.bin / "cmdName.exe"
     else:
         wrapper_file = script.bin / "cmdName"
@@ -555,11 +549,6 @@ def test_install_from_wheel_no_setuptools_entrypoint(
         wrapper_file = script.bin / "t1"
     wrapper_helper = script.bin / "t1-script.py"
 
-    # The wheel has t1.exe and t1-script.py. We will be generating t1 or
-    # t1.exe depending on the platform. So we check that the correct wrapper
-    # is present and that the -script.py helper has been skipped. We can't
-    # easily test that the wrapper from the wheel has been skipped /
-    # overwritten without getting very platform-dependent, so omit that.
     result.did_create(wrapper_file)
     result.did_not_create(wrapper_helper)
 
@@ -626,8 +615,6 @@ def test_wheel_compiles_pyc(
         "--find-links",
         tmpdir,
     )
-    # There are many locations for the __init__.pyc file so attempt to find
-    #   any of them
     exists = [
         os.path.exists(script.site_packages_path / "simpledist/__init__.pyc"),
         *script.site_packages_path.glob("simpledist/__pycache__/__init__*.pyc"),
@@ -650,8 +637,6 @@ def test_wheel_no_compiles_pyc(
         "--find-links",
         tmpdir,
     )
-    # There are many locations for the __init__.pyc file so attempt to find
-    #   any of them
     exists = [
         os.path.exists(script.site_packages_path / "simpledist/__init__.pyc"),
         *script.site_packages_path.glob("simpledist/__pycache__/__init__*.pyc"),
@@ -664,7 +649,6 @@ def test_install_from_wheel_uninstalls_old_version(
     script: CpipTestEnvironment,
     data: TestData,
 ) -> None:
-    # regression test for https://github.com/pypa/cpip/issues/1825
     package = data.packages.joinpath("simplewheel-1.0-py2.py3-none-any.whl")
     result = script.cpip("install", package, "--no-index")
     package = data.packages.joinpath("simplewheel-2.0-py2.py3-none-any.whl")

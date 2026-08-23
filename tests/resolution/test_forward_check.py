@@ -73,9 +73,6 @@ def build_random_graph(wheelhouse: Path, seed: int) -> list[str]:
     for depth, name in enumerate(names):
         for version in VERSIONS:
             requires = []
-            # Only depend on later packages, so the graph stays acyclic and
-            # every generated wheelhouse is a fair test rather than a
-            # cycle-handling test.
             for other in names[depth + 1 :]:
                 if rng.random() > 0.55:
                     continue
@@ -144,8 +141,6 @@ def test_impossible_pins_are_skipped_without_conflicts(tmp_path: Path) -> None:
         "fam-right": "1.1.0",
         "fam-shared": "1.1.0",
     }
-    # Reaching that answer by walking every root is what the check prevents;
-    # the ceiling is what makes this a regression test rather than a smoke test.
     assert result.metrics["nab_conflicts"] <= 2, result.metrics
 
 
@@ -162,8 +157,6 @@ def test_unsolvable_graphs_still_fail(tmp_path: Path) -> None:
     with pytest.raises(ResolutionError) as caught:
         resolve_or_raise(wheelhouse, ["app"])
 
-    # The resolver's own derivation is what explains the failure; the check
-    # must not have short-circuited it into something less informative.
     assert str(caught.value)
 
 

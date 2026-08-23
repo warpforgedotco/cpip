@@ -8,7 +8,7 @@ setup(
     description="File system test package",
     long_description="""\
 File system test package""",
-    classifiers=[],  # Get strings from https://pypi.org/pypi?%3Aaction=list_classifiers
+    classifiers=[],
     keywords="cpip tests",
     author="cpip",
     author_email="cpip@openplans.org",
@@ -18,7 +18,6 @@ File system test package""",
     include_package_data=True,
     zip_safe=False,
     install_requires=[
-        # -*- Extra requirements: -*-
     ],
     entry_points="""
       # -*- Entry points: -*-

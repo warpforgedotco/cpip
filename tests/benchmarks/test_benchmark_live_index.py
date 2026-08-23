@@ -89,7 +89,7 @@ def test_live_artifact_head(benchmark: BenchmarkFixture) -> None:
     def request_artifact() -> int:
         try:
             response = session.head(url)
-        except Exception as error:  # network outcome is the measured path
+        except Exception as error:
             return len(type(error).__name__)
         try:
             return response.status_code

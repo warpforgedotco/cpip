@@ -168,12 +168,12 @@ def test_uptodate_flag(script: CpipTestEnvironment, data: TestData) -> None:
     for item in json_output:
         if "editable_project_location" in item:
             item["editable_project_location"] = "<location>"
-    assert {"name": "simple", "version": "1.0"} not in json_output  # 3.0 is latest
+    assert {"name": "simple", "version": "1.0"} not in json_output
     assert {
         "name": "pip-test-package",
         "version": "0.1.1",
         "editable_project_location": "<location>",
-    } in json_output  # editables included
+    } in json_output
     assert {"name": "simple2", "version": "3.0"} in json_output
 
 
@@ -204,7 +204,7 @@ def test_uptodate_columns_flag(script: CpipTestEnvironment, data: TestData) -> N
     )
     assert "Package" in result.stdout
     assert "Version" in result.stdout
-    assert "Editable project location" in result.stdout  # editables included
+    assert "Editable project location" in result.stdout
     assert "pip-test-package (0.1.1," not in result.stdout
     assert "pip-test-package 0.1.1" in result.stdout, str(result)
     assert "simple2          3.0" in result.stdout, str(result)
@@ -296,7 +296,7 @@ def test_outdated_columns_flag(script: CpipTestEnvironment, data: TestData) -> N
     assert "simplewheel (1.0) - Latest: 2.0 [wheel]" not in result.stdout
     assert "simple           1.0     3.0    sdist" in result.stdout, str(result)
     assert "simplewheel      1.0     2.0    wheel" in result.stdout, str(result)
-    assert "simple2" not in result.stdout, str(result)  # 3.0 is latest
+    assert "simple2" not in result.stdout, str(result)
 
 
 @pytest.fixture(scope="session")
@@ -496,7 +496,6 @@ def test_outdated_pre(script: CpipTestEnvironment, data: TestData) -> None:
         "simple==1.0",
     )
 
-    # Let's build a fake wheelhouse
     script.scratch_path.joinpath("wheelhouse").mkdir()
     wheelhouse_path = script.scratch_path / "wheelhouse"
     wheelhouse_path.joinpath("simple-1.1-py2.py3-none-any.whl").write_text("")
@@ -551,7 +550,6 @@ def test_outdated_formats(script: CpipTestEnvironment, data: TestData) -> None:
         "simple==1.0",
     )
 
-    # Let's build a fake wheelhouse
     script.scratch_path.joinpath("wheelhouse").mkdir()
     wheelhouse_path = script.scratch_path / "wheelhouse"
     wheelhouse_path.joinpath("simple-1.1-py2.py3-none-any.whl").write_text("")
@@ -564,7 +562,6 @@ def test_outdated_formats(script: CpipTestEnvironment, data: TestData) -> None:
     )
     assert "simple==1.0" in result.stdout
 
-    # Check columns
     result = script.cpip(
         "list",
         "--no-index",
@@ -576,7 +573,6 @@ def test_outdated_formats(script: CpipTestEnvironment, data: TestData) -> None:
     assert "Package Version Latest Type" in result.stdout
     assert "simple  1.0     1.1    wheel" in result.stdout
 
-    # Check that freeze is not allowed
     result = script.cpip(
         "list",
         "--no-index",
@@ -591,7 +587,6 @@ def test_outdated_formats(script: CpipTestEnvironment, data: TestData) -> None:
         in result.stderr
     )
 
-    # Check json
     result = script.cpip(
         "list",
         "--no-index",
@@ -727,11 +722,9 @@ def test_list_path_multiple(
 
 def test_list_skip_work_dir_pkg(script: CpipTestEnvironment) -> None:
     """Test that list should not include package in working directory"""
-    # Create a test package and create .egg-info dir
     pkg_path = create_test_package_with_setup(script, name="simple", version="1.0")
     script.run("python", "setup.py", "egg_info", expect_stderr=True, cwd=pkg_path)
 
-    # List should not include package simple when run from package directory
     result = script.cpip("list", "--format=json", cwd=pkg_path)
     json_result = json.loads(result.stdout)
     assert {"name": "simple", "version": "1.0"} not in json_result
@@ -741,14 +734,11 @@ def test_list_include_work_dir_pkg(script: CpipTestEnvironment) -> None:
     """Test that list should include package in working directory
     if working directory is added in PYTHONPATH
     """
-    # Create a test package and create .egg-info dir
     pkg_path = create_test_package_with_setup(script, name="simple", version="1.0")
     script.run("python", "setup.py", "egg_info", expect_stderr=True, cwd=pkg_path)
 
     script.environ.update({"PYTHONPATH": pkg_path})
 
-    # List should include package simple when run from package directory
-    # when the package directory is in PYTHONPATH
     result = script.cpip("list", "--format=json", cwd=pkg_path)
     json_result = json.loads(result.stdout)
     assert {"name": "simple", "version": "1.0"} in json_result
@@ -762,7 +752,6 @@ def test_list_pep610_editable(script: CpipTestEnvironment) -> None:
     result = script.cpip("install", "--no-build-isolation", pkg_path)
     direct_url_path = result.get_created_direct_url_path("testpkg")
     assert direct_url_path
-    # patch direct_url.json to simulate an editable install
     with open(direct_url_path) as f:
         direct_url_dict = json.load(f)
     assert "dir_info" in direct_url_dict
@@ -798,13 +787,11 @@ def test_outdated_only_final_for_specific_package(
     """Test that --only-final filters prereleases for specific package."""
     script.cpip_install_local("simple==1.0")
 
-    # Create fake wheelhouse with prerelease
     wheelhouse_path = script.scratch_path / "wheelhouse"
     wheelhouse_path.mkdir()
     make_wheel("simple", "1.1").save_to_dir(wheelhouse_path)
     make_wheel("simple", "2.0a1").save_to_dir(wheelhouse_path)
 
-    # Without --only-final, should show 1.1 (highest stable)
     result = script.cpip(
         "list",
         "--no-index",
@@ -818,7 +805,6 @@ def test_outdated_only_final_for_specific_package(
     assert outdated[0]["name"] == "simple"
     assert outdated[0]["latest_version"] == "1.1"
 
-    # With --only-final for simple, should still show 1.1
     result = script.cpip(
         "list",
         "--no-index",
@@ -841,13 +827,11 @@ def test_outdated_all_releases_for_specific_package(
     """Test that --all-releases allows prereleases for specific package."""
     script.cpip_install_local("simple==1.0")
 
-    # Create fake wheelhouse with prerelease
     wheelhouse_path = script.scratch_path / "wheelhouse"
     wheelhouse_path.mkdir()
     make_wheel("simple", "1.1").save_to_dir(wheelhouse_path)
     make_wheel("simple", "2.0a1").save_to_dir(wheelhouse_path)
 
-    # With --all-releases for simple, should show 2.0a1 (highest including prereleases)
     result = script.cpip(
         "list",
         "--no-index",

@@ -266,7 +266,6 @@ def warm_index(
                 for wheel in wheels
             ],
         )
-    # The page cache is always fresh: this is the second run, not the first.
     session = SimpleNamespace(cache=cache, has_fresh_cached_response=lambda url: True)
     cache_dir = str(root / "cache")
     os.makedirs(cache_dir)

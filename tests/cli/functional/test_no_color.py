@@ -13,14 +13,6 @@ from cpip_test_support import CpipTestEnvironment
 @pytest.mark.skipif(shutil.which("script") is None, reason="no 'script' executable")
 def test_no_color(script: CpipTestEnvironment) -> None:
     """Ensure colour output disabled when --no-color is passed."""
-    # Using 'script' in this test allows for transparently testing cpip's output
-    # since cpip is smart enough to disable colour output when piped, which is
-    # not the behaviour we want to be testing here.
-    #
-    # On the other hand, this test is non-portable due to the options passed to
-    # 'script' and well as the mere use of the same.
-    #
-    # This test will stay until someone has the time to rewrite it.
     cpip_command = "cpip download {} setuptools==62.0.0 --no-cache-dir -d /tmp/"
     if sys.platform == "darwin":
         command = f"script -q /tmp/cpip-test-no-color.txt {cpip_command}"

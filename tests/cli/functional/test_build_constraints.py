@@ -243,13 +243,11 @@ def test_constraints_dont_pass_through_with_build_constraints(
         version="1.0",
         py_modules=["test_isolation"],
     )
-    # An impossible regular constraint that would break the build if it leaked.
     constraints = create_constraints_file(
         script=script,
         filename="constraints.txt",
         content="setuptools==2000\n",
     )
-    # A satisfiable build constraint.
     build_constraints = create_constraints_file(
         script=script,
         filename="build_constraints.txt",

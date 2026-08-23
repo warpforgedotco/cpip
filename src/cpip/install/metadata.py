@@ -142,8 +142,6 @@ def direct_url_from_link(
     link_is_in_wheel_cache: bool = False,
 ) -> DirectUrl:
     if link.is_vcs:
-        # Deferred: the VCS backends (and their subprocess support) only for
-        # a VCS link.
         from cpip.vcs.versioncontrol import vcs
 
         vcs_backend = vcs.get_backend_for_scheme(link.scheme)

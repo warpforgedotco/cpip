@@ -18,10 +18,6 @@ from cpip_test_support.venv import VirtualEnvironment
 
 
 def patch_dist_in_site_packages(virtualenv: VirtualEnvironment) -> None:
-    # Since the tests are run from a virtualenv, and to avoid the "Will not
-    # install to the usersite because it will lack sys.path precedence..."
-    # error: Monkey patch the Distribution class so it's possible to install a
-    # conflicting distribution in the user site.
     virtualenv.sitecustomize = textwrap.dedent("""
         def dist_in_site_packages(dist):
             return False
@@ -102,8 +98,6 @@ class Tests_UserSite:
         data: TestData,
     ) -> None:
         """User install in virtualenv (with no system packages) fails with message"""
-        # We can't use PYTHONNOUSERSITE, as it's not
-        # honoured by virtualenv's custom site.py.
         virtualenv.user_site_packages = False
         run_from = data.packages.joinpath("FSPkg")
         result = script.cpip(
@@ -133,10 +127,8 @@ class Tests_UserSite:
             data.pypi_packages,
         )
 
-        # usersite has 0.1
         dist_info_folder = script.user_site / "initools-0.1.dist-info"
         initools_v2_file = (
-            # file only in 0.2
             script.base_path / script.user_site / "initools" / "configparser.py"
         )
         result2.did_create(dist_info_folder)
@@ -171,13 +163,11 @@ class Tests_UserSite:
             "initools==0.1",
         )
 
-        # usersite has 0.1
         dist_info_folder = script.user_site / "initools-0.1.dist-info"
         initools_folder = script.user_site / "initools"
         result2.did_create(dist_info_folder)
         result2.did_create(initools_folder)
 
-        # site still has 0.2 (can't look in result1; have to check)
         dist_info_folder = (
             script.base_path / script.site_packages / "initools-0.2.dist-info"
         )
@@ -215,13 +205,11 @@ class Tests_UserSite:
             "initools",
         )
 
-        # usersite has 0.3.1
         dist_info_folder = script.user_site / "initools-0.3.1.dist-info"
         initools_folder = script.user_site / "initools"
         result2.did_create(dist_info_folder)
         result2.did_create(initools_folder)
 
-        # site still has 0.2 (can't look in result1; have to check)
         dist_info_folder = (
             script.base_path / script.site_packages / "initools-0.2.dist-info"
         )
@@ -273,13 +261,11 @@ class Tests_UserSite:
             "initools==0.1",
         )
 
-        # usersite has 0.1
         dist_info_folder = script.user_site / "initools-0.1.dist-info"
         result3.did_create(dist_info_folder)
         initools_v3_file = script.base_path / script.user_site / initools_v3_file_name
         assert not isfile(initools_v3_file), initools_v3_file
 
-        # site still has 0.2 (can't just look in result1; have to check)
         dist_info_folder = (
             script.base_path / script.site_packages / "initools-0.2.dist-info"
         )
@@ -337,7 +323,6 @@ class Tests_UserSite:
         """Test that --user install fails when user site-packages are disabled."""
         create_basic_wheel_for_package(script, "pkg", "0.1")
 
-        # Create a custom Python script that disables user site and runs cpip via exec
         test_script = script.scratch_path / "test_disable_user_site.py"
         test_script.write_text(
             textwrap.dedent(f"""

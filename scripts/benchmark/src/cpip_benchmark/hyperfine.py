@@ -6,17 +6,6 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 
-# hyperfine runs every benchmarked command through a shell unless told
-# otherwise, and on macOS that shell is the SIP-protected /bin/sh, which strips
-# DYLD_* out of the environment before the measured process ever starts -- so a
-# profiler that attaches by injection (CodSpeed's walltime instrument, samply,
-# Instruments) silently measures nothing. --shell=none also drops a fork+exec
-# from every timed iteration, which matters for the startup-* benchmarks.
-#
-# The cost is that a command string is no longer interpreted: env assignments
-# and '&&' chains have to go somewhere else. Per-command env rides on the
-# hyperfine process (see ``Hyperfine.environment``) and multi-step preparation
-# goes through ``cpip_benchmark.runner chain``.
 NO_SHELL = "-N"
 
 

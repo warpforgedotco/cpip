@@ -36,12 +36,8 @@ from filelock import FileLock
 
 sys.path.insert(0, str(Path(__file__).parent / "tests/cli"))
 
-# Config will be available from the public API in pytest >= 7.0.0:
-# https://github.com/pytest-dev/pytest/commit/88d84a57916b592b070f4201dc84f0286d1f9fef
 from _pytest.config import Config
 
-# Parser will be available from the public API in pytest >= 7.0.0:
-# https://github.com/pytest-dev/pytest/commit/538b5c24999e9ebb4fab43faabc8bcc28737bcdf
 from _pytest.config.argparsing import Parser
 from cpip_test_support import (
     DATA_DIR,
@@ -60,8 +56,6 @@ from installer.sources import WheelFile
 
 from cpip.core.temp_dir import global_tempdir_manager
 
-# For the cpip zipapp, Python modules are replaced with their .pyc equivalent to
-# speed up startup, but some modules must remain as .py files for cpip to function.
 ZIPAPP_PYC_BLOCKLIST = [
     "cpip/__cpip-runner__.py",
 ]
@@ -124,9 +118,9 @@ def pytest_addoption(parser: Parser) -> None:
 
 def pytest_configure(config: Config) -> None:
     """Make pytest's numbered-directory cleanup tolerate transient races."""
-    from _pytest import pathlib as pytest_pathlib
+    from _pytest import pathlib
 
-    original = pytest_pathlib.on_rm_rf_error
+    original = pathlib.on_rm_rf_error
     if getattr(original, "_cpip_retry_enotempty", False):
         return
 
@@ -151,22 +145,20 @@ def pytest_configure(config: Config) -> None:
         return original(func, path, excinfo, start_path=start_path)
 
     on_rm_rf_error._cpip_retry_enotempty = True  # type: ignore[attr-defined]
-    pytest_pathlib.on_rm_rf_error = on_rm_rf_error
+    pathlib.on_rm_rf_error = on_rm_rf_error
 
 
 def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) -> None:
     for item in items:
-        if not hasattr(item, "module"):  # e.g.: DoctestTextfile
+        if not hasattr(item, "module"):
             continue
 
         if item.get_closest_marker("search") and not config.getoption("--run-search"):
             item.add_marker(pytest.mark.skip("cpip search test skipped"))
 
-        # Exempt tests known to use the network from pytest-subket.
         if item.get_closest_marker("network") is not None:
             item.add_marker(pytest.mark.enable_socket)
 
-        # Mark network tests as flaky in CI.
         if "CI" in os.environ and item.get_closest_marker("network") is not None:
             item.add_marker(pytest.mark.flaky(reruns=3, reruns_delay=2))
 
@@ -218,8 +210,6 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
         elif module_root_dir.startswith("unit"):
             item.add_marker(pytest.mark.unit)
 
-            # We don't want to allow using the script resource if this is a
-            # unit test, as unit tests should not need all that heavy lifting
             if "script" in item.fixturenames:
                 raise RuntimeError(
                     "Cannot use the ``script`` funcarg in a unit test: "
@@ -292,7 +282,6 @@ def resolver_variant(request: pytest.FixtureRequest) -> Iterator[str]:
     """Set environment variable to make cpip default to the correct resolver."""
     resolver = request.config.getoption("--resolver")
 
-    # Handle the environment variables for this test.
     features = set(os.environ.get("CPIP_USE_FEATURE", "").split())
     deprecated_features = set(os.environ.get("CPIP_USE_DEPRECATED", "").split())
 
@@ -335,19 +324,14 @@ def isolate(tmpdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     We use an autouse function scoped fixture because we want to ensure that
     every test has it's own isolated home directory.
     """
-    # TODO: Figure out how to isolate from *system* level configuration files
-    #       as well as user level configuration files.
 
-    # Create a directory to use as our home location.
     home_dir = os.path.join(str(tmpdir), "home")
     os.makedirs(home_dir)
 
-    # Create a directory to use as a fake root
     fake_root = os.path.join(str(tmpdir), "fake-root")
     os.makedirs(fake_root)
 
     if sys.platform == "win32":
-        # Note: this will only take effect in subprocesses...
         home_drive, home_path = os.path.splitdrive(home_dir)
         monkeypatch.setenv("USERPROFILE", home_dir)
         monkeypatch.setenv("HOMEDRIVE", home_drive)
@@ -360,11 +344,7 @@ def isolate(tmpdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
             monkeypatch.setenv(env_var, path)
             os.makedirs(path)
     else:
-        # Set our home directory to our temporary directory, this should force
-        # all of our relative configuration files to be read from here instead
-        # of the user's actual $HOME directory.
         monkeypatch.setenv("HOME", home_dir)
-        # Isolate ourselves from XDG directories
         monkeypatch.setenv(
             "XDG_DATA_HOME",
             os.path.join(
@@ -406,28 +386,20 @@ def isolate(tmpdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
             ),
         )
 
-    # Configure git, because without an author name/email git will complain
-    # and cause test failures.
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    # Keep VCS tests deterministic and non-interactive. Normal cpip commands
-    # retain their interactive prompting behavior outside the pytest harness.
     monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
     monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
     monkeypatch.setenv("GIT_AUTHOR_NAME", "cpip")
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "distutils-sig@python.org")
     monkeypatch.delenv("CPIP_NO_PARTIAL_CLONE_FOR_BROKEN_GIT_SERVER", False)
 
-    # We want to disable the version check from running in the tests
     monkeypatch.setenv("CPIP_DISABLE_CPIP_VERSION_CHECK", "true")
 
-    # Make sure tests don't share a requirements tracker.
     monkeypatch.delenv("CPIP_BUILD_TRACKER", False)
 
-    # Make sure color control variables don't affect internal output.
     monkeypatch.delenv("FORCE_COLOR", False)
     monkeypatch.delenv("NO_COLOR", False)
 
-    # FIXME: Windows...
     os.makedirs(os.path.join(home_dir, ".config", "git"))
     with open(os.path.join(home_dir, ".config", "git", "config"), "wb") as fp:
         fp.write(b"[user]\n\tname = cpip\n\temail = distutils-sig@python.org\n")
@@ -452,26 +424,21 @@ def scoped_global_tempdir_manager(request: pytest.FixtureRequest) -> Iterator[No
 @pytest.fixture(scope="session")
 def cpip_src(tmpdir_factory: pytest.TempPathFactory) -> Path:
     def not_code_files_and_folders(path: str, names: list[str]) -> Iterable[str]:
-        # In the root directory...
         if os.path.samefile(path, SRC_DIR):
             folders = {
                 name for name in names if os.path.isdir(os.path.join(path, name))
             }
             to_ignore = folders - {"src"}
-            # and ignore ".git" if present (which may be a file if in a linked
-            # worktree).
             if ".git" in names:
                 to_ignore.add(".git")
             return to_ignore
 
-        # Ignore all compiled files and egg-info.
         ignored = set()
         for pattern in ("__pycache__", "*.pyc", "cpip.egg-info"):
             ignored.update(fnmatch.filter(names, pattern))
         return ignored
 
     cpip_src = tmpdir_factory.mktemp("cpip_src").joinpath("cpip_src")
-    # Copy over our source tree so that each use is self contained
     shutil.copytree(
         SRC_DIR,
         cpip_src.resolve(),
@@ -493,11 +460,6 @@ def cpip_editable_parts(
     )
     cpip_self_install_path = tmpdir_factory.mktemp("cpip_self_install")
     shutil.copytree(SRC_DIR / "src" / "cpip", cpip_self_install_path / "cpip")
-    # Target installs still generate console scripts in the active Python
-    # environment.  Every xdist worker builds this session fixture, so the
-    # installs must not concurrently replace the shared ``.venv/bin/cpip``.
-    # Otherwise one worker can move that file into its transaction backup just
-    # as another worker tries to move it, leaving the subprocess without cpip.
     lock_path = Path(tempfile.gettempdir()) / "cpip-tests-editable-install.lock"
     with FileLock(lock_path):
         subprocess.check_call(
@@ -552,10 +514,6 @@ def common_wheel_editable_install(
             ),
             additional_metadata={},
         )
-    # The scripts are not necessary for our use cases, and they would be installed with
-    # the wrong interpreter, so remove them.
-    # TODO consider a refactoring by adding a install_from_wheel(path) method
-    # to the virtualenv fixture.
     if bin_install_dir.exists():
         shutil.rmtree(bin_install_dir)
     return lib_install_dir
@@ -579,9 +537,6 @@ def coverage_install(tmpdir_factory: pytest.TempPathFactory) -> Path:
         destination = install_dir / str(file)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
-    # The copied package is already selected for this interpreter/platform.
-    # Mark the fixture as universal so cpip check does not reject the host's
-    # manylinux wheel tag when it scans the isolated test environment.
     for wheel_metadata in install_dir.glob("*.dist-info/WHEEL"):
         contents = wheel_metadata.read_text(encoding="utf-8")
         contents = "\n".join(
@@ -599,8 +554,6 @@ def socket_install(tmpdir_factory: pytest.TempPathFactory, common_wheels: Path) 
         common_wheels,
         "pytest_subket",
     )
-    # pytest-subket is only included so it can intercept and block unexpected
-    # network requests. It should NOT be visible to the cpip under test.
     dist_info = next(lib_dir.glob("*.dist-info"))
     shutil.rmtree(dist_info)
     return lib_dir
@@ -633,11 +586,9 @@ def virtualenv_template(
     else:
         venv_type = "virtualenv"
 
-    # Create the virtual environment
     tmpdir = tmpdir_factory.mktemp("virtualenv")
     venv = VirtualEnvironment(tmpdir.joinpath("venv_orig"), venv_type=venv_type)
 
-    # Install setuptools, pytest-subket, and cpip.
     install_pth_link(venv, "setuptools", setuptools_install)
     install_pth_link(venv, "pytest_subket", socket_install)
     dependency_root = tmpdir_factory.mktemp("cpip_test_dependencies")
@@ -658,7 +609,6 @@ def virtualenv_template(
         str(dependency_root),
         encoding="utf-8",
     )
-    # Also copy pytest-subket's .pth file so it can intercept socket calls.
     with open(venv.site / "pytest_socket.pth", "w") as f:
         f.write(socket_install.joinpath("pytest_socket.pth").read_text())
 
@@ -671,26 +621,17 @@ def virtualenv_template(
         dirs_exist_ok=True,
         symlinks=True,
     )
-    # Create placeholder ``easy-install.pth``, as several tests depend on its
-    # existence.  TODO: Ensure
-    # ``cpip_test_support.TestCpipResult.files_updated`` correctly detects changed files.
     venv.site.joinpath("easy-install.pth").touch()
 
     if request.config.getoption("--cov"):
-        # Install coverage and pth file for executing it in any spawned processes
-        # in this virtual environment.
         install_pth_link(venv, "coverage", coverage_install)
-        # zz prefix ensures the file is after easy-install.pth.
         with open(venv.site / "zz-coverage-helper.pth", "a") as f:
             f.write("import coverage; coverage.process_startup()")
 
-    # Drop (non-relocatable) launchers.
     for exe in os.listdir(venv.bin):
-        if not exe.startswith(("python", "libpy")):  # Don't remove libpypy-c.so...
+        if not exe.startswith(("python", "libpy")):
             (venv.bin / exe).unlink()
 
-    # Rename original virtualenv directory to make sure
-    # it's not reused by mistake from one of the copies.
     venv_template = tmpdir / "venv_template"
     venv.move(venv_template)
     return venv
@@ -736,21 +677,13 @@ def script_factory(
         if virtualenv is None:
             virtualenv = virtualenv_factory(tmpdir.joinpath("venv"))
         return CpipTestEnvironment(
-            # The base location for our test environment
             tmpdir,
-            # Tell the Test Environment where our virtualenv is located
             virtualenv=virtualenv,
-            # Do not ignore hidden files, they need to be checked as well
             ignore_hidden=False,
-            # We are starting with an already empty directory
             start_clear=False,
-            # We want to ensure no temporary files are left behind, so the
-            # CpipTestEnvironment needs to capture and assert against temp
             capture_temp=True,
             assert_no_temp=True,
-            # Deprecated python versions produce an extra deprecation warning
             cpip_expect_warning=deprecated_python,
-            # Tell the Test Environment if we want to run cpip via a zipapp
             zipapp=zipapp,
             **kwargs,
         )
@@ -773,8 +706,6 @@ runpy.run_module("cpip", run_name="__main__")
 
 
 def make_zipapp_from_pip(cpip_src: Path, zipapp_path: Path) -> None:
-    # cpip_src will exclude existing .pyc files, but to speed up zipapp
-    # startup, replace the .py files with their equivalent .pyc (CPython only)
     src_dir = cpip_src / "src"
     with zipapp_path.open("wb") as zipapp_file:
         zipapp_file.write(b"#!/usr/bin/env python\n")
@@ -809,8 +740,6 @@ def zipapp(
         return None
 
     temp_location = tmpdir_factory.mktemp("zipapp")
-    # cpip_src has session scope, so make a copy to avoid littering it with
-    # .pyc files.
     cpip_src_copy = temp_location / "cpip-src"
     shutil.copytree(cpip_src, cpip_src_copy)
     pyz_file = temp_location / "cpip.pyz"
@@ -862,15 +791,11 @@ def deprecated_python() -> bool:
 
 @pytest.fixture(scope="session")
 def cert_factory(tmpdir_factory: pytest.TempPathFactory) -> CertFactory:
-    # Delay the import requiring cryptography in order to make it possible
-    # to deselect relevant tests on systems where cryptography cannot
-    # be installed.
     from cpip_test_support.certs import make_tls_cert, serialize_cert, serialize_key
 
     def factory() -> str:
         """Returns path to cert/key file."""
         output_path = tmpdir_factory.mktemp("certs") / "cert.pem"
-        # Must be Text on PY2.
         cert, key = make_tls_cert("localhost")
         with open(str(output_path), "wb") as f:
             f.write(serialize_cert(cert))
@@ -904,15 +829,10 @@ class MetadataKind(Enum):
     attribute from PEP 658.
     """
 
-    # Valid: will read metadata from the dist instead.
     No = "none"
-    # Valid: will read the .metadata file, but won't check its hash.
     Unhashed = "unhashed"
-    # Valid: will read the .metadata file and check its hash matches.
     Sha256 = "sha256"
-    # Invalid: will error out after checking the hash.
     WrongHash = "wrong-hash"
-    # Invalid: will error out after failing to fetch the .metadata file.
     NoFile = "no-file"
 
 
@@ -928,11 +848,8 @@ class FakePackage:
     version: str
     filename: str
     metadata: MetadataKind
-    # This will override any dependencies specified in the actual dist's METADATA.
     requires_dist: tuple[str, ...] = ()
-    # This will override the Provides-Extra entries in the actual dist's METADATA.
     provides_extra: tuple[str, ...] = ()
-    # This will override the Name specified in the actual dist's METADATA.
     metadata_name: str | None = None
 
     def metadata_filename(self) -> str:
@@ -974,12 +891,9 @@ def fake_packages() -> dict[str, list[FakePackage]]:
         "simple": [
             FakePackage("simple", "1.0", "simple-1.0.tar.gz", MetadataKind.Sha256),
             FakePackage("simple", "2.0", "simple-2.0.tar.gz", MetadataKind.No),
-            # This will raise a hashing error.
             FakePackage("simple", "3.0", "simple-3.0.tar.gz", MetadataKind.WrongHash),
         ],
         "simple2": [
-            # Override the dependencies here in order to force cpip to download
-            # simple-1.0.tar.gz as well.
             FakePackage(
                 "simple2",
                 "1.0",
@@ -987,9 +901,7 @@ def fake_packages() -> dict[str, list[FakePackage]]:
                 MetadataKind.Unhashed,
                 ("simple==1.0",),
             ),
-            # This will raise an error when cpip attempts to fetch the metadata file.
             FakePackage("simple2", "2.0", "simple2-2.0.tar.gz", MetadataKind.NoFile),
-            # This has a METADATA file with a mismatched name.
             FakePackage(
                 "simple2",
                 "3.0",
@@ -999,8 +911,6 @@ def fake_packages() -> dict[str, list[FakePackage]]:
             ),
         ],
         "colander": [
-            # Ensure we can read the dependencies from a metadata file within a wheel
-            # *without* PEP 658 metadata.
             FakePackage(
                 "colander",
                 "0.9.9",
@@ -1009,8 +919,6 @@ def fake_packages() -> dict[str, list[FakePackage]]:
             ),
         ],
         "compilewheel": [
-            # The sidecar declares a dependency the wheel's embedded METADATA
-            # does not, which must be rejected as a Requires-Dist mismatch.
             FakePackage(
                 "compilewheel",
                 "1.0",
@@ -1020,7 +928,6 @@ def fake_packages() -> dict[str, list[FakePackage]]:
             ),
         ],
         "has-script": [
-            # Ensure we check PEP 658 metadata hashing errors for wheel files.
             FakePackage(
                 "has-script",
                 "1.0",
@@ -1037,7 +944,6 @@ def fake_packages() -> dict[str, list[FakePackage]]:
             ),
         ],
         "priority": [
-            # Ensure we check for a missing metadata file for wheels.
             FakePackage(
                 "priority",
                 "1.0",
@@ -1046,9 +952,6 @@ def fake_packages() -> dict[str, list[FakePackage]]:
             ),
         ],
         "requires-simple-extra": [
-            # Metadata name is not canonicalized. The sidecar mirrors the
-            # wheel's embedded Requires-Dist and Provides-Extra so the
-            # post-download metadata reconciliation accepts it.
             FakePackage(
                 "requires-simple-extra",
                 "0.1",
@@ -1073,12 +976,9 @@ def html_index_for_packages(
     """
     html_dir = tmpdir_factory.mktemp("fake_index_html_content")
 
-    # (1) Generate the content for a PyPI index.html.
     pkg_links = "\n".join(
         f'    <a href="{pkg}/index.html">{pkg}</a>' for pkg in fake_packages
     )
-    # Output won't be nicely indented because dedent() acts after f-string
-    # arg insertion.
     index_html = dedent(f"""\
         <!DOCTYPE html>
         <html>
@@ -1090,35 +990,25 @@ def html_index_for_packages(
           {pkg_links}
           </body>
         </html>""")
-    # (2) Generate the index.html in a new subdirectory of the temp directory.
     (html_dir / "index.html").write_text(index_html)
 
-    # (3) Generate subdirectories for individual packages, each with their own
-    # index.html.
     for pkg, links in fake_packages.items():
         pkg_subdir = html_dir / pkg
         pkg_subdir.mkdir()
 
         download_links: list[str] = []
         for package_link in links:
-            # (3.1) Generate the <a> tag which cpip can crawl pointing to this
-            # specific package version.
             download_links.append(
                 f'    <a href="{package_link.filename}" {package_link.generate_additional_tag()}>{package_link.filename}</a><br/>',  # noqa: E501
             )
-            # (3.2) Copy over the corresponding file in `shared_data.packages`.
             shutil.copy(
                 shared_data.packages / package_link.filename,
                 pkg_subdir / package_link.filename,
             )
-            # (3.3) Write a metadata file, if applicable.
             if package_link.metadata != MetadataKind.NoFile:
                 with open(pkg_subdir / package_link.metadata_filename(), "wb") as f:
                     f.write(package_link.generate_metadata())
 
-        # (3.4) After collating all the download links and copying over the files,
-        # write an index.html with the generated download links for each
-        # copied file for this specific package name.
         download_links_str = "\n".join(download_links)
         pkg_index_content = dedent(f"""\
             <!DOCTYPE html>

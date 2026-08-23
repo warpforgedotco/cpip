@@ -64,14 +64,11 @@ def find_path_to_project_root_from_repo_root(
     `location`. Return the path to project root relative to `repo_root`.
     Return None if the project root is `repo_root`, or cannot be found.
     """
-    # find project root.
     orig_location = location
     while not is_installable_dir(location):
         last_location = location
         location = os.path.dirname(location)
         if location == last_location:
-            # We've traversed up to the root of the filesystem without
-            # finding a Python project.
             logger.warning(
                 "Could not find a Python project for directory %s (tried all parent directories)",
                 orig_location,
@@ -166,8 +163,6 @@ class RevOptions:
 
 
 BUILTIN_BACKENDS = (
-    # (module, registered name, marker directory), in the order
-    # ``_ensure_builtin_backends_loaded`` registers them.
     ("bazaar", "bzr", ".bzr"),
     ("git", "git", ".git"),
     ("mercurial", "hg", ".hg"),
@@ -179,18 +174,11 @@ BUILTIN_NAMES = frozenset(name for _, name, _ in BUILTIN_BACKENDS)
 
 class VcsSupport:
     registry_internal: dict[str, VersionControl] = {}
-    # Set once the registry stops being exactly the builtin table -- a backend
-    # registered from outside this package, or a builtin removed -- which is
-    # what ``get_backend_for_dir`` checks before trusting BUILTIN_BACKENDS to
-    # describe every backend. Class-level like the registry it describes,
-    # since a second ``VcsSupport()`` shares that registry.
     registry_customized_internal: bool = False
     schemes = ["ssh", "git", "hg", "bzr", "sftp", "svn"]
 
     def __init__(self) -> None:
         self._builtin_backends_loaded = False
-        # Register more schemes with urlparse for various version control
-        # systems
         urllib.parse.uses_netloc.extend(self.schemes)
         super().__init__()
 
@@ -265,10 +253,6 @@ class VcsSupport:
         if not vcs_backends:
             return None
 
-        # Choose the VCS in the inner-most directory. Since all repository
-        # roots found here would be either `location` or one of its
-        # parents, the longest path should have the most path components,
-        # i.e. the backend representing the inner-most repository.
         inner_most_repo_path = max(vcs_backends, key=len)
         return vcs_backends[inner_most_repo_path]
 
@@ -334,9 +318,7 @@ class VersionControl:
     name = ""
     dirname = ""
     repo_name = ""
-    # List of supported schemes for this Version Control
     schemes: tuple[str, ...] = ()
-    # Iterable of environment variable names to pass to call_subprocess().
     unset_environ: tuple[str, ...] = ()
     default_arg_rev: str | None = None
 
@@ -372,10 +354,6 @@ class VersionControl:
             {repository_url}@{revision}#egg={project_name}
 
         """
-        # Three independent questions, each usually one spawn of the VCS
-        # command (a few milliseconds of waiting apiece): ask them at once
-        # and wait once. Results are read in the original order, so a
-        # missing remote still wins over any later failure.
         from concurrent.futures import ThreadPoolExecutor
 
         with ThreadPoolExecutor(max_workers=3) as pool:
@@ -476,7 +454,6 @@ class VersionControl:
                 "The format is <vcs>+<protocol>://<url>, "
                 "e.g. svn+http://myrepo/svn/MyApp#egg=MyApp",
             )
-        # Remove the vcs prefix.
         scheme = scheme.split("+", 1)[1]
         netloc, user_pass = cls.get_netloc_and_auth(netloc, scheme)
         rev = None
@@ -636,7 +613,6 @@ class VersionControl:
                 self.name,
                 self.repo_name,
             )
-            # https://github.com/python/mypy/issues/1174
             prompt = ("(i)gnore, (w)ipe, (b)ackup ", ("i", "w", "b"))
 
         logger.warning(
@@ -667,7 +643,6 @@ class VersionControl:
             self.fetch_new(dest, url, rev_options, verbosity=verbosity)
             return
 
-        # Do nothing if the response is "i".
         if response == "s":
             logger.info(
                 "Switching %s %s to %s%s",
@@ -743,17 +718,11 @@ class VersionControl:
         except NotADirectoryError:
             raise BadCommand(f"Cannot find command {cls.name!r} - invalid PATH")
         except FileNotFoundError:
-            # errno.ENOENT = no such file or directory
-            # In other words, the VCS executable isn't available
             raise BadCommand(
                 f"Cannot find command {cls.name!r} - do you have "
                 f"{cls.name!r} installed and in your PATH?",
             )
         except PermissionError:
-            # errno.EACCES = Permission denied
-            # This error occurs, for instance, when the command is installed
-            # only for another user. So, the current user don't have
-            # permission to call the other user command.
             raise BadCommand(
                 f"No permission to execute {cls.name!r} - install it "
                 f"locally, globally (ask admin), or check your PATH. "

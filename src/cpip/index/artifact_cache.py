@@ -107,8 +107,6 @@ class ArtifactCache:
             try:
                 result[algorithm] = hashlib.new(algorithm)
             except (TypeError, ValueError):
-                # Unsupported hashes retain the resolver's existing validation
-                # behavior. The artifact store always provides SHA-256.
                 continue
         return result
 
