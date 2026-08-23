@@ -384,6 +384,10 @@ class NetworkSession:
 
         self.fresh_cached_response_cache: dict[str, float | None] = {}
 
+        self.environ_proxies_cache: dict[str, dict[str, str]] = {}
+
+        self.environ_ca_bundle: str | None = None
+
         self.network_stats = (
             NetworkStats()
             if os.environ.get("CPIP_BENCH_NETWORK_STATS") == "1"
@@ -407,6 +411,12 @@ class NetworkSession:
             adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64)
             session.mount("https://", adapter)
             session.mount("http://", adapter)
+
+            session.trust_env = False
+
+            self.environ_ca_bundle = os.environ.get(
+                "REQUESTS_CA_BUNDLE",
+            ) or os.environ.get("CURL_CA_BUNDLE")
 
             self.requests_session = session
 
@@ -937,6 +947,9 @@ class NetworkSession:
         if parsed.hostname and parsed.hostname.lower() in self.trusted_hosts:
             verify = False
 
+        elif verify is True and self.environ_ca_bundle is not None:
+            verify = self.environ_ca_bundle
+
         kwargs: dict[str, Any] = {
             "headers": request.headers,
             "data": request.body,
@@ -946,14 +959,53 @@ class NetworkSession:
             "verify": verify,
         }
 
+        proxies = self.environ_proxies_for(request.url, parsed.hostname)
+
         if self.proxies is not None:
-            kwargs["proxies"] = self.proxies
+            proxies = {**proxies, **self.proxies} if proxies else self.proxies
+
+        if proxies:
+            kwargs["proxies"] = proxies
 
         if self.cert is not None:
             kwargs["cert"] = self.cert
 
         raw = self.requests_session.request(request.method, request.url, **kwargs)
 
+        return self.wrap_transport_response(raw, request, stream=stream)
+
+    def environ_proxies_for(
+        self,
+        url: str,
+        hostname: str | None,
+    ) -> dict[str, str]:
+        """Resolve environment and system proxies once per host.
+
+        The transport session runs with ``trust_env`` off so requests does
+        not repeat this resolution (a native system-configuration call on
+        macOS) on every request.
+        """
+
+        key = hostname or ""
+
+        cached = self.environ_proxies_cache.get(key)
+
+        if cached is None:
+            from cpip._vendor.requests.utils import get_environ_proxies
+
+            cached = get_environ_proxies(url, no_proxy=None)
+
+            self.environ_proxies_cache[key] = cached
+
+        return cached
+
+    def wrap_transport_response(
+        self,
+        raw: Any,
+        request: HttpRequest,
+        *,
+        stream: bool,
+    ) -> HttpResponse:
         content: bytes | None = None
 
         if not stream:
