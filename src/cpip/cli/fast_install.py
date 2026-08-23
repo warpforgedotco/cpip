@@ -904,11 +904,19 @@ def iter_wheel_paths(find_links: list[str]) -> list[str] | None:
 
             continue
 
+        # One absolute directory, then plain joins: `abspath` on each entry
+        # would re-derive the same prefix per wheel, and for a relative
+        # `--find-links` that is a `getcwd` syscall per entry -- on a
+        # wheelhouse of a few thousand, the scan's largest single cost.
+        # Entry names carry no separator and are never "." or "..", so the
+        # join is already normalized, exactly as `abspath` left it.
+        directory = os.path.abspath(value)
+
         try:
             with os.scandir(value) as entries:
                 for entry in entries:
                     if entry.name.endswith(".whl") and entry.is_file():
-                        result.append(os.path.abspath(entry.path))
+                        result.append(os.path.join(directory, entry.name))
 
         except OSError:
             return None
@@ -1083,7 +1091,7 @@ def install_resolved_pure_wheels(
         return False
 
     prepared: list[
-        tuple[str, bool, bool, list[tuple[str, str, bytes, int | None]]]
+        tuple[str, bool, bool, list[tuple[str, str, bytes, int | None, str]]]
     ] = []
 
     destinations: set[str] = set()
@@ -1168,18 +1176,25 @@ def install_resolved_pure_wheels(
                     mode_from_external_attr(archive.modes[name]) for name in names
                 ]
 
+                # `name` rides along because it already *is* the RECORD path:
+                # `destination` was built as `join(target, name)`, so the
+                # `relpath(destination, target)` the row used to be written
+                # from could only ever reproduce it -- once per installed
+                # file, at the cost of splitting both paths apart again.
                 members = [
                     (
                         destination,
                         directory,
                         contents,
                         mode,
+                        name,
                     )
-                    for destination, directory, contents, mode in zip(
+                    for destination, directory, contents, mode, name in zip(
                         destinations_for_wheel,
                         directories_for_wheel,
                         contents,
                         modes_for_wheel,
+                        names,
                     )
                 ]
 
@@ -1191,9 +1206,8 @@ def install_resolved_pure_wheels(
                 dist_info,
                 candidate.canonical_name in requested_roots,
                 any(
-                    destination == os.path.join(target, dist_info, "RECORD")
-                    and bool(contents.strip())
-                    for destination, _, contents, _ in members
+                    name == f"{dist_info}/RECORD" and bool(contents.strip())
+                    for _, _, contents, _, name in members
                 ),
                 members,
             ),
@@ -1222,7 +1236,7 @@ def install_resolved_pure_wheels(
                 import csv
                 import hashlib
 
-            for destination, directory, contents, mode in members:
+            for destination, directory, contents, mode, relative in members:
                 if directory not in created_directories:
                     os.makedirs(directory, exist_ok=True)
 
@@ -1237,11 +1251,6 @@ def install_resolved_pure_wheels(
                 created_files.append(destination)
 
                 if not reuse_record:
-                    relative = os.path.relpath(destination, target).replace(
-                        os.sep,
-                        "/",
-                    )
-
                     if relative == record_relative:
                         record_is_member = True
                     else:
