@@ -24,9 +24,7 @@ INDEX_URLS = [
     "https://mirror.invalid/simple/",
     "https://example.invalid/simple/",
 ]
-PAGE_URLS = [
-    f"https://example.invalid/simple/package-{index}/" for index in range(50)
-]
+PAGE_URLS = [f"https://example.invalid/simple/package-{index}/" for index in range(50)]
 PAGE_BODY = simple_index_html(120).encode()
 ARTIFACT_URLS = [
     f"https://example.invalid/packages/package-{index}-1.0.0-py3-none-any.whl"
@@ -38,7 +36,9 @@ ARTIFACT_BODY = bytes(512 * 1024)
 class FakeTransportSession(NetworkSession):
     """NetworkSession whose transport is a canned in-memory response table."""
 
-    def __init__(self, bodies: dict[str, bytes], response_headers: dict[str, str], **kwargs) -> None:
+    def __init__(
+        self, bodies: dict[str, bytes], response_headers: dict[str, str], **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self.bodies = bodies
         self.response_headers = response_headers
@@ -142,9 +142,7 @@ def test_session_fresh_cache_probe(
 
     def probe_all() -> int:
         session.fresh_cached_response_cache.clear()
-        return sum(
-            session.has_fresh_cached_response(url) for url in PAGE_URLS
-        )
+        return sum(session.has_fresh_cached_response(url) for url in PAGE_URLS)
 
     assert benchmark(probe_all) == len(PAGE_URLS)
 
@@ -204,9 +202,7 @@ def test_download_artifacts(
     location = str(tmp_path_factory.mktemp("network-downloads"))
 
     def download_all() -> int:
-        return sum(
-            1 for _ in downloader.batch(links, location)
-        )
+        return sum(1 for _ in downloader.batch(links, location))
 
     assert benchmark(download_all) == len(ARTIFACT_URLS)
 

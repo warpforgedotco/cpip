@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import urllib.parse
+from collections.abc import MutableMapping
 
 from cpip.core.cpip_version import get_cpip_version
 from cpip.core.urls import redact_auth_from_url, url_to_path
@@ -61,7 +62,7 @@ class _FileTransportExceptions:
     ConnectionError = _NeverRaised
 
 
-class HeaderDict:
+class HeaderDict(MutableMapping[str, str]):
     """Case-insensitive header mapping for cache- and file-backed responses."""
 
     __slots__ = ("data",)
@@ -82,8 +83,8 @@ class HeaderDict:
     def __delitem__(self, name: str) -> None:
         del self.data[name.lower()]
 
-    def __contains__(self, name: str) -> bool:
-        return name.lower() in self.data
+    def __contains__(self, name: object) -> bool:
+        return isinstance(name, str) and name.lower() in self.data
 
     def __len__(self) -> int:
         return len(self.data)
@@ -92,13 +93,13 @@ class HeaderDict:
         for name, _ in self.data.values():
             yield name
 
-    def get(self, name: str, default: Any = None) -> Any:
+    def get(self, name: Any, default: Any = None, /) -> Any:
         entry = self.data.get(name.lower())
 
         return default if entry is None else entry[1]
 
-    def items(self) -> Iterator[tuple[str, str]]:
-        yield from self.data.values()
+    def items(self) -> Any:
+        return self.data.values()
 
 
 class HttpRequest:
@@ -229,7 +230,13 @@ class InFlightRequest:
         self.event = threading.Event()
 
         self.response: (
-            tuple[int, str, str, Mapping[str, str] | email.message.Message | HeaderDict, bytes]
+            tuple[
+                int,
+                str,
+                str,
+                Mapping[str, str] | email.message.Message | HeaderDict,
+                bytes,
+            ]
             | None
         ) = None
 
