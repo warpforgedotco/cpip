@@ -47,6 +47,46 @@ class _MissingCacheExpiry(enum.Enum):
 _MISSING_CACHE_EXPIRY = _MissingCacheExpiry.TOKEN
 
 
+class HeaderDict:
+    """Case-insensitive header mapping for cache- and file-backed responses."""
+
+    __slots__ = ("data",)
+
+    def __init__(self, headers: Mapping[str, Any] | None = None) -> None:
+        self.data: dict[str, tuple[str, str]] = {}
+
+        if headers:
+            for name, value in headers.items():
+                self.data[name.lower()] = (name, str(value))
+
+    def __setitem__(self, name: str, value: str) -> None:
+        self.data[name.lower()] = (name, value)
+
+    def __getitem__(self, name: str) -> str:
+        return self.data[name.lower()][1]
+
+    def __delitem__(self, name: str) -> None:
+        del self.data[name.lower()]
+
+    def __contains__(self, name: str) -> bool:
+        return name.lower() in self.data
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __iter__(self) -> Iterator[str]:
+        for name, _ in self.data.values():
+            yield name
+
+    def get(self, name: str, default: Any = None) -> Any:
+        entry = self.data.get(name.lower())
+
+        return default if entry is None else entry[1]
+
+    def items(self) -> Iterator[tuple[str, str]]:
+        yield from self.data.values()
+
+
 class HttpRequest:
     __slots__ = ("body", "headers", "method", "url")
 
@@ -75,7 +115,7 @@ class HttpResponse:
         status_code: int,
         reason: str,
         url: str,
-        headers: Mapping[str, str] | email.message.Message,
+        headers: Mapping[str, str] | email.message.Message | HeaderDict,
         raw: Any,
         transport_response: Any = None,
         streaming: bool = False,
@@ -175,7 +215,7 @@ class InFlightRequest:
         self.event = threading.Event()
 
         self.response: (
-            tuple[int, str, str, Mapping[str, str] | email.message.Message, bytes]
+            tuple[int, str, str, Mapping[str, str] | email.message.Message | HeaderDict, bytes]
             | None
         ) = None
 
@@ -643,18 +683,11 @@ class NetworkSession:
         if body is None:
             return None, None
 
-        import email.message
-
-        response_headers = email.message.Message()
-
-        for name, value in headers.items():
-            response_headers[name] = str(value)
-
         return HttpResponse(
             status_code=status,
             reason=reason,
             url=request.url,
-            headers=response_headers,
+            headers=HeaderDict(headers),
             raw=body,
             request=request,
             from_cache=True,
@@ -704,8 +737,6 @@ class NetworkSession:
         request: HttpRequest,
         metadata: dict[str, Any],
     ) -> HttpResponse:
-        import email.message
-
         self.fresh_cached_response_cache.pop(request.url, None)
 
         headers = metadata.get("headers", {})
@@ -731,16 +762,11 @@ class NetworkSession:
                 f"Cached response body missing for url: {request.url}",
             )
 
-        response_headers = email.message.Message()
-
-        for name, value in headers.items():
-            response_headers[name] = str(value)
-
         return HttpResponse(
             status_code=int(metadata.get("status", 200)),
             reason=str(metadata.get("reason", "OK")),
             url=request.url,
-            headers=response_headers,
+            headers=HeaderDict(headers),
             raw=body,
             request=request,
             from_cache=True,
@@ -748,7 +774,7 @@ class NetworkSession:
 
     @staticmethod
     def cache_expiry(
-        headers: Mapping[str, str] | email.message.Message,
+        headers: Mapping[str, str] | email.message.Message | HeaderDict,
     ) -> float | None:
         import email.utils
 
@@ -891,25 +917,21 @@ class NetworkSession:
 
     @staticmethod
     def open_file(request: HttpRequest) -> HttpResponse:
-        import email.message
-
         try:
             with open(url_to_path(request.url), "rb") as file:
                 body = file.read()
 
         except OSError as exc:
-            headers = email.message.Message()
-
             return HttpResponse(
                 status_code=404,
                 reason=type(exc).__name__,
                 url=request.url,
-                headers=headers,
+                headers=HeaderDict(),
                 raw=io.BytesIO(f"{type(exc).__name__}: {exc}".encode()),
                 request=request,
             )
 
-        headers = email.message.Message()
+        headers = HeaderDict()
 
         headers["Content-Length"] = str(len(body))
 
