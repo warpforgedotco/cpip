@@ -1,4 +1,4 @@
-"""Low-level wheel archive reading for the local wheelhouse resolver."""
+"""Low-level wheel archive reading shared by platform-facing workflows."""
 
 from __future__ import annotations
 

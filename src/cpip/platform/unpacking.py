@@ -13,8 +13,8 @@ from zipfile import ZipInfo
 
 from cpip.core.errors import InstallationError
 from cpip.core.utils import ensure_dir
-from cpip.install.tar_reader import fast_untar
-from cpip.resolution.archive import WheelArchive, WheelhouseUnavailable
+from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
+from cpip.platform.tar_reader import fast_untar
 
 TYPE_CHECKING = False
 
@@ -370,7 +370,7 @@ def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
         zipfp.close()
 
 
-def untar_file(filename: str, location: str) -> None:
+def untar_file(filename: str, location: str, flatten: bool = True) -> None:
     """Untar the file (with path `filename`) to the destination `location`.
     All files are written based on system defaults and umask (i.e. permissions
     are not preserved), except that regular file members with any execute
@@ -398,7 +398,7 @@ def untar_file(filename: str, location: str) -> None:
     extracted_names = fast_untar(filename, location, mode)
 
     if extracted_names is not None:
-        if extracted_names and has_leading_dir(extracted_names):
+        if flatten and extracted_names and has_leading_dir(extracted_names):
             _strip_leading_dir_in_place(location, extracted_names[0])
 
         return
@@ -406,7 +406,7 @@ def untar_file(filename: str, location: str) -> None:
     tar = tarfile.open(filename, mode, encoding="utf-8")
     try:
         members = tar.getmembers()
-        leading = has_leading_dir(member.name for member in members)
+        leading = flatten and has_leading_dir(member.name for member in members)
 
         # PEP 706 added `tarfile.data_filter`, and made some other changes to
         # Python's tarfile module (see below). The features were backported to
@@ -652,20 +652,25 @@ class ArchiveExtractor:
         filename: str,
         location: str,
         content_type: str | None = None,
+        *,
+        flatten: bool | None = None,
     ) -> None:
         self.filename = os.fspath(filename)
         self.location = location
         self.content_type = content_type
+        self.flatten = flatten
 
     def extract(self) -> None:
         """Extract using content type, extension, then unambiguous signatures."""
-        zip_flatten = not self.filename.endswith(".whl")
+        flatten = self.flatten
+        zip_flatten = not self.filename.endswith(".whl") if flatten is None else flatten
+        tar_flatten = True if flatten is None else flatten
 
         if self.content_type == "application/zip":
             unzip_file(self.filename, self.location, flatten=zip_flatten)
             return
         if self.content_type == "application/x-gzip":
-            untar_file(self.filename, self.location)
+            untar_file(self.filename, self.location, flatten=tar_flatten)
             return
 
         filename_lower = self.filename.lower()
@@ -673,7 +678,7 @@ class ArchiveExtractor:
             unzip_file(self.filename, self.location, flatten=zip_flatten)
             return
         if filename_lower.endswith(TAR_EXTENSIONS + BZ2_EXTENSIONS + XZ_EXTENSIONS):
-            untar_file(self.filename, self.location)
+            untar_file(self.filename, self.location, flatten=tar_flatten)
             return
 
         # Avoid the ambiguous case where both signature checks return true.
@@ -683,7 +688,7 @@ class ArchiveExtractor:
             unzip_file(self.filename, self.location, flatten=zip_flatten)
             return
         if is_tarfile and not is_zipfile:
-            untar_file(self.filename, self.location)
+            untar_file(self.filename, self.location, flatten=tar_flatten)
             return
         if is_zipfile and is_tarfile:
             logger.error("Ambiguous file signature in %s.", self.filename)

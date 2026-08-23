@@ -354,6 +354,12 @@ def prepare_metadata_for_build_wheel(
     with open(os.path.join(target, "WHEEL"), "w", encoding="utf-8") as file:
         file.write(wheel_text_internal())
 
+    for relative, contents in project_license_files(project, os.getcwd()):
+        target_path = os.path.join(target, "licenses", *relative.split("/"))
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        with open(target_path, "wb") as file:
+            file.write(contents)
+
     return dist_info
 
 
@@ -637,6 +643,16 @@ class ProjectBuilder:
 
             write_file(archive, f"{dist_info}/WHEEL", wheel_text_internal())
 
+            for relative, contents in project_license_files(
+                project,
+                self.source_dir,
+            ):
+                write_file(
+                    archive,
+                    f"{dist_info}/licenses/{relative}",
+                    contents,
+                )
+
             entry_points = entry_points_text_internal(project)
 
             if entry_points:
@@ -905,6 +921,10 @@ class ProjectMetadata:
 
     provided_extras: frozenset[str] = frozenset()
 
+    license_expression: str | None = None
+
+    license_files: tuple[str, ...] = ()
+
     def __post_init__(self) -> None:
         object.__setattr__(self, "version", str(Version(self.version)))
 
@@ -971,6 +991,21 @@ class ProjectMetadataReader:
                         else None
                     )
 
+                    license_expression = (
+                        project.get("license")
+                        if isinstance(project.get("license"), str)
+                        else None
+                    )
+
+                    license_files_raw = project.get("license-files", [])
+
+                    if not isinstance(license_files_raw, list) or not all(
+                        isinstance(item, str) for item in license_files_raw
+                    ):
+                        raise BuildError(
+                            f"Cannot build {source_dir}: project.license-files is invalid",
+                        )
+
                     optional_dependencies_raw = project.get("optional-dependencies", {})
 
                     optional_dependencies: dict[str, tuple[str, ...]] = {}
@@ -999,6 +1034,8 @@ class ProjectMetadataReader:
                         scripts={
                             str(key): str(value) for key, value in scripts.items()
                         },
+                        license_expression=license_expression,
+                        license_files=tuple(license_files_raw),
                     )
 
             setup_py_path = os.path.join(source_text, "setup.py")
@@ -1481,10 +1518,17 @@ def _is_package_payload_text(
 
 def metadata_text(project: ProjectMetadata) -> str:
     lines = [
-        "Metadata-Version: 2.1",
+        "Metadata-Version: 2.4"
+        if project.license_expression or project.license_files
+        else "Metadata-Version: 2.1",
         f"Name: {project.name}",
         f"Version: {project.version}",
     ]
+
+    if project.license_expression:
+        lines.append(f"License-Expression: {project.license_expression}")
+
+    lines.extend(f"License-File: {path}" for path in project.license_files)
 
     if project.summary:
         lines.append(f"Summary: {project.summary}")
@@ -1510,6 +1554,43 @@ def metadata_text(project: ProjectMetadata) -> str:
                 lines.append(f'Requires-Dist: {dependency}; extra == "{extra}"')
 
     return "\n".join(lines) + "\n"
+
+
+def project_license_files(
+    project: ProjectMetadata,
+    source_dir: str | os.PathLike[str],
+) -> tuple[tuple[str, bytes], ...]:
+    """Read validated PEP 639 license files from a project source tree."""
+    source = os.path.realpath(os.fspath(source_dir))
+    result: list[tuple[str, bytes]] = []
+    for configured_path in project.license_files:
+        normalized = configured_path.replace("\\", "/")
+        parts = normalized.split("/")
+        if (
+            not normalized
+            or os.path.isabs(configured_path)
+            or any(part in {"", ".", ".."} for part in parts)
+        ):
+            raise BuildError(f"Invalid project license file path: {configured_path!r}")
+        path = os.path.realpath(os.path.join(source, *parts))
+        try:
+            contained = os.path.commonpath((source, path)) == source
+        except ValueError:
+            contained = False
+        if not contained or not os.path.isfile(path):
+            raise BuildError(
+                f"Project license file is missing or outside the source tree: "
+                f"{configured_path!r}",
+            )
+        try:
+            with open(path, "rb") as file:
+                contents = file.read()
+        except OSError as exc:
+            raise BuildError(
+                f"Cannot read project license file {configured_path!r}: {exc}",
+            ) from exc
+        result.append((normalized, contents))
+    return tuple(result)
 
 
 def wheel_text_internal() -> str:

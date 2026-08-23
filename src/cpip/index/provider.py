@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import contextlib
+import copy
 import datetime
 import hashlib
 import operator
@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from cpip.core.format_control import FormatControl
+    from cpip.core.http import HttpSession
     from cpip.core.wheel import TargetContext, WheelFile
     from cpip.index.candidate_materialization import CandidateStream
 
@@ -106,7 +107,7 @@ class CandidateProvider:
         build_isolation: bool = True,
         dry_run: bool = False,
         locked_links: dict[str, Link] | None = None,
-        session: Any = None,
+        session: HttpSession | None = None,
         uploaded_prior_to: datetime.datetime | None = None,
         compute_source_hashes: bool = False,
         hashes_by_name: dict[str, Hashes] | None = None,
@@ -237,7 +238,7 @@ class CandidateProvider:
         build_isolation: bool = True,
         dry_run: bool = False,
         locked_links: dict[str, Link] | None = None,
-        session: Any = None,
+        session: HttpSession | None = None,
         uploaded_prior_to: datetime.datetime | None = None,
     ) -> CandidateProvider:
         normalized_find_links = list(find_links)
@@ -2239,25 +2240,19 @@ class CandidateProvider:
 
         return self._generate_catalog_candidates(catalog_key, ordered)
 
-    @contextlib.contextmanager
-    def yanked_allowed(self) -> Iterator[None]:
-        """Admit yanked releases for the duration of the block.
+    def with_yanked_policy(self, allow_yanked: bool) -> CandidateProvider:
+        """Return a query view with an independent yanked-release policy.
 
-        Yanked releases are excluded by policy, but a caller that has found
-        nothing else may deliberately fall back to one.  Owning the flip here
-        keeps the relaxation scoped and exception-safe instead of leaving
-        callers to save and restore ``allow_yanked`` themselves.
-
-        ``find_candidates`` can return a lazily evaluated stream, so consume
-        the result inside the block; a stream materialized afterwards sees the
-        restored policy.
+        The view shares immutable configuration, caches, locks, and transport
+        resources with this provider.  Only its policy flag differs, so lazy
+        streams retain the policy they were created with and concurrent
+        queries cannot observe a temporary mutation on the owning provider.
         """
-        previous = self.allow_yanked
-        self.allow_yanked = True
-        try:
-            yield
-        finally:
-            self.allow_yanked = previous
+        if self.allow_yanked == allow_yanked:
+            return self
+        view = copy.copy(self)
+        view.allow_yanked = allow_yanked
+        return view
 
     def find_candidates(
         self,

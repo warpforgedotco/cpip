@@ -193,16 +193,16 @@ Invariants:
 | Package | Owns | Must not own |
 | --- | --- | --- |
 | `core` | value types, packaging rules, hashes, URLs, wheels, cache primitives | command policy |
-| `platform` | config locations, install schemes, cloning, host behavior | selection policy |
+| `platform` | config locations, install schemes, cloning, secure archive extraction, host behavior | selection policy |
 | `build` | backend hooks, metadata generation, build isolation | resolver decisions |
 | `index` | sources, links, catalogs, discovery, artifact localization, materialization | backtracking, installation |
 | `network` | sessions, auth, HTTP transport, HTTP cache | resolver state |
 | `vcs` | VCS URLs, revisions, source retrieval | wheel selection |
 | `resolution` | requirements, constraints, search adapter, result assembly | filesystem installation |
-| `install` | targets, inventories, archives, extraction, transactions | index parsing |
+| `install` | targets, inventories, wheel plans, transactions | index parsing |
 | `cli` | argument parsing, dispatch, presentation, fast paths | reusable mechanics |
 
-Allowed runtime imports (enforced by review, not by a test):
+Allowed runtime imports (enforced by `tests/core/test_architecture_imports.py`):
 
 | Domain | May import |
 | --- | --- |
@@ -216,18 +216,17 @@ Allowed runtime imports (enforced by review, not by a test):
 | `install` | everything but `cli` |
 | `cli` | everything |
 
-Three edges cross the table and are known debt, not precedent:
+Four edges cross the table and are known debt, not precedent:
 `build/build_backend.py` → `install.build_env.venv`,
 `resolution/inputs.py` → `install.requirement_set`,
+`resolution/api.py` → install-only typing contracts,
 `resolution/req_install.py` → `build.pep517_hooks`. `TYPE_CHECKING` imports
 count as edges too; move the shared shape down instead of guarding the import.
 Vendored code is outside these rules.
 
-Check new edges by hand after changing a package:
-
-```sh
-rg -n "^from cpip\.|^import cpip\." src/cpip/<package> | grep -v "cpip\.<package>"
-```
+The test parses nested and `TYPE_CHECKING` imports too. Extend the exception
+set only while documenting an existing edge here; new shared shapes should
+move down instead.
 
 ## Performance boundaries
 

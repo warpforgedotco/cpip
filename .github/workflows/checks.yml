@@ -48,11 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Starts at the versions this repository already exercises: 3.10 is
-        # what the checked-in lockfile resolves for locally and 3.12 is what
-        # the CodSpeed job runs. `requires-python` allows 3.9 upward, so widen
-        # this once the suite is known green on the rest.
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -65,7 +61,7 @@ jobs:
           enable-cache: true
       - name: Install Subversion
         run: sudo apt-get update && sudo apt-get install --yes subversion
-      - run: uv sync --locked --group test --group benchmark
+      - run: uv sync --locked --group test
       - name: Unit and package tests
         # Excludes tests/cli/functional, which drives a real cpip in a
         # subprocess and runs in its own job below. Network-marked tests are
@@ -74,30 +70,31 @@ jobs:
         run: >
           uv run pytest tests
           --ignore=tests/cli/functional
+          --ignore=tests/benchmarks
           -m "not network"
           -p no:randomly
 
   functional:
-    name: Test suite
+    name: Functional / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
-    # Not required to merge yet. This suite builds virtualenvs and wheels per
-    # test, so it is both the slowest and the most environment-sensitive part
-    # of the tree; give it a few green runs on CI hardware before gating on
-    # it. Promote by deleting this line and adding the job to branch
-    # protection.
-    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        # setup-python does not publish 3.15 builds yet. Keep the minimum and
+        # newest available supported interpreter as the functional gates.
+        python-version: ["3.10", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           enable-cache: true
       - name: Install Subversion
         run: sudo apt-get update && sudo apt-get install --yes subversion
-      - run: uv sync --locked --group test --group benchmark
+      - run: uv sync --locked --group test
       - name: Functional tests
-        run: uv run pytest tests/ -n auto
+        run: uv run pytest tests/cli/functional -n auto

@@ -25,7 +25,7 @@ from benchmark_support import reset_caches
 from cpip.core.hashes import Hashes, hash_file
 from cpip.core.wheel import read_metadata_message, validate_wheel
 from cpip.install.target import InstallTarget
-from cpip.install.unpacking import untar_file, unzip_file
+from cpip.platform.unpacking import untar_file, unzip_file
 from cpip.install.wheel_transaction import WheelInstaller
 from pytest_codspeed import BenchmarkFixture
 

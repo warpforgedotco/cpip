@@ -9,7 +9,7 @@ an import statement.
 import sys
 
 # Copied from pyproject.toml
-PYTHON_REQUIRES = (3, 9)
+PYTHON_REQUIRES = (3, 10)
 
 
 def version_str(version):
@@ -18,7 +18,10 @@ def version_str(version):
 
 if sys.version_info[:2] < PYTHON_REQUIRES:
     raise SystemExit(
-        f"This version of cpip does not support python {version_str(sys.version_info[:2])} (requires >={version_str(PYTHON_REQUIRES)}).",
+        "This version of cpip does not support python {} (requires >={}).".format(
+            version_str(sys.version_info[:2]),
+            version_str(PYTHON_REQUIRES),
+        ),
     )
 
 # From here on, we can use Python 3 features, but the syntax must remain

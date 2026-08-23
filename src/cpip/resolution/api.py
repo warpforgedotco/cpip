@@ -75,11 +75,13 @@ class ResolutionEngine:
 
         provider = kwargs.pop("provider", None)
         if provider is None:
+            session = kwargs.pop("session", None)
             provider = CandidateProvider.from_options(
                 find_links=list(config.find_links),
                 index_url=config.index_urls[0] if config.index_urls else None,
                 extra_index_urls=config.index_urls[1:] if config.index_urls else (),
                 no_index=config.no_index,
+                session=session,
             )
         self.provider = provider
 
@@ -179,6 +181,7 @@ class ResolutionEngine:
         requirements: list[str],
         *,
         constraints: list[str] | None = None,
+        session: Any = None,
     ) -> ResolutionResult | None:
         """Resolve a local wheel directory through the normal nab path."""
 
@@ -187,6 +190,7 @@ class ResolutionEngine:
             no_index=True,
             constraints=tuple(constraints or ()),
             ignore_installed=True,
+            session=session,
         )
         try:
             return resolver.resolve(requirements)
