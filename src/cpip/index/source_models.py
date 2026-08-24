@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Callable, Protocol
 
 from cpip.core.packaging import Requirement, canonicalize_name
 from cpip.core.versions import Version
+from cpip.core.wheel import CandidateMetadata
 
 if TYPE_CHECKING:
     from cpip.core.wheel import WheelFile
@@ -114,36 +115,6 @@ class CandidateSummary:
         self.yanked_reason = yanked_reason
 
 
-class CandidateMetadata:
-    """Metadata needed by dependency resolution, separate from artifact state."""
-
-    __slots__ = (
-        "dependencies",
-        "name",
-        "provided_extras",
-        "requires_python",
-        "version",
-    )
-
-    def __init__(
-        self,
-        name: str,
-        version: Version,
-        dependencies: tuple[Requirement, ...],
-        provided_extras: frozenset[str],
-        requires_python: str | None,
-    ) -> None:
-        self.name = name
-
-        self.version = version
-
-        self.dependencies = dependencies
-
-        self.provided_extras = provided_extras
-
-        self.requires_python = requires_python
-
-
 class LazyCandidateMetadata:
     """A one-shot, memoized metadata computation for a candidate."""
 
@@ -199,7 +170,7 @@ class CandidateRecord:
 
         self.metadata_loader = metadata_loader
 
-        self._canonical_name: str | None = canonicalize_name(name)
+        self._canonical_name = canonicalize_name(name)
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, CandidateRecord) and (
@@ -229,16 +200,7 @@ class CandidateRecord:
 
     @property
     def canonical_name(self) -> str:
-        cached = self._canonical_name
-
-        if cached is not None:
-            return cached
-
-        cached = canonicalize_name(self.name)
-
-        self._canonical_name = cached
-
-        return cached
+        return self._canonical_name
 
     def sort_key(self, *, prefer_binary: bool) -> tuple[object, object, object, int]:
         wheel_rank = 1 if self.link.kind is ArtifactKind.WHEEL else 0

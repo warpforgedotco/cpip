@@ -263,6 +263,104 @@ def save_cached_install_plan(
     return True
 
 
+def _candidate_from_record(cache_dir: str, record: object) -> WheelCandidate | None:
+    """Decode one marshal-safe plan record after validating its wire shape."""
+    if not isinstance(record, tuple) or len(record) != 13:
+        return None
+
+    (
+        name,
+        version_text,
+        digest,
+        dependency_texts,
+        provided_extras,
+        requires_python,
+        source_url,
+        source_hash_items,
+        source_kind,
+        source_vcs,
+        yanked_reason,
+        dist_info,
+        archive_entries,
+    ) = record
+
+    if not (
+        isinstance(name, str)
+        and isinstance(version_text, str)
+        and isinstance(digest, str)
+        and valid_sha256(digest)
+        and isinstance(dependency_texts, tuple)
+        and all(isinstance(item, str) for item in dependency_texts)
+        and isinstance(provided_extras, tuple)
+        and all(isinstance(item, str) for item in provided_extras)
+        and (requires_python is None or isinstance(requires_python, str))
+        and (source_url is None or isinstance(source_url, str))
+        and isinstance(source_hash_items, tuple)
+        and all(
+            isinstance(item, tuple)
+            and len(item) == 2
+            and all(isinstance(part, str) for part in item)
+            for item in source_hash_items
+        )
+        and isinstance(source_kind, str)
+        and source_kind == "wheel"
+        and (source_vcs is None or isinstance(source_vcs, str))
+        and (yanked_reason is None or isinstance(yanked_reason, str))
+        and isinstance(dist_info, str)
+        and isinstance(archive_entries, tuple)
+        and valid_archive_entries(archive_entries)
+    ):
+        return None
+
+    tree = os.path.join(archive_entry_root(cache_dir, digest), "tree")
+
+    if not os.path.isdir(tree):
+        return None
+
+    typed_archive_entries = tuple(
+        (entry[0], entry[1], entry[2], entry[3])
+        for entry in archive_entries
+        if isinstance(entry, tuple)
+        and len(entry) == 4
+        and isinstance(entry[0], str)
+        and isinstance(entry[1], str)
+        and isinstance(entry[2], str)
+        and isinstance(entry[3], int)
+    )
+    source_hashes = {
+        item[0]: item[1]
+        for item in source_hash_items
+        if isinstance(item, tuple)
+        and len(item) == 2
+        and isinstance(item[0], str)
+        and isinstance(item[1], str)
+    }
+
+    archive = CachedWheelArchive(digest, tree, dist_info, typed_archive_entries)
+
+    return WheelCandidate(
+        name=name,
+        version=Version(version_text),
+        path=archive.tree,
+        dependencies=tuple(
+            parse_requirement(item)
+            for item in dependency_texts
+            if isinstance(item, str)
+        ),
+        provided_extras=frozenset(
+            item for item in provided_extras if isinstance(item, str)
+        ),
+        requires_python=requires_python,
+        source_url=source_url,
+        source_hashes=source_hashes,
+        source_kind=source_kind,
+        source_vcs=source_vcs,
+        from_cache=True,
+        yanked_reason=yanked_reason,
+        wheel_layout=archive,
+    )
+
+
 def load_cached_install_plan(
     cache_dir: str,
     key: str,
@@ -303,68 +401,12 @@ def load_cached_install_plan(
 
     try:
         for record in value[2]:
-            if not (
-                isinstance(record, tuple)
-                and len(record) == 13
-                and isinstance(record[0], str)
-                and isinstance(record[1], str)
-                and isinstance(record[2], str)
-                and valid_sha256(record[2])
-                and isinstance(record[3], tuple)
-                and all(isinstance(item, str) for item in record[3])
-                and isinstance(record[4], tuple)
-                and all(isinstance(item, str) for item in record[4])
-                and (record[5] is None or isinstance(record[5], str))
-                and (record[6] is None or isinstance(record[6], str))
-                and isinstance(record[7], tuple)
-                and all(
-                    isinstance(item, tuple)
-                    and len(item) == 2
-                    and all(isinstance(part, str) for part in item)
-                    for item in record[7]
-                )
-                and record[8] == "wheel"
-                and (record[9] is None or isinstance(record[9], str))
-                and (record[10] is None or isinstance(record[10], str))
-                and isinstance(record[11], str)
-                and valid_archive_entries(record[12])
-            ):
+            candidate = _candidate_from_record(cache_dir, record)
+
+            if candidate is None:
                 return None
 
-            tree = os.path.join(
-                archive_entry_root(cache_dir, record[2]),
-                "tree",
-            )
-
-            if not os.path.isdir(tree):
-                return None
-
-            archive = CachedWheelArchive(
-                record[2],
-                tree,
-                record[11],
-                record[12],
-            )
-
-            candidates.append(
-                WheelCandidate(
-                    name=record[0],
-                    version=Version(record[1]),
-                    path=archive.tree,
-                    dependencies=tuple(parse_requirement(item) for item in record[3]),
-                    provided_extras=frozenset(
-                        item for item in record[4] if isinstance(item, str)
-                    ),
-                    requires_python=record[5],
-                    source_url=record[6],
-                    source_hashes=dict(record[7]),
-                    source_kind=record[8],
-                    source_vcs=record[9],
-                    from_cache=True,
-                    yanked_reason=record[10],
-                    wheel_layout=archive,
-                ),
-            )
+            candidates.append(candidate)
 
         graph: dict[str, set[str]] = {}
 

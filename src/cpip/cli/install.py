@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime
-import hashlib
 import logging
 import os
 import sys
@@ -29,8 +28,9 @@ from cpip.core.errors import (
     ResolutionError,
 )
 from cpip.core.format_control import FormatControl
+from cpip.core.hashes import file_hashes
 from cpip.core.hashes import Hashes
-from cpip.core.metadata import find_installed, user_lib_path
+from cpip.core.metadata import find_installed, installed_index, user_lib_path
 from cpip.core.packaging import (
     canonicalize_name,
     marker_applies,
@@ -294,9 +294,10 @@ def filter_already_satisfied_requirements(
     the final report list it without re-deriving satisfaction later.
     """
     unresolved_requirements: list[InstallRequirement] = []
+    installed = installed_index()
     for requirement in requirements:
         installed_dist = (
-            find_installed(requirement.req.name)
+            installed.get(requirement.req.canonical_name)
             if requirement.req is not None and requirement.req.url is None
             else None
         )
@@ -872,6 +873,7 @@ def report_nothing_installed(
     execution: Any,
     outcome: InstallOutcome,
 ) -> None:
+    installed = installed_index()
     for requirement in outcome.satisfied_requirements:
         if requirement not in outcome.reported_satisfied and not execution.quiet:
             print(f"Requirement already satisfied: {requirement}")
@@ -881,7 +883,7 @@ def report_nothing_installed(
         item = install_req_from_line(requirement)
         requirement_name = item.req.name if item.req is not None else requirement
         if (
-            find_installed(requirement_name) is not None
+            installed.get(canonicalize_name(requirement_name)) is not None
             and requirement not in outcome.reported_satisfied
             and not execution.quiet
         ):
@@ -1296,11 +1298,8 @@ def run_install(args: list[str]) -> int:
                 digest_count = min(
                     digest_count, len(constraint_hashes.get("sha256", ()))
                 )
-            discarded = max(0, 2 - digest_count)
-            suffix = "no candidates" if discarded == 0 else f"{discarded} non-matches"
             print(
-                f"Checked 2 links for project {name!r} against {digest_count} hashes "
-                f"({digest_count} matches, 0 no digest): discarding {suffix}",
+                f"Using {digest_count} sha256 hashes for requirement {name!r}",
             )
 
     plan: ResolutionResult | None = None
@@ -1360,6 +1359,8 @@ def run_install(args: list[str]) -> int:
 
         assert plan is not None
 
+        installed = installed_index()
+
         if plan.metrics.get("nab_conflicts", 0) and not execution.quiet:
             print("This could take a while.")
             if plan.metrics.get("nab_conflicts", 0) >= 8:
@@ -1370,7 +1371,7 @@ def run_install(args: list[str]) -> int:
         if not execution.quiet and not execution.options.ignore_installed:
             for candidate in plan.candidates:
                 for dependency in candidate.dependencies:
-                    installed_dependency = find_installed(dependency.name)
+                    installed_dependency = installed.get(dependency.canonical_name)
                     if installed_dependency is not None and dependency.is_satisfied_by(
                         installed_dependency.version,
                         allow_prereleases=True,
@@ -1396,7 +1397,7 @@ def run_install(args: list[str]) -> int:
             }
             retained = []
             for candidate in plan.candidates:
-                existing = find_installed(candidate.name)
+                existing = installed.get(candidate.canonical_name)
                 dependency = needed_versions.get(candidate.canonical_name)
                 if existing is not None and (
                     existing.version == candidate.version
@@ -1436,8 +1437,7 @@ def run_install(args: list[str]) -> int:
                         and candidate.source_url.startswith("file:")
                     ):
                         path = url_to_path(candidate.source_url)
-                        with open(path, "rb") as artifact:
-                            actual = hashlib.sha256(artifact.read()).hexdigest()
+                        actual = file_hashes(path)["sha256"]
                         allowed = expected.get("sha256", [])
                         if expected and not allowed:
                             raise InstallationError(
@@ -1455,10 +1455,9 @@ def run_install(args: list[str]) -> int:
             )
             plan = plan.replace(candidates=tuple(materialized_candidates))
 
+        parsed_constraints = map(parse_requirement, execution.bundle.constraints)
         active_constraints = [
-            parse_requirement(raw)
-            for raw in execution.bundle.constraints
-            if parse_requirement(raw).marker is None
+            constraint for constraint in parsed_constraints if constraint.marker is None
         ]
         for candidate in plan.candidates:
             matching_constraints = [

@@ -224,6 +224,22 @@ def test_unreadable_metadata_is_undecidable_not_fatal(tmp_path: Path) -> None:
     assert adapter._pins_are_impossible("app", Version("1.0.0")) is False
 
 
+def test_forward_check_does_not_hide_programming_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = CandidateProvider.from_options(no_index=True)
+    adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
+    adapter.requirements["app"] = parse_requirement("app")
+
+    def explode(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("unexpected provider defect")
+
+    monkeypatch.setattr(provider, "release_candidates", explode)
+
+    with pytest.raises(RuntimeError, match="unexpected provider defect"):
+        adapter._pins_are_impossible("app", Version("1.0.0"))
+
+
 def test_malformed_requires_python_rejects_without_raising() -> None:
     """The index provider treats bad metadata as incompatible; so must this."""
 

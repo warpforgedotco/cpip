@@ -15,7 +15,7 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#partial-so
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Generic, cast
+from typing import TYPE_CHECKING, Any, Generic
 
 from .ranges import Range
 from .types import PackageType, RangeProtocol, VersionType

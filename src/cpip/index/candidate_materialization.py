@@ -18,6 +18,7 @@ from typing import NamedTuple
 
 from cpip.build.build import build_wheel_from_source, unpack_source_internal
 from cpip.core.errors import BuildError, InstallationError, UnsupportedWheel
+from cpip.core.hashes import file_hashes
 from cpip.core.packaging import (
     Requirement,
     canonicalize_name,
@@ -641,8 +642,7 @@ class CandidateMaterializer:
         )
 
         try:
-            with open(local, "rb") as file:
-                result = {"sha256": hashlib.sha256(file.read()).hexdigest()}
+            result = file_hashes(local)
 
         except OSError:
             self.source_hash_cache[fingerprint] = None

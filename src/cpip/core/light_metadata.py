@@ -20,10 +20,10 @@ on for correctness. Keep this module's own imports light in turn.
 from __future__ import annotations
 
 import os
-import re
 import sys
 
 from cpip.core.direct_url import DirectUrl
+from cpip.core.egg_link import egg_link_path_from_sys_path
 from cpip.core.packaging import canonicalize_name, marker_applies, parse_requirement
 from cpip.core.versions import Version
 from cpip.core.urls import url_to_path
@@ -114,24 +114,6 @@ def _read_metadata_file(info_location: str) -> LightMetadata | None:
         metadata = parse_metadata_text(text)
         if metadata.get("Name") and metadata.get("Version"):
             return metadata
-    return None
-
-
-def egg_link_names(raw_name: str) -> list[str]:
-    """Return the filename variants used by setuptools for an egg-link."""
-    return [
-        re.sub("[^A-Za-z0-9.]+", "-", raw_name) + ".egg-link",
-        f"{raw_name}.egg-link",
-    ]
-
-
-def egg_link_path_from_sys_path(raw_name: str) -> str | None:
-    """Find an egg-link for ``raw_name`` by walking the interpreter path."""
-    for path_item in sys.path:
-        for egg_link_name in egg_link_names(raw_name):
-            egg_link = os.path.join(path_item, egg_link_name)
-            if os.path.isfile(egg_link):
-                return egg_link
     return None
 
 

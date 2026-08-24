@@ -14,6 +14,7 @@ from cpip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
+from cpip.core.errors import CpipError
 from cpip.core.versions import Version, ZERO_VERSION
 from cpip.core.wheel import WheelCandidate
 from cpip.index.candidate_evaluators import CandidateEvaluator
@@ -514,7 +515,7 @@ class NabProvider:
         requirement = parse_requirement(package)
         try:
             records = self.provider.release_candidates(requirement, version)
-        except Exception:
+        except (CpipError, OSError, ValueError):
             records = ()
 
         if records is None:
@@ -527,7 +528,7 @@ class NabProvider:
                     requirement,
                     records[0],
                 )
-            except Exception:
+            except (CpipError, OSError, ValueError):
                 candidate = None
 
         self._catalog_candidate_cache[key] = candidate
@@ -546,7 +547,7 @@ class NabProvider:
 
         try:
             found = tuple(self.provider.find_candidates(parse_requirement(package)))
-        except Exception:
+        except (CpipError, OSError, ValueError):
             found = ()
 
         index: dict[Version, object | None] = {}

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
 import shutil
 
+from cpip.core.hashes import file_hashes
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.cache import origin_hashes, wheel_cache_path
 from cpip.index.links import Link
@@ -27,8 +27,7 @@ def source_hashes_for_link(link: Link) -> dict[str, str]:
 
     if local is not None:
         try:
-            with open(local, "rb") as file:
-                return {"sha256": hashlib.sha256(file.read()).hexdigest()}
+            return file_hashes(local)
 
         except OSError:
             return {}

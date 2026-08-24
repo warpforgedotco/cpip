@@ -509,7 +509,7 @@ WHEEL_METADATA_CACHE_SIZE = 1024
 _NO_HEADERS: list[str] = []
 
 
-class WheelResolutionMetadata:
+class CandidateMetadata:
     __slots__ = (
         "dependencies",
         "name",
@@ -547,9 +547,12 @@ class WheelResolutionMetadata:
     requires_python: str | None
 
 
-wheel_metadata_cache: dict[tuple[str, int, int], WheelResolutionMetadata] = (
-    register_table({})
-)
+# Compatibility for existing internal callers while ``CandidateMetadata`` is
+# the canonical shared name used by discovery and wheel parsing.
+WheelResolutionMetadata = CandidateMetadata
+
+
+wheel_metadata_cache: dict[tuple[str, int, int], CandidateMetadata] = register_table({})
 
 wheel_dependency_cache: dict[
     tuple[tuple[str, int, int], frozenset[str]],
@@ -872,7 +875,7 @@ def wheel_archive_identity(
 
 
 def project_wheel_dependencies(
-    metadata: WheelResolutionMetadata,
+    metadata: CandidateMetadata,
     identity: tuple[str, int, int] | None,
     extras: frozenset[str],
 ) -> tuple[Requirement, ...]:
@@ -980,7 +983,7 @@ def wheel_candidate(
             else Version(metadata_version)
         )
 
-        metadata = WheelResolutionMetadata(
+        metadata = CandidateMetadata(
             name=metadata_name,
             version=parsed_metadata_version,
             dependencies=tuple(
