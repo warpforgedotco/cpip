@@ -7,7 +7,7 @@ import urllib.parse
 
 from cpip.core.caches import bounded_put, memoized, register_table
 from cpip.core.names import canonicalize_name
-from cpip.core.versions import FINAL_SUFFIX, InvalidVersion, Version
+from cpip.core.versions import FINAL_SUFFIX, Version, version_of
 
 TYPE_CHECKING = False
 
@@ -71,6 +71,21 @@ def default_environment(extra: str | None = None) -> dict[str, str]:
     }
 
 
+class InvalidSpecifier(ValueError):
+    """The text is not a version specifier PEP 440 permits.
+
+    A ``ValueError`` so that callers written against the older behaviour --
+    where a malformed clause surfaced as ``InvalidVersion`` or a bare
+    ``ValueError`` -- keep catching it.
+    """
+
+
+# Operators whose operand PEP 440 restricts to a public version: no local
+# label, and no `.*` prefix match. `==`/`!=` allow both; `===` is arbitrary
+# text and is not parsed at all.
+_PUBLIC_ONLY_OPERATORS = frozenset(("<", "<=", ">", ">=", "~="))
+
+
 class Specifier:
     """One clause of a version specifier, frozen at construction.
 
@@ -98,10 +113,28 @@ class Specifier:
             _write_is_wildcard(self, False)
             _write_parsed_version(self, None)
             return
-        if wildcard and operator not in ("==", "!="):
-            raise InvalidVersion(version)
+        if wildcard and operator in _PUBLIC_ONLY_OPERATORS:
+            raise InvalidSpecifier(
+                f"prefix matching is only valid with == and !=: {operator}{version}",
+            )
+        parsed = Version(version[:-2] if wildcard else version)
+        if operator in _PUBLIC_ONLY_OPERATORS and parsed[3]:
+            raise InvalidSpecifier(
+                f"a local version label is not permitted with {operator}: "
+                f"{operator}{version}",
+            )
+        if wildcard and (parsed[2] != FINAL_SUFFIX or parsed[3]):
+            raise InvalidSpecifier(
+                f"prefix matching cannot follow a pre, post, dev or local "
+                f"segment: {operator}{version}",
+            )
+        if operator == "~=" and len(parsed.release) < 2:
+            raise InvalidSpecifier(
+                f"~= needs at least two release segments to have an upper "
+                f"bound: ~={version}",
+            )
         _write_is_wildcard(self, wildcard)
-        _write_parsed_version(self, Version(version[:-2] if wildcard else version))
+        _write_parsed_version(self, parsed)
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError(f"Specifier is immutable (tried to set {name!r})")
@@ -146,9 +179,13 @@ class Specifier:
             )
 
         if operator == ">=":
+            if version[3]:
+                return version[:3] >= other[:3]
             return version >= other
 
         if operator == "<=":
+            if version[3]:
+                return version[:3] <= other[:3]
             return version <= other
 
         if operator == ">":
@@ -308,8 +345,8 @@ class SpecifierSet:
     _exact_version: Version | None
     _is_pinned: bool
     _explicitly_allows_prereleases: bool
-    _contains: dict[Version, bool]
-    _contains_with_prereleases: dict[Version, bool]
+    _contains: dict[str, bool]
+    _contains_with_prereleases: dict[str, bool]
 
     def __new__(cls, value: str = "") -> SpecifierSet:
         key = value.strip()
@@ -415,12 +452,12 @@ class SpecifierSet:
         except AttributeError:
             allowed = False
             for specifier in self.specifiers:
+                if specifier.operator == "!=":
+                    continue
                 parsed = specifier.parsed_version
-                if (
-                    parsed is not None
-                    and specifier.operator != "!="
-                    and parsed.is_prerelease
-                ):
+                if parsed is None:
+                    parsed = version_of(specifier.version)
+                if parsed is not None and parsed.is_prerelease:
                     allowed = True
                     break
             object.__setattr__(self, "_explicitly_allows_prereleases", allowed)
@@ -458,7 +495,8 @@ class SpecifierSet:
                 "_contains_with_prereleases" if allow_prereleases else "_contains",
                 cache,
             )
-        cached = cache.get(parsed)
+        key = parsed.public
+        cached = cache.get(key)
         if cached is not None:
             return cached
 
@@ -475,7 +513,7 @@ class SpecifierSet:
                     result = False
                     break
 
-        bounded_put(cache, parsed, result, _CONTAINS_CACHE_SIZE)
+        bounded_put(cache, key, result, _CONTAINS_CACHE_SIZE)
         return result
 
     def __bool__(self) -> bool:

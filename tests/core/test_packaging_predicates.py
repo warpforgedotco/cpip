@@ -31,7 +31,7 @@ from cpip.core.packaging import (
     is_windows_path,
     parse_requirement,
 )
-from cpip.core.versions import Version
+from cpip.core.versions import InvalidVersion, Version
 
 
 def _oracle_names_exact_version(requirement: Requirement) -> bool:
@@ -52,13 +52,23 @@ def _oracle_sole_pinned_version(requirement: Requirement) -> Version | None:
 
 
 def _oracle_explicitly_allows_prereleases(specifier: SpecifierSet) -> bool:
-    return any(
-        clause.operator not in ("===", "!=")
-        and Version(
-            clause.version[:-2] if clause.version.endswith(".*") else clause.version
-        ).is_prerelease
-        for clause in specifier.specifiers
-    )
+    # Every operator but `!=` opts the set in when its operand names a
+    # prerelease -- `===` included, even though its operand is arbitrary text
+    # rather than a parsed version, which is why this has to tolerate text
+    # that is not a version at all.
+    for clause in specifier.specifiers:
+        if clause.operator == "!=":
+            continue
+        text = clause.version
+        if text.endswith(".*"):
+            text = text[:-2]
+        try:
+            parsed = Version(text)
+        except InvalidVersion:
+            continue
+        if parsed.is_prerelease:
+            return True
+    return False
 
 
 def _oracle_is_unnamed_direct(requirement: Requirement) -> bool:
