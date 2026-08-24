@@ -8,6 +8,7 @@ against ``packaging`` covers the rest of the grammar.
 
 from __future__ import annotations
 
+import packaging.markers
 import pytest
 from cpip.core.markers import (
     InvalidMarker,
@@ -19,7 +20,6 @@ from cpip.core.markers import (
     parse_marker,
 )
 from cpip.core.packaging import marker_applies
-from packaging.markers import InvalidMarker as PackagingInvalidMarker
 from packaging.markers import Marker
 
 LINUX = {
@@ -200,7 +200,7 @@ def test_extra_literal_is_normalised() -> None:
     ],
 )
 def test_rejects_what_packaging_rejects(marker: str) -> None:
-    with pytest.raises(PackagingInvalidMarker):
+    with pytest.raises(packaging.markers.InvalidMarker):
         Marker(marker)
     with pytest.raises(InvalidMarker):
         parse_marker(marker)
