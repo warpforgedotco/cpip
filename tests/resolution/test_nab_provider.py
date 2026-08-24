@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
+import cpip.resolution.nab_provider
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
 from cpip.resolution.models import ResolutionConfig
@@ -57,6 +60,33 @@ class FakeProvider:
                 if name == requirement.name
             )
         return (self.candidates[(requirement.name, next(iter(allowed_versions)))],)
+
+
+def test_constraints_are_indexed_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    marker_calls = 0
+    marker_applies = cpip.resolution.nab_provider.marker_applies
+
+    def counting_marker_applies(marker, extras=()):
+        nonlocal marker_calls
+        marker_calls += 1
+        return marker_applies(marker, extras=extras)
+
+    monkeypatch.setattr(
+        cpip.resolution.nab_provider,
+        "marker_applies",
+        counting_marker_applies,
+    )
+    adapter = NabProvider(
+        FakeProvider(),
+        ResolutionConfig(
+            constraints=("dep==1", "ignored==1; python_version < '0'"),
+        ),
+    )
+
+    assert adapter._constraint_for("dep") == (parse_requirement("dep==1"),)
+    assert adapter._constraint_for("dep[extra]") == (parse_requirement("dep==1"),)
+    assert adapter._constraint_for("unrelated") == ()
+    assert marker_calls == 2
 
 
 def test_constraints_apply_to_transitive_dependencies() -> None:

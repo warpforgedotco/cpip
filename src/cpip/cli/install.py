@@ -1456,16 +1456,18 @@ def run_install(args: list[str]) -> int:
             plan = plan.replace(candidates=tuple(materialized_candidates))
 
         parsed_constraints = map(parse_requirement, execution.bundle.constraints)
-        active_constraints = [
-            constraint for constraint in parsed_constraints if constraint.marker is None
-        ]
+        active_constraints_by_name: dict[str, list[Any]] = {}
+        for constraint in parsed_constraints:
+            if constraint.marker is None and constraint.url is None:
+                active_constraints_by_name.setdefault(
+                    constraint.canonical_name,
+                    [],
+                ).append(constraint)
         for candidate in plan.candidates:
-            matching_constraints = [
-                constraint
-                for constraint in active_constraints
-                if constraint.canonical_name == candidate.canonical_name
-                and constraint.url is None
-            ]
+            matching_constraints = active_constraints_by_name.get(
+                candidate.canonical_name,
+                (),
+            )
             if matching_constraints and not all(
                 constraint.specifier.contains(candidate.version, allow_prereleases=True)
                 for constraint in matching_constraints

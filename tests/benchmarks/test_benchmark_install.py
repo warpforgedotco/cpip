@@ -24,9 +24,14 @@ from pathlib import Path
 from benchmark_support import reset_caches
 from cpip.core.hashes import Hashes, hash_file
 from cpip.core.wheel import read_metadata_message, validate_wheel
+from cpip.install.output import materialize_candidates
 from cpip.install.target import InstallTarget
 from cpip.platform.unpacking import untar_file, unzip_file
-from cpip.install.wheel_transaction import WheelInstaller
+from cpip.install.wheel_transaction import (
+    WheelInstaller,
+    install_wheels_transactionally,
+)
+from cpip.resolution.api import ResolutionEngine
 from pytest_codspeed import BenchmarkFixture
 
 
@@ -73,6 +78,33 @@ def test_install_wheel(
         WheelInstaller(target, pycompile=False).install(payload_wheel)
 
     benchmark(install)
+
+
+def test_install_compiled_dependency_graph(
+    benchmark: BenchmarkFixture,
+    graph_wheelhouse: Path,
+    tmp_path: Path,
+) -> None:
+    resolved = ResolutionEngine.resolve_wheelhouse(
+        [str(graph_wheelhouse)],
+        ["application"],
+    )
+    assert resolved is not None
+    candidates = tuple(materialize_candidates(resolved.candidates))
+    requests = tuple((candidate.path, True, None) for candidate in candidates)
+    counter = itertools.count()
+
+    def install_compiled() -> None:
+        destination = tmp_path / f"compiled-graph-{next(counter)}"
+        target = InstallTarget.from_options("application", target=str(destination))
+        install_wheels_transactionally(
+            requests,
+            target=target,
+            pycompile=True,
+            candidates=candidates,
+        )
+
+    benchmark(install_compiled)
 
 
 def test_unzip_wheel_many_files(

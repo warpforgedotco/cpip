@@ -8,8 +8,9 @@ import re
 import sys
 from collections.abc import Iterable
 
-from cpip.core.versions import ZERO_VERSION
 from cpip.core import errors
+from cpip.core.metadata import installed_index
+from cpip.core.versions import ZERO_VERSION
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.inputs import (
     coerce_requirements,
@@ -99,7 +100,12 @@ class ResolutionEngine:
         from cpip._vendor.nab_resolver.resolver import Resolver
 
         requirements = coerce_requirements(requirements_input)
-        adapter = NabProvider(self.provider, context=self.config)
+        installed = {} if self.config.ignore_installed else installed_index()
+        adapter = NabProvider(
+            self.provider,
+            context=self.config,
+            installed=installed,
+        )
         roots = adapter.add_roots(requirements)
         resolver = Resolver(adapter, root_version=ZERO_VERSION)
         try:

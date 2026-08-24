@@ -3,6 +3,7 @@ import importlib.util
 import os
 import shutil
 import sysconfig
+import threading
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -58,29 +59,31 @@ def install_wheel(
 def make_wheel_internal(
     directory: Path,
     *,
+    name: str = "owner-demo",
     version: str = "1.0",
     extra_files: dict[str, str] | None = None,
     entry_points: str | None = None,
 ) -> Path:
-    wheel = directory / f"owner_demo-{version}-py3-none-any.whl"
+    distribution = name.replace("-", "_")
+    wheel = directory / f"{distribution}-{version}-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr("owner_demo/__init__.py", f"VALUE = {version!r}\n")
+        archive.writestr(f"{distribution}/__init__.py", f"VALUE = {version!r}\n")
         archive.writestr(
-            f"owner_demo-{version}.dist-info/METADATA",
-            f"Metadata-Version: 2.1\nName: owner-demo\nVersion: {version}\n",
+            f"{distribution}-{version}.dist-info/METADATA",
+            f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n",
         )
         archive.writestr(
-            f"owner_demo-{version}.dist-info/WHEEL",
+            f"{distribution}-{version}.dist-info/WHEEL",
             "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
         )
         if entry_points is not None:
             archive.writestr(
-                f"owner_demo-{version}.dist-info/entry_points.txt",
+                f"{distribution}-{version}.dist-info/entry_points.txt",
                 entry_points,
             )
         for path, data in (extra_files or {}).items():
             archive.writestr(path, data)
-        archive.writestr(f"owner_demo-{version}.dist-info/RECORD", "")
+        archive.writestr(f"{distribution}-{version}.dist-info/RECORD", "")
     return wheel
 
 
@@ -288,6 +291,37 @@ def test_batch_install_rolls_back_when_destinations_overlap(tmp_path: Path) -> N
         )
 
     assert not target.exists()
+
+
+def test_compiled_batch_installs_in_parallel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    wheels = [
+        make_wheel_internal(wheelhouse, name=f"compiled-{index}") for index in range(4)
+    ]
+    candidates = [wheel_candidate(wheel) for wheel in wheels]
+    thread_names: list[str] = []
+    original_install = WheelInstaller.install
+
+    def record_thread(self, path, *args, **kwargs):
+        thread_names.append(threading.current_thread().name)
+        return original_install(self, path, *args, **kwargs)
+
+    monkeypatch.setattr(WheelInstaller, "install", record_thread)
+    target = tmp_path / "target"
+    install_wheels_transactionally(
+        [(wheel, True, None) for wheel in wheels],
+        target=InstallTarget.from_options("compiled-0", target=str(target)),
+        pycompile=True,
+        lookup_existing=False,
+        candidates=candidates,
+    )
+
+    assert any(name != "MainThread" for name in thread_names)
+    assert len(list(target.rglob("*.pyc"))) == 4
 
 
 def test_fresh_target_reuses_copy_on_write_wheel_archive(tmp_path: Path) -> None:
