@@ -414,8 +414,13 @@ def valid_record(value: object) -> bool:
         return False
     if metadata is not None and not valid_str_dict(metadata):
         return False
-    if upload_time is not None and type(upload_time) is not str:
-        return False
+    if upload_time is not None:
+        if type(upload_time) is not str:
+            return False
+        try:
+            parse_iso_datetime(upload_time)
+        except ValueError:
+            return False
     if type(parts) is not tuple or len(parts) != 5:
         return False
     for part in parts:
