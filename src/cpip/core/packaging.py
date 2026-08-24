@@ -334,6 +334,7 @@ class SpecifierSet:
         "_contains_with_prereleases",
         "_exact_version",
         "_explicitly_allows_prereleases",
+        "_has_arbitrary",
         "_is_pinned",
         "_text",
         "specifiers",
@@ -345,8 +346,8 @@ class SpecifierSet:
     _exact_version: Version | None
     _is_pinned: bool
     _explicitly_allows_prereleases: bool
-    _contains: dict[str, bool]
-    _contains_with_prereleases: dict[str, bool]
+    _contains: dict[Version | str, bool]
+    _contains_with_prereleases: dict[Version | str, bool]
 
     def __new__(cls, value: str = "") -> SpecifierSet:
         key = value.strip()
@@ -429,6 +430,24 @@ class SpecifierSet:
             return exact
 
     @property
+    def has_arbitrary_clause(self) -> bool:
+        """Some ``===`` clause, whose operand is text rather than a version.
+
+        This decides how the containment memo is keyed. Every other operator
+        depends only on the comparison tuple, which is what a Version hashes
+        as; ``===`` compares the canonical *spelling*, and 1.0 and 1.0.0 are
+        one key but two spellings. Keying everything by text would cost a
+        property call and a string hash on the hot path for the sake of an
+        operator almost nothing uses.
+        """
+        try:
+            return self._has_arbitrary
+        except AttributeError:
+            found = any(specifier.operator == "===" for specifier in self.specifiers)
+            object.__setattr__(self, "_has_arbitrary", found)
+            return found
+
+    @property
     def is_pinned(self) -> bool:
         """Some ``==``/``===`` clause without a wildcard: the set admits at
         most one release (the yank and hash policy question)."""
@@ -495,7 +514,7 @@ class SpecifierSet:
                 "_contains_with_prereleases" if allow_prereleases else "_contains",
                 cache,
             )
-        key = parsed.public
+        key: Version | str = parsed.public if self.has_arbitrary_clause else parsed
         cached = cache.get(key)
         if cached is not None:
             return cached
