@@ -115,7 +115,14 @@ def test_supported_wheel_tags_target_context_oracle() -> None:
         ("macosx_13_0_arm64", "macosx_11_0_arm64", True),
         ("macosx_13_0_arm64", "macosx_13_0_universal2", True),
         ("macosx_13_0_arm64", "macosx_14_0_arm64", False),
-        ("macosx_13_0_x86_64", "macosx_13_0_universal2", False),
+        # A universal2 wheel carries an x86_64 slice as well as an arm64 one,
+        # so an Intel Mac loads it: packaging.tags.mac_platforms((13, 0),
+        # "x86_64") lists macosx_13_0_universal2.
+        ("macosx_13_0_x86_64", "macosx_13_0_universal2", True),
+        ("macosx_13_0_x86_64", "macosx_13_0_intel", True),
+        ("macosx_13_0_x86_64", "macosx_13_0_fat64", True),
+        ("macosx_13_0_x86_64", "macosx_13_0_arm64", False),
+        ("macosx_13_0_arm64", "macosx_13_0_x86_64", False),
     ],
 )
 def test_wheel_tag_rank_macos_platform_oracle(

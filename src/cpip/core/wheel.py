@@ -98,16 +98,48 @@ class PureWheelCandidate:
 
 
 MACOS_COMPATIBLE_ARCHES = {
-    "x86_64": frozenset(("x86_64", "intel", "universal")),
-    "i386": frozenset(("i386", "intel", "universal")),
-    "intel": frozenset(("intel", "universal")),
+    "x86_64": frozenset(
+        ("x86_64", "intel", "fat64", "fat32", "universal2", "universal")
+    ),
+    "i386": frozenset(("i386", "intel", "fat32", "fat", "universal")),
+    "intel": frozenset(("intel", "fat64", "fat32", "universal")),
     "arm64": frozenset(("arm64", "universal2")),
     "aarch64": frozenset(("aarch64", "universal2")),
-    "ppc": frozenset(("ppc", "universal")),
-    "ppc64": frozenset(("ppc64", "universal")),
+    "ppc": frozenset(("ppc", "fat32", "fat", "universal")),
+    "ppc64": frozenset(("ppc64", "fat64", "universal")),
     "universal": frozenset(("universal",)),
     "universal2": frozenset(("universal2",)),
 }
+
+_LEGACY_MANYLINUX_GLIBC = {
+    "manylinux1": (2, 5),
+    "manylinux2010": (2, 12),
+    "manylinux2014": (2, 17),
+}
+
+
+def linux_platform_parts(platform_tag: str) -> tuple[str, ...] | None:
+    """``(family, major, minor, arch)`` for a manylinux or musllinux tag.
+
+    Both the PEP 600 spelling (``manylinux_2_17_x86_64``) and the three
+    pre-600 aliases (``manylinux2014_x86_64``) reduce to the same shape, so
+    the matcher never has to know which spelling a wheel happened to use.
+    Returns None for anything that is not one of those tags.
+    """
+    if platform_tag.startswith("manylinux_") or platform_tag.startswith("musllinux_"):
+        fields = platform_tag.split("_", 3)
+        if len(fields) != 4:
+            return None
+        family, major, minor, arch = fields
+        if not major.isdigit() or not minor.isdigit() or not arch:
+            return None
+        return (family, major, minor, arch)
+
+    prefix, _, arch = platform_tag.partition("_")
+    glibc = _LEGACY_MANYLINUX_GLIBC.get(prefix)
+    if glibc is None or not arch:
+        return None
+    return ("manylinux", str(glibc[0]), str(glibc[1]), arch)
 
 
 def Parser() -> parser.Parser:
@@ -296,6 +328,9 @@ class WheelTag:
 
         elif platform_lower.startswith("ios_"):
             parts = tuple(platform_lower.split("_", 4))
+
+        elif platform_lower.startswith(("manylinux", "musllinux")):
+            parts = linux_platform_parts(platform_lower)
 
         else:
             parts = None
@@ -632,7 +667,7 @@ def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag,
 
         version_digits = CURRENT_PYTHON_VERSION_DIGITS
 
-        platform_tags = (current_platform_tag(),)
+        platform_tags = current_platform_tags()
 
         abi_tags = ()
 
@@ -643,7 +678,7 @@ def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag,
 
         implementation = target.implementation or "cp"
 
-        platform_tags = target.platforms or (current_platform_tag(),)
+        platform_tags = target.platforms or current_platform_tags()
 
         abi_tags = target.abis
 
@@ -726,13 +761,54 @@ def current_platform_tag() -> str:
         mac_version = release.split(".")
 
         if len(mac_version) >= 2 and all(part.isdigit() for part in mac_version[:2]):
-            return f"macosx_{mac_version[0]}_{mac_version[1]}_{platform.machine()}".replace(
-                "-", "_"
-            ).replace(".", "_")
+            major = int(mac_version[0])
+            minor = 0 if major >= 11 else int(mac_version[1])
+            machine = platform.machine().replace("-", "_").replace(".", "_")
+            return f"macosx_{major}_{minor}_{machine}"
 
     import sysconfig
 
     return sysconfig.get_platform().replace("-", "_").replace(".", "_")
+
+
+@memoized(1)
+def current_platform_tags() -> tuple[str, ...]:
+    """The platforms this interpreter can install a wheel for, best first.
+
+    On most systems this is one tag. On Linux it is two: the libc the
+    interpreter is linked against, expressed as the newest manylinux or
+    musllinux tag it satisfies, followed by the bare ``linux_<arch>`` that
+    ``sysconfig`` reports. Without the first entry no manylinux wheel is ever
+    compatible, and effectively every binary package on PyPI falls back to
+    building from source.
+
+    Only the *newest* tag of the family is listed rather than every older one
+    the host also satisfies: :func:`platform_matches` compares libc versions,
+    so one entry stands for the whole range. That is the same reason the
+    macOS entry is a single tag rather than one per deployment target.
+    """
+    platform_tag = current_platform_tag()
+
+    if not platform_tag.startswith("linux_"):
+        return (platform_tag,)
+
+    from cpip.core.libc import GLIBC, MUSL, detect, manylinux_arch_supported
+
+    arch = platform_tag[len("linux_") :]
+    libc = detect()
+
+    if libc is None:
+        return (platform_tag,)
+
+    kind, major, minor = libc
+
+    if kind == GLIBC and manylinux_arch_supported(arch):
+        return (f"manylinux_{major}_{minor}_{arch}", platform_tag)
+
+    if kind == MUSL:
+        return (f"musllinux_{major}_{minor}_{arch}", platform_tag)
+
+    return (platform_tag,)
 
 
 @memoized(4096)
@@ -1403,7 +1479,39 @@ def platform_matches(
 
         return _android_platform_matches_parts(runtime_parts, wheel_parts)
 
+    if runtime.startswith(("manylinux", "musllinux")) and wheel.startswith(
+        ("manylinux", "musllinux"),
+    ):
+        if runtime_parts is None or wheel_parts is None:
+            return False
+
+        return _linux_platform_matches_parts(runtime_parts, wheel_parts)
+
     return False
+
+
+def _linux_platform_matches_parts(
+    runtime_parts: tuple[str, ...],
+    wheel_parts: tuple[str, ...],
+) -> bool:
+    """A libc-tagged wheel runs here if it names the same libc and architecture
+    and asks for no newer a version than the one installed.
+
+    Comparing versions rather than enumerating every tag the host satisfies is
+    what keeps the supported-tag list at two entries on Linux instead of the
+    forty-odd the reference implementation generates. PEP 600 lets us compare
+    across major versions directly: a newer glibc satisfies every older one.
+    """
+    runtime_family, runtime_major, runtime_minor, runtime_arch = runtime_parts
+    wheel_family, wheel_major, wheel_minor, wheel_arch = wheel_parts
+
+    if runtime_family != wheel_family or runtime_arch != wheel_arch:
+        return False
+
+    return (int(wheel_major), int(wheel_minor)) <= (
+        int(runtime_major),
+        int(runtime_minor),
+    )
 
 
 def _macos_platform_matches_parts(
