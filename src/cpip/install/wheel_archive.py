@@ -46,10 +46,11 @@ def destination_internal_parts_text(
     *,
     resolved_directories: DestinationCache | None = None,
     resolved_roots: ResolvedRoots | None = None,
+    root_is_purelib: bool = True,
 ) -> str:
     if not parts or not parts[0].endswith(".data"):
         return _safe_destination_parts_with_text(
-            target.purelib,
+            target.purelib if root_is_purelib else target.platlib,
             parts,
             display_relative,
             resolved_directories=resolved_directories,
@@ -165,6 +166,7 @@ class MemberPaths:
         "directories",
         "resolved_directories",
         "resolved_roots",
+        "root_is_purelib",
         "stage_root",
         "target",
     )
@@ -176,11 +178,13 @@ class MemberPaths:
         *,
         resolved_directories: DestinationCache | None = None,
         resolved_roots: ResolvedRoots | None = None,
+        root_is_purelib: bool = True,
     ) -> None:
         self.target = target
         self.stage_root = stage_root
         self.resolved_directories = resolved_directories
         self.resolved_roots = resolved_roots
+        self.root_is_purelib = root_is_purelib
         self.directories: dict[str, tuple[tuple[str, ...], str, str, str] | None] = {}
 
     def resolve(self, filename: str) -> tuple[tuple[str, ...], str, str, str]:
@@ -223,6 +227,7 @@ class MemberPaths:
                 filename,
                 resolved_directories=self.resolved_directories,
                 resolved_roots=self.resolved_roots,
+                root_is_purelib=self.root_is_purelib,
             ),
             "/".join(parts),
         )
@@ -242,7 +247,7 @@ class MemberPaths:
             root = getattr(self.target, prefix[1])
             parent_parts = prefix[2:]
         else:
-            root = self.target.purelib
+            root = self.target.purelib if self.root_is_purelib else self.target.platlib
             parent_parts = prefix
         resolved_parent = _resolved_parent_directory(
             root,

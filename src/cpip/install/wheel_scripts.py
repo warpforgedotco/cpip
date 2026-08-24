@@ -11,15 +11,40 @@ from cpip.core.errors import InstallationError
 
 
 def rewrite_shebang(path: str, executable: str | None) -> None:
+    """Point a ``.data/scripts`` pseudo-shebang at the target interpreter.
+
+    The binary distribution format says a first line starting with exactly
+    ``#!python`` is rewritten, and separately allows the ``#!pythonw``
+    convention for Windows GUI scripts. Matching the whole of ``#!python\n``
+    missed both ``#!pythonw`` and the CRLF form a wheel built on Windows
+    carries, leaving those scripts unable to find an interpreter.
+    """
     with open(path, "rb") as file:
         contents = file.read()
 
-    if contents.startswith(b"#!python\n"):
-        with open(path, "wb") as file:
-            file.write(
-                f"#!{executable or sys.executable}\n".encode()
-                + contents[len(b"#!python\n") :],
-            )
+    if not contents.startswith(b"#!python"):
+        return
+
+    first_line, separator, rest = contents.partition(b"\n")
+    if not separator:
+        first_line, rest = contents, b""
+    interpreter = executable or sys.executable
+    if first_line.rstrip(b"\r")[len(b"#!python") :].startswith(b"w"):
+        interpreter = _windowed(interpreter)
+
+    with open(path, "wb") as file:
+        file.write(f"#!{interpreter}\n".encode() + rest)
+
+
+def _windowed(executable: str) -> str:
+    """``pythonw`` beside ``python``, when there is one to point at."""
+    directory, _, name = executable.rpartition(os.sep)
+    if not name.startswith("python") or name.startswith("pythonw"):
+        return executable
+    stem, dot, suffix = name.partition(".")
+    candidate = f"{stem}w{dot}{suffix}"
+    full = os.path.join(directory, candidate) if directory else candidate
+    return full if os.path.exists(full) else executable
 
 
 def entry_point_scripts(path: str) -> dict[str, tuple[str, bool]]:

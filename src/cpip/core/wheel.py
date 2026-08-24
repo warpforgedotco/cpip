@@ -1236,6 +1236,25 @@ def wheel_version_from_text(text: str) -> tuple[int, ...]:
         raise UnsupportedWheel(f"invalid Wheel-Version: {value!r}") from exc
 
 
+def root_is_purelib_from_text(text: str) -> bool:
+    """Whether the wheel root unpacks into purelib, from the WHEEL text.
+
+    ``Root-Is-Purelib: false`` means the wheel carries compiled extensions and
+    belongs in platlib. In a virtualenv the two schemes are the same directory,
+    which is why getting this wrong is invisible in most testing; on a system
+    layout that splits them (``/usr/lib`` against ``/usr/lib64``) it puts the
+    package in the wrong one. The field is required, and anything other than a
+    case-insensitive ``true`` reads as false, as the format specifies.
+    """
+    for line in text.splitlines():
+        if not line:
+            break
+        name, separator, value = line.partition(":")
+        if separator and name.casefold() == "root-is-purelib":
+            return value.strip().casefold() == "true"
+    raise UnsupportedWheel("WHEEL is missing Root-Is-Purelib")
+
+
 def check_compatibility(version: tuple[int, ...], name: str) -> None:
     if version[0] > VERSION_COMPATIBLE[0]:
         raise UnsupportedWheel(

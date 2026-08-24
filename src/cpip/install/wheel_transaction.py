@@ -16,10 +16,11 @@ from collections.abc import Iterable
 from contextlib import nullcontext
 from threading import Lock
 
-from cpip.core.errors import InstallationError
+from cpip.core.errors import InstallationError, UnsupportedWheel
 from cpip.core.names import canonicalize_name
 from cpip.core.wheel import (
     WheelCandidate,
+    root_is_purelib_from_text,
     validate_wheel,
     validate_wheel_with_metadata,
     wheel_candidate,
@@ -277,6 +278,7 @@ def install_wheel_internal(
                         archive,  # ty:ignore[invalid-argument-type]
                         os.path.basename(path)[:-4].split("-", 1)[0],
                     )
+            root_is_purelib = wheel_root_is_purelib(archive, validated_dist_info)
             wheel_record_metadata: dict[str, tuple[str, str]] = {}
             try:
                 record_text = archive.read(f"{validated_dist_info}/RECORD").decode(
@@ -297,6 +299,7 @@ def install_wheel_internal(
                 stage_root_text,
                 resolved_directories=resolved_directories,
                 resolved_roots=resolved_roots,
+                root_is_purelib=root_is_purelib,
             )
             for member in archive.infolist():
                 if member.is_dir():
@@ -654,6 +657,22 @@ def install_wheel_internal(
     return candidate
 
 
+def wheel_root_is_purelib(archive: object, dist_info: str) -> bool:
+    """``Root-Is-Purelib`` for an already-validated wheel.
+
+    The WHEEL file has been read once by validation, but only its version was
+    kept; re-reading one small member is cheaper than threading the text
+    through every layout cache. A wheel whose WHEEL cannot be read here has
+    already passed validation, so the format default -- purelib -- is used
+    rather than failing the install a second time.
+    """
+    try:
+        raw = archive.read(f"{dist_info}/WHEEL")  # type: ignore[attr-defined]
+        return root_is_purelib_from_text(raw.decode())
+    except (KeyError, OSError, UnicodeDecodeError, UnsupportedWheel):
+        return True
+
+
 def validate_wheel_batch(
     paths: Iterable[str],
     *,
@@ -685,6 +704,7 @@ def validate_wheel_batch(
             candidates.append(candidate)
             if validation_cache is not None:
                 validation_cache[path] = dist_info
+            root_is_purelib = root_is_purelib_from_text(wheel_metadata_text)
             for member in archive.infolist():
                 if member.is_dir():
                     continue
@@ -695,6 +715,7 @@ def validate_wheel_batch(
                     member.filename,
                     resolved_directories=resolved_directories,
                     resolved_roots=resolved_roots,
+                    root_is_purelib=root_is_purelib,
                 )
                 destination_text = destination
                 if destination_text in destinations:
