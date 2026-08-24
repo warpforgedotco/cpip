@@ -225,3 +225,75 @@ def test_environ_proxies_cached_per_host_and_port(
 
     assert bypassed == {}
     assert proxied.get("http") == "http://proxy.invalid:3128"
+
+
+def test_redirect_gains_environment_proxy_for_destination(
+    monkeypatch,
+) -> None:
+    """trust_env is off, so the redirect hook must add the destination's
+    environment proxy itself (and still honor NO_PROXY for it)."""
+    import urllib.parse
+
+    from cpip._vendor import requests
+
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:3128")
+    monkeypatch.setenv("NO_PROXY", "start.test")
+    session = NetworkSession()
+    session.ensure_requests_backend()
+    transport = session.requests_session
+
+    proxied = requests.Request("GET", "http://elsewhere.test/file").prepare()
+    assert transport.rebuild_proxies(proxied, {}) == {
+        "http": "http://proxy.invalid:3128",
+    }
+
+    bypassed = requests.Request("GET", "http://start.test/file").prepare()
+    assert transport.rebuild_proxies(bypassed, {}) == {}
+
+
+def test_redirect_reapplies_netrc_for_destination(tmp_path, monkeypatch) -> None:
+    """A cross-host redirect strips Authorization; the destination must get
+    its own netrc credentials, as requests did with trust_env on."""
+    import base64
+
+    netrc_path = tmp_path / "netrc"
+    netrc_path.write_text("machine localhost login redirected password secret\n")
+    monkeypatch.setenv("NETRC", str(netrc_path))
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        seen_authorization: list[str | None] = []
+
+        def do_GET(self) -> None:
+            if self.path == "/start":
+                target = f"http://localhost:{self.server.server_port}/target"
+                self.send_response(302)
+                self.send_header("Location", target)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            type(self).seen_authorization.append(self.headers.get("Authorization"))
+            body = b"ok"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        session = NetworkSession()
+        url = f"http://127.0.0.1:{server.server_port}/start"
+        response = session.get(url, headers={"Authorization": "Basic original"})
+        assert response.content == b"ok"
+
+        token = base64.b64encode(b"redirected:secret").decode()
+        assert Handler.seen_authorization == [f"Basic {token}"]
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()

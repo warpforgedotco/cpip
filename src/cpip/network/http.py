@@ -17,7 +17,7 @@ from collections.abc import MutableMapping
 from cpip.core.cpip_version import get_cpip_version
 from cpip.core.urls import redact_auth_from_url, url_to_path
 from cpip.core.utils import current_version
-from cpip.network.auth import MultiDomainBasicAuth
+from cpip.network.auth import MultiDomainBasicAuth, get_netrc_auth
 from cpip.network.cache import SafeFileCache
 from cpip.network.exceptions import (
     ConnectionFailedError,
@@ -407,7 +407,44 @@ class NetworkSession:
             from cpip._vendor import requests
             from cpip._vendor.requests.adapters import HTTPAdapter
 
-            session = requests.Session()
+            network_session = self
+
+            class RedirectEnvironmentSession(requests.Session):
+                """Restore trust_env's redirect-time behavior from cpip's caches.
+
+                trust_env is off so requests does not re-resolve environment
+                proxies and netrc on every request; redirects still need the
+                per-destination half of that behavior -- an environment proxy
+                for the new host and its netrc credentials.
+                """
+
+                def rebuild_proxies(self, prepared_request, proxies):
+                    merged = dict(proxies) if proxies else {}
+
+                    parsed = urllib.parse.urlsplit(prepared_request.url)
+
+                    if parsed.scheme in ("http", "https"):
+                        environ = network_session.environ_proxies_for(
+                            prepared_request.url,
+                            parsed,
+                        )
+
+                        proxy = environ.get(parsed.scheme, environ.get("all"))
+
+                        if proxy:
+                            merged.setdefault(parsed.scheme, proxy)
+
+                    return super().rebuild_proxies(prepared_request, merged)
+
+                def rebuild_auth(self, prepared_request, response):
+                    super().rebuild_auth(prepared_request, response)
+
+                    new_auth = get_netrc_auth(prepared_request.url)
+
+                    if new_auth is not None:
+                        prepared_request.prepare_auth(new_auth)
+
+            session = RedirectEnvironmentSession()
             adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64)
             session.mount("https://", adapter)
             session.mount("http://", adapter)
