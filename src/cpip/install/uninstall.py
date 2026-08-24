@@ -23,19 +23,58 @@ class DistributionUninstaller:
         return uninstall_distribution(name, paths=self.paths)
 
 
+def _script_directories(root: str) -> frozenset[str]:
+    """The script directories a distribution installed in ``root`` may write.
+
+    A wheel's ``.data/scripts`` members are the one class of file that
+    legitimately lands outside the library root, so removing them has to be
+    allowed -- but only in the directories this layout actually puts them in.
+    Accepting any parent directory merely *named* ``bin`` would let a crafted
+    RECORD reach ``/tmp/anywhere/bin/x``.
+
+    The candidates are the scripts path of the running interpreter, and the
+    ones implied by the layouts cpip installs into: ``<root>/bin`` for a
+    ``--target`` directory, ``<prefix>/Scripts`` beside a Windows
+    ``Lib/site-packages``, and ``<prefix>/bin`` above a POSIX
+    ``lib/pythonX.Y/site-packages``.
+    """
+    import sysconfig
+
+    candidates = [os.path.join(root, "bin"), os.path.join(root, "Scripts")]
+
+    windows_prefix = os.path.dirname(os.path.dirname(root))
+    candidates.append(os.path.join(windows_prefix, "Scripts"))
+
+    posix_prefix = os.path.dirname(windows_prefix)
+    candidates.append(os.path.join(posix_prefix, "bin"))
+
+    scripts = sysconfig.get_path("scripts")
+    if scripts:
+        candidates.append(scripts)
+
+    return frozenset(
+        os.path.normcase(os.path.realpath(candidate)) for candidate in candidates
+    )
+
+
 def _inside_distribution(path: str, root: str) -> bool:
     """Whether ``path`` is a file this distribution may remove.
 
     Either it sits under the directory holding the ``.dist-info``, or it is a
-    console script in the environment's ``bin``/``Scripts`` directory -- the
-    one place a wheel's files legitimately land outside that root.
+    console script in one of this layout's script directories.
+
+    The path is resolved first: ``commonpath`` compares path components
+    literally, so an unresolved ``site-packages/../../../etc/passwd`` would
+    otherwise look like it starts inside the distribution.
     """
+    resolved = os.path.realpath(path)
     try:
-        if os.path.commonpath((path, root)) == root:
+        if os.path.commonpath((resolved, root)) == root:
             return True
     except (OSError, ValueError):
         pass
-    return os.path.basename(os.path.dirname(path)) in {"bin", "Scripts"}
+    parent = os.path.normcase(os.path.realpath(os.path.dirname(resolved)))
+    return parent in _script_directories(root)
 
 
 def uninstall_distribution(
@@ -101,9 +140,10 @@ def uninstall_distribution(
             else:
                 resolved_text = path_text
 
-            if ".." in relative_parts and os.path.basename(
-                os.path.dirname(resolved_text),
-            ) not in {"bin", "Scripts"}:
+            if ".." in relative_parts and not _inside_distribution(
+                resolved_text,
+                root,
+            ):
                 continue
 
             if ".." in relative_parts:
@@ -139,13 +179,8 @@ def uninstall_distribution(
 
             path = os.path.realpath(os.path.join(egg_link_root, *relative_parts))
 
-            try:
-                if os.path.commonpath((path, root)) != root:
-                    raise ValueError
-
-            except (OSError, ValueError):
-                if os.path.basename(os.path.dirname(path)) not in {"bin", "Scripts"}:
-                    continue
+            if not _inside_distribution(path, root):
+                continue
 
             recorded_paths.add(path)
 
