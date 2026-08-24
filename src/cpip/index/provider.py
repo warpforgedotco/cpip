@@ -2483,7 +2483,7 @@ class CandidateProvider:
 
         candidates_by_version: dict[Version, list[CandidateRecord]] = {}
 
-        records_by_version: dict[Version, tuple[object, ...]] = {}
+        records_by_version: dict[Version, list[object]] = {}
 
         cached_groups = self.catalog_groups(requirement, allow_fetch=True)
 
@@ -2571,8 +2571,7 @@ class CandidateProvider:
                             ordered_has_unyanked = True
 
                     if has_eligible_artifact:
-                        records_by_version[version] = (
-                            *records_by_version.get(version, ()),
+                        records_by_version.setdefault(version, []).append(
                             (source_url, generation),
                         )
 
@@ -2692,7 +2691,14 @@ class CandidateProvider:
                 {version: tuple(links) for version, links in links_by_version.items()},
             ),
             records_by_version=(
-                None if cached_groups is None else MappingProxyType(records_by_version)
+                None
+                if cached_groups is None
+                else MappingProxyType(
+                    {
+                        version: tuple(records)
+                        for version, records in records_by_version.items()
+                    },
+                )
             ),
         )
 
