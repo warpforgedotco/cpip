@@ -295,7 +295,13 @@ class DirectUrl:
         if isinstance(archive_info, dict):
             hashes = archive_info.get("hashes")
             if isinstance(hashes, dict) and hashes:
-                algorithm, digest = next(iter(hashes.items()))
+                # sha256 where the producer recorded one: a reader that
+                # understands only the legacy field should not be handed the
+                # weakest digest just because it was inserted first.
+                preferred = [
+                    (name, value) for name, value in hashes.items() if name == "sha256"
+                ]
+                algorithm, digest = (preferred or list(hashes.items()))[0]
                 if isinstance(algorithm, str) and isinstance(digest, str):
                     archive_info["hash"] = f"{algorithm}={digest}"  # ty:ignore[invalid-assignment]
         return data
