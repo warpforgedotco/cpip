@@ -9,7 +9,7 @@ import threading
 
 
 from cpip.cli.dependency_groups import toml_module
-from cpip.core.errors import InstallationError
+from cpip.core.errors import CpipError, InstallationError
 from cpip.core.format_control import FormatControl
 from cpip.core.packaging import SpecifierSet, canonicalize_name, parse_requirement
 from cpip.core.versions import Version
@@ -678,7 +678,7 @@ def bundle_install_requirements(
 
                 source_version = str(metadata.version)
 
-            except Exception:
+            except (CpipError, OSError, ValueError):
                 source_name = item.req.canonical_name
 
                 source_version = "unknown"
@@ -817,7 +817,7 @@ def bundle_install_requirements(
                         build_isolation=False,
                     ).version,
                 )
-            except Exception:
+            except (CpipError, OSError, ValueError):
                 source_version = ""
 
             previous = direct_sources.get(item.req.canonical_name)
