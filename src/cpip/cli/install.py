@@ -1164,6 +1164,22 @@ def run_install(args: list[str]) -> int:
             allow_prereleases=options.pre,
         )
 
+    if bundle.require_hashes:
+        from cpip.resolution.hash_checking import enforce_hash_checking
+
+        def _as_editable(line: str) -> Any:
+            item = install_req_from_line(line)
+            item.editable = True
+            return item
+
+        enforce_hash_checking(
+            [
+                *requirements,
+                *(_as_editable(editable) for editable in bundle.editables),
+            ],
+            constraints=bundle.constraints,
+        )
+
     execution = InstallExecutionContext(
         options=options,
         bundle=bundle,

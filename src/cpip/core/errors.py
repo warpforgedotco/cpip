@@ -138,24 +138,69 @@ class ResolutionError(CpipError):
 
 
 class HashError(InstallationError):
-    """A distribution hash is missing, unsupported, or invalid."""
+    """A distribution hash is missing, unsupported, or invalid.
+
+    ``order`` sorts the subclasses by how hard the problem is to act on,
+    hardest first, so that a report covering several of them leads with the
+    one the user has to solve before the others matter: being told to pin a
+    version is noise while the file still names a repository that cannot be
+    hashed at all. ``head`` is the sentence introducing a group of them.
+    """
+
+    order = 4
+    head = ""
 
 
 class HashMissing(HashError):
     """A required hash was not provided."""
 
+    order = 2
+    head = (
+        "Hashes are required in --require-hashes mode, but they are missing "
+        "from some requirements. Add lines like these to your requirements "
+        "files to prevent tampering. (If you did not enable --require-hashes "
+        "manually, note that it turns on automatically when any package has "
+        "a hash.)"
+    )
+
 
 class HashMismatch(HashError):
     """A distribution hash does not match the allowed hashes."""
+
+    order = 4
+    head = (
+        "THESE PACKAGES DO NOT MATCH THE HASHES FROM THE REQUIREMENTS FILE. "
+        "If you have updated the package versions, please update the hashes. "
+        "Otherwise, examine the package contents carefully; someone may have "
+        "tampered with them."
+    )
 
 
 class HashUnpinned(HashError):
     """A requirement is not pinned in require-hashes mode."""
 
+    order = 3
+    head = (
+        "In --require-hashes mode, all requirements must have their versions "
+        "pinned with ==. These do not:"
+    )
+
 
 class VcsHashUnsupported(HashError):
     """Version control requirements cannot be hash-verified."""
 
+    order = 0
+    head = (
+        "Can't verify hashes for these requirements because we don't have a "
+        "way to hash version control repositories:"
+    )
+
 
 class DirectoryUrlHashUnsupported(HashError):
     """Directory requirements cannot be hash-verified."""
+
+    order = 1
+    head = (
+        "Can't verify hashes for these file:// requirements because they "
+        "point to directories:"
+    )
