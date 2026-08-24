@@ -344,6 +344,7 @@ class SpecifierSet:
     _text: str
     _bounds: tuple[tuple[Version, bool] | None, tuple[Version, bool] | None]
     _exact_version: Version | None
+    _has_arbitrary: bool
     _is_pinned: bool
     _explicitly_allows_prereleases: bool
     _contains: dict[Version | str, bool]
@@ -389,6 +390,11 @@ class SpecifierSet:
 
         self = object.__new__(cls)
         _write_specifiers(self, specifiers)
+        object.__setattr__(
+            self,
+            "_has_arbitrary",
+            any(specifier.operator == "===" for specifier in specifiers),
+        )
         if len(_specifier_sets) >= _SPECIFIER_SET_CACHE_SIZE:
             _specifier_sets.clear()
         _specifier_sets[key] = self
@@ -440,12 +446,7 @@ class SpecifierSet:
         property call and a string hash on the hot path for the sake of an
         operator almost nothing uses.
         """
-        try:
-            return self._has_arbitrary
-        except AttributeError:
-            found = any(specifier.operator == "===" for specifier in self.specifiers)
-            object.__setattr__(self, "_has_arbitrary", found)
-            return found
+        return self._has_arbitrary
 
     @property
     def is_pinned(self) -> bool:
@@ -514,7 +515,7 @@ class SpecifierSet:
                 "_contains_with_prereleases" if allow_prereleases else "_contains",
                 cache,
             )
-        key: Version | str = parsed.public if self.has_arbitrary_clause else parsed
+        key: Version | str = parsed.public if self._has_arbitrary else parsed
         cached = cache.get(key)
         if cached is not None:
             return cached
@@ -584,6 +585,7 @@ class Requirement:
 
     name: str
     _canonical_name: str
+    _canonical_marker: str
     specifier: SpecifierSet
     extras: frozenset[str]
     url: str | None

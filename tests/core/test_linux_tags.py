@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 from cpip.core import libc, wheel
+from cpip.core.utils import CURRENT_PYTHON_VERSION_DIGITS
 from cpip.core.wheel import (
     WheelTag,
     _parse_wheel_filename,
@@ -37,7 +38,17 @@ def linux_host(monkeypatch: pytest.MonkeyPatch):
     wheel.supported_wheel_tags.cache_clear()
 
 
+CP = CURRENT_PYTHON_VERSION_DIGITS
+OLD = "39"
+
+
+def _wheel(name: str) -> str:
+    """A fixture filename tagged for the interpreter actually running."""
+    return name.format(V=CP, OLD=OLD)
+
+
 def _rank(filename: str, supported: tuple[WheelTag, ...]) -> int | None:
+    filename = _wheel(filename)
     parsed = _parse_wheel_filename(filename)
     assert parsed is not None, filename
     return wheel_tag_rank(tuple(parsed.tags), supported)
@@ -46,13 +57,13 @@ def _rank(filename: str, supported: tuple[WheelTag, ...]) -> int | None:
 @pytest.mark.parametrize(
     "filename",
     [
-        "numpy-2.1.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
-        "lxml-5.3.0-cp314-cp314-manylinux_2_28_x86_64.whl",
-        "charset_normalizer-3.4.0-cp314-cp314-manylinux2014_x86_64.whl",
-        "old-1.0-cp314-cp314-manylinux2010_x86_64.whl",
-        "older-1.0-cp314-cp314-manylinux1_x86_64.whl",
-        "stable-1.0-cp39-abi3-manylinux_2_28_x86_64.whl",
-        "plain-1.0-cp314-cp314-linux_x86_64.whl",
+        "numpy-2.1.0-cp{V}-cp{V}-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+        "lxml-5.3.0-cp{V}-cp{V}-manylinux_2_28_x86_64.whl",
+        "charset_normalizer-3.4.0-cp{V}-cp{V}-manylinux2014_x86_64.whl",
+        "old-1.0-cp{V}-cp{V}-manylinux2010_x86_64.whl",
+        "older-1.0-cp{V}-cp{V}-manylinux1_x86_64.whl",
+        "stable-1.0-cp{OLD}-abi3-manylinux_2_28_x86_64.whl",
+        "plain-1.0-cp{V}-cp{V}-linux_x86_64.whl",
         "pure-1.0-py3-none-any.whl",
     ],
 )
@@ -65,14 +76,14 @@ def test_glibc_host_accepts_manylinux(linux_host, filename: str) -> None:
     "filename",
     [
         # A glibc newer than the host's.
-        "toonew-1.0-cp314-cp314-manylinux_2_99_x86_64.whl",
+        "toonew-1.0-cp{V}-cp{V}-manylinux_2_99_x86_64.whl",
         # Another architecture.
-        "wrongarch-1.0-cp314-cp314-manylinux_2_17_aarch64.whl",
+        "wrongarch-1.0-cp{V}-cp{V}-manylinux_2_17_aarch64.whl",
         # The other libc.
-        "musl-1.0-cp314-cp314-musllinux_1_2_x86_64.whl",
+        "musl-1.0-cp{V}-cp{V}-musllinux_1_2_x86_64.whl",
         # Another operating system.
-        "win-1.0-cp314-cp314-win_amd64.whl",
-        "mac-1.0-cp314-cp314-macosx_11_0_arm64.whl",
+        "win-1.0-cp{V}-cp{V}-win_amd64.whl",
+        "mac-1.0-cp{V}-cp{V}-macosx_11_0_arm64.whl",
     ],
 )
 def test_glibc_host_rejects_incompatible(linux_host, filename: str) -> None:
@@ -82,25 +93,25 @@ def test_glibc_host_rejects_incompatible(linux_host, filename: str) -> None:
 
 def test_musl_host_accepts_musllinux_only(linux_host) -> None:
     supported = linux_host("linux_x86_64", ("musl", 1, 2))
-    assert _rank("p-1.0-cp314-cp314-musllinux_1_2_x86_64.whl", supported) is not None
-    assert _rank("p-1.0-cp314-cp314-musllinux_1_1_x86_64.whl", supported) is not None
-    assert _rank("p-1.0-cp314-cp314-musllinux_1_9_x86_64.whl", supported) is None
-    assert _rank("p-1.0-cp314-cp314-manylinux_2_17_x86_64.whl", supported) is None
-    assert _rank("p-1.0-cp314-cp314-linux_x86_64.whl", supported) is not None
+    assert _rank("p-1.0-cp{V}-cp{V}-musllinux_1_2_x86_64.whl", supported) is not None
+    assert _rank("p-1.0-cp{V}-cp{V}-musllinux_1_1_x86_64.whl", supported) is not None
+    assert _rank("p-1.0-cp{V}-cp{V}-musllinux_1_9_x86_64.whl", supported) is None
+    assert _rank("p-1.0-cp{V}-cp{V}-manylinux_2_17_x86_64.whl", supported) is None
+    assert _rank("p-1.0-cp{V}-cp{V}-linux_x86_64.whl", supported) is not None
 
 
 def test_unidentifiable_libc_falls_back_to_bare_linux(linux_host) -> None:
     """No libc, no claim: only what sysconfig itself reports is compatible."""
     supported = linux_host("linux_x86_64", None)
     assert supported[0].platform == "linux_x86_64"
-    assert _rank("p-1.0-cp314-cp314-manylinux_2_17_x86_64.whl", supported) is None
-    assert _rank("p-1.0-cp314-cp314-linux_x86_64.whl", supported) is not None
+    assert _rank("p-1.0-cp{V}-cp{V}-manylinux_2_17_x86_64.whl", supported) is None
+    assert _rank("p-1.0-cp{V}-cp{V}-linux_x86_64.whl", supported) is not None
 
 
 def test_libc_tag_is_preferred_over_bare_linux(linux_host) -> None:
     supported = linux_host("linux_x86_64", ("glibc", 2, 39))
-    manylinux = _rank("p-1.0-cp314-cp314-manylinux_2_17_x86_64.whl", supported)
-    plain = _rank("p-1.0-cp314-cp314-linux_x86_64.whl", supported)
+    manylinux = _rank("p-1.0-cp{V}-cp{V}-manylinux_2_17_x86_64.whl", supported)
+    plain = _rank("p-1.0-cp{V}-cp{V}-linux_x86_64.whl", supported)
     assert manylinux is not None
     assert plain is not None
     assert manylinux < plain
