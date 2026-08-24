@@ -199,11 +199,16 @@ def test_markers_match_from_line() -> None:
 
 
 def test_markers_match_extras_as_set() -> None:
+    # PEP 508 gives `extra` a single value, so a marker is evaluated once per
+    # requested extra and the results OR-ed -- the same rule pip applies in
+    # BaseDistribution.iter_dependencies. A negative clause therefore holds as
+    # soon as *some* requested extra satisfies it: asking for [gpu, docs] pulls
+    # in a dependency guarded by `extra != "gpu"`, because it applies to docs.
     req = install_req_from_line('name; extra != "gpu"')
     assert req.match_markers()
     assert req.match_markers(["docs"])
     assert not req.match_markers(["gpu"])
-    assert not req.match_markers(["gpu", "docs"])
+    assert req.match_markers(["gpu", "docs"])
 
     req = install_req_from_line('name; extra == "gpu"')
     assert not req.match_markers()
@@ -237,6 +242,8 @@ def test_markers_match_ordered_extra_comparison() -> None:
 
 
 def test_markers_match_extra_in_operators() -> None:
+    # `in` is Python containment on the literal, so "gpu" matches by being a
+    # substring of "gpu,docs" -- not by the literal being split on commas.
     req = install_req_from_line('name; extra in "gpu,docs"')
     assert req.match_markers(["gpu"])
     assert req.match_markers(["docs"])
@@ -245,7 +252,9 @@ def test_markers_match_extra_in_operators() -> None:
     req = install_req_from_line('name; extra not in "gpu,docs"')
     assert not req.match_markers(["gpu"])
     assert req.match_markers(["cpu"])
-    assert not req.match_markers(["gpu", "cpu"])
+    # OR over the requested extras again: cpu is not in the list, so the
+    # requirement applies even though gpu was also asked for.
+    assert req.match_markers(["gpu", "cpu"])
 
 
 def test_extras_for_non_editable_and_editable_requirements() -> None:

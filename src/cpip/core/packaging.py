@@ -26,6 +26,22 @@ def safe_extra(extra: str) -> str:
     return canonicalize_name(extra)
 
 
+def implementation_version_text() -> str:
+    """``implementation_version`` as PEP 508 defines it.
+
+    This is the *implementation's* version, not the language version: on PyPy
+    it is 7.3.x, not 3.10.x, and markers that gate on a PyPy release are
+    written against that number. Non-final builds carry the release level, so
+    a CPython alpha reports ``3.15.0a1`` rather than ``3.15.0``.
+    """
+    info = sys.implementation.version
+    version = f"{info.major}.{info.minor}.{info.micro}"
+    kind = info.releaselevel
+    if kind != "final":
+        version += kind[0] + str(info.serial)
+    return version
+
+
 @memoized(8)
 def default_environment(extra: str | None = None) -> dict[str, str]:
     import platform
@@ -34,9 +50,14 @@ def default_environment(extra: str | None = None) -> dict[str, str]:
 
     version = platform.python_version()
 
+    if version.endswith("+"):
+        # A build from an untagged checkout reports "3.15.0+", which is not a
+        # PEP 440 version; the reference environment repairs it the same way.
+        version += "local"
+
     return {
         "implementation_name": sys.implementation.name,
-        "implementation_version": version,
+        "implementation_version": implementation_version_text(),
         "os_name": os.name,
         "platform_machine": platform.machine(),
         "platform_python_implementation": impl,
@@ -493,6 +514,7 @@ class Requirement:
     """
 
     __slots__ = (
+        "_canonical_marker",
         "_canonical_name",
         "_is_unnamed_direct",
         "extras",
@@ -569,24 +591,47 @@ class Requirement:
     def __delattr__(self, name: str) -> None:
         raise AttributeError(f"Requirement is immutable (tried to delete {name!r})")
 
+    @property
+    def canonical_marker(self) -> str:
+        """The marker in its canonical spelling, computed on first read.
+
+        Identity has to be about meaning, not about how the metadata happened
+        to be typed: ``python_version<'3.7'`` and ``python_version < "3.7"``
+        are the same guard, and requirements carrying them must dedupe.
+        """
+        try:
+            return self._canonical_marker
+        except AttributeError:
+            from cpip.core.markers import canonical_marker
+
+            text = canonical_marker(self.marker) if self.marker else ""
+            object.__setattr__(self, "_canonical_marker", text)
+            return text
+
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Requirement) and (
             self.canonical_name,
             self.specifier,
             self.extras,
             self.url,
-            self.marker,
+            self.canonical_marker,
         ) == (
             other.canonical_name,
             other.specifier,
             other.extras,
             other.url,
-            other.marker,
+            other.canonical_marker,
         )
 
     def __hash__(self) -> int:
         return hash(
-            (self.canonical_name, self.specifier, self.extras, self.url, self.marker)
+            (
+                self.canonical_name,
+                self.specifier,
+                self.extras,
+                self.url,
+                self.canonical_marker,
+            )
         )
 
     def copy_with(self, **changes: object) -> Requirement:
@@ -621,7 +666,7 @@ class Requirement:
         else:
             parts.append(str(self.specifier))
         if self.marker:
-            parts.append("; " + self.marker.replace("'", '"'))
+            parts.append("; " + self.canonical_marker)
         return "".join(parts)
 
     def __repr__(self) -> str:
@@ -888,19 +933,25 @@ def split_marker(value: str) -> tuple[str, str | None]:
 
 
 def marker_applies(marker: str | None, *, extras: Iterable[str] = ()) -> bool:
+    """Whether a requirement guarded by ``marker`` applies here.
+
+    Extras are evaluated the way pip evaluates them: the marker is checked
+    once per requested extra with ``extra`` bound to that name, and the
+    results are OR-ed. A requirement with no extras requested is checked once
+    with ``extra`` bound to the empty string. Binding a *set* instead would
+    get ``extra != "x"`` wrong whenever more than one extra is requested.
+    """
     if not marker:
         return True
 
-    normalized_extras = tuple(sorted(safe_extra(extra) for extra in extras if extra))
+    normalized_extras = tuple(sorted({safe_extra(extra) for extra in extras if extra}))
 
     return _marker_applies_cached(marker, normalized_extras)
 
 
 @memoized(4096)
 def _marker_applies_cached(marker: str, extras: tuple[str, ...]) -> bool:
-    env = default_environment()
-
-    return marker_applies_internal(marker, env, set(extras))
+    return marker_applies_internal(marker, default_environment(), set(extras))
 
 
 def marker_applies_internal(
@@ -908,124 +959,32 @@ def marker_applies_internal(
     env: dict[str, str],
     extras: set[str],
 ) -> bool:
-    or_clauses = re.split(r"\s+or\s+", marker, flags=re.IGNORECASE)
+    """Evaluate ``marker`` against ``env``, once per extra in ``extras``.
 
-    return any(marker_and_clause_matches(clause, env, extras) for clause in or_clauses)
+    An unparseable marker, or one naming a variable this environment does not
+    define, is treated as not applying rather than raising: a single bad
+    Requires-Dist line in one package's metadata must not abort a resolve.
+    """
+    from cpip.core.markers import (
+        InvalidMarker,
+        UndefinedComparison,
+        UndefinedEnvironmentName,
+        evaluate_marker,
+        parse_marker,
+    )
 
+    try:
+        tree = parse_marker(marker)
+    except InvalidMarker:
+        return False
 
-def marker_and_clause_matches(
-    clause_text: str,
-    env: dict[str, str],
-    extras: set[str],
-) -> bool:
-    clauses = re.split(r"\s+and\s+", clause_text, flags=re.IGNORECASE)
+    contexts = [{**env, "extra": extra} for extra in extras] or [{**env, "extra": ""}]
 
-    for clause in clauses:
-        clause = strip_grouping_parentheses(clause.strip())
-
-        match = re.match(
-            r"\s*([A-Za-z0-9_]+)\s*(==|!=|<=|>=|<|>|in|not in)\s*(['\"])(.*?)\3\s*$",
-            clause,
-        )
-
-        if match is None:
-            return False
-
-        key, op, _, expected = match.groups()
-
-        if key == "extra":
-            if not extra_marker_clause_matches(op, expected, extras):
-                return False
-
+    for context in contexts:
+        try:
+            if evaluate_marker(tree, context):
+                return True
+        except (UndefinedEnvironmentName, UndefinedComparison):
             continue
 
-        actual = env.get(key, "")
-
-        if op == "==" and actual != expected:
-            return False
-
-        if op == "!=" and actual == expected:
-            return False
-
-        if op == "in" and actual not in {part.strip() for part in expected.split(",")}:
-            return False
-
-        if op == "not in" and actual in {part.strip() for part in expected.split(",")}:
-            return False
-
-        if op in {"<", "<=", ">", ">="} and not _compare_marker_values(
-            actual, op, expected
-        ):
-            return False
-
-    return True
-
-
-def strip_grouping_parentheses(text: str) -> str:
-    while text.startswith("(") and text.endswith(")"):
-        depth = 0
-
-        balanced = True
-
-        for index, char in enumerate(text):
-            if char == "(":
-                depth += 1
-
-            elif char == ")":
-                depth -= 1
-
-                if depth == 0 and index != len(text) - 1:
-                    balanced = False
-
-                    break
-
-        if not balanced or depth != 0:
-            break
-
-        text = text[1:-1].strip()
-
-    return text
-
-
-def extra_marker_clause_matches(op: str, expected: str, extras: set[str]) -> bool:
-    if not extras:
-        extras = {""}
-
-    expected = safe_extra(expected)
-
-    if op == "==":
-        return expected in extras
-
-    if op == "!=":
-        return expected not in extras
-
-    if op == "in":
-        expected_values = {safe_extra(part.strip()) for part in expected.split(",")}
-
-        return any(extra in expected_values for extra in extras)
-
-    if op == "not in":
-        expected_values = {safe_extra(part.strip()) for part in expected.split(",")}
-
-        return all(extra not in expected_values for extra in extras)
-
-    return any(_compare_marker_values(extra, op, expected) for extra in extras)
-
-
-def _compare_marker_values(actual: str, op: str, expected: str) -> bool:
-    """Order two marker operands as versions when both parse, else as text."""
-    try:
-        left: Any = Version(actual)
-        right: Any = Version(expected)
-    except InvalidVersion:
-        left = actual
-        right = expected
-    if op == "<":
-        return left < right
-    if op == "<=":
-        return left <= right
-    if op == ">":
-        return left > right
-    if op == ">=":
-        return left >= right
-    raise ValueError(f"unsupported marker operator: {op}")
+    return False
