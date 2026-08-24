@@ -141,3 +141,40 @@ def test_rewrite_shebang(tmp_path, contents: bytes, expected: bytes) -> None:
     script.write_bytes(contents)
     rewrite_shebang(str(script), "/opt/py/bin/python3")
     assert script.read_bytes() == expected
+
+
+def test_root_is_purelib_default_is_shared_by_both_readers() -> None:
+    """A wheel with no Root-Is-Purelib has already passed validation by the
+    time either install path asks, so both take the same lenient answer."""
+    from cpip.install.wheel_transaction import root_is_purelib_or_default
+
+    assert root_is_purelib_or_default("Wheel-Version: 1.0\n") is True
+    assert (
+        root_is_purelib_or_default("Wheel-Version: 1.0\nRoot-Is-Purelib: false\n")
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    "path, expected",
+    [
+        ("/env/lib/python3.12/site-packages/pkg/mod.py", True),
+        ("/env/lib/python3.12/site-packages/../../../bin/tool", True),
+        ("/env/bin/tool", True),
+        # A directory merely named "bin" is not this environment's.
+        ("/tmp/anywhere/bin/payload", False),
+        ("/usr/local/bin/anything", False),
+        ("/etc/passwd", False),
+        # commonpath compares components literally, so the escape has to be
+        # resolved before it is compared.
+        ("/env/lib/python3.12/site-packages/../../../../etc/passwd", False),
+    ],
+)
+def test_record_paths_are_confined_to_the_distribution(
+    path: str, expected: bool
+) -> None:
+    """RECORD is whatever the wheel shipped, so a row naming a file outside
+    this distribution and its script directory is refused, not followed."""
+    from cpip.install.uninstall import _inside_distribution
+
+    assert _inside_distribution(path, "/env/lib/python3.12/site-packages") is expected
