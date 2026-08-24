@@ -1157,6 +1157,26 @@ def run_install(args: list[str]) -> int:
         else []
     )
 
+    if bundle.require_hashes:
+        # Before the satisfied-requirement filter, not after: hash-checking
+        # mode is a claim about the requirements the user wrote, and one that
+        # happens to be installed already must not escape the pin and digest
+        # rules just because nothing would be fetched for it.
+        from cpip.resolution.hash_checking import enforce_hash_checking
+
+        def _as_editable(line: str) -> Any:
+            item = install_req_from_line(line)
+            item.editable = True
+            return item
+
+        enforce_hash_checking(
+            [
+                *requirements,
+                *(_as_editable(editable) for editable in bundle.editables),
+            ],
+            constraints=bundle.constraints,
+        )
+
     if not reinstall and not options.upgrade:
         requirements = filter_already_satisfied_requirements(
             requirements,

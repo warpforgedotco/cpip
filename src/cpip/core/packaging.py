@@ -7,7 +7,7 @@ import urllib.parse
 
 from cpip.core.caches import bounded_put, memoized, register_table
 from cpip.core.names import canonicalize_name
-from cpip.core.versions import FINAL_SUFFIX, InvalidVersion, Version
+from cpip.core.versions import FINAL_SUFFIX, InvalidVersion, Version, version_of
 
 TYPE_CHECKING = False
 
@@ -26,6 +26,22 @@ def safe_extra(extra: str) -> str:
     return canonicalize_name(extra)
 
 
+def implementation_version_text() -> str:
+    """``implementation_version`` as PEP 508 defines it.
+
+    This is the *implementation's* version, not the language version: on PyPy
+    it is 7.3.x, not 3.10.x, and markers that gate on a PyPy release are
+    written against that number. Non-final builds carry the release level, so
+    a CPython alpha reports ``3.15.0a1`` rather than ``3.15.0``.
+    """
+    info = sys.implementation.version
+    version = f"{info.major}.{info.minor}.{info.micro}"
+    kind = info.releaselevel
+    if kind != "final":
+        version += kind[0] + str(info.serial)
+    return version
+
+
 @memoized(8)
 def default_environment(extra: str | None = None) -> dict[str, str]:
     import platform
@@ -34,9 +50,14 @@ def default_environment(extra: str | None = None) -> dict[str, str]:
 
     version = platform.python_version()
 
+    if version.endswith("+"):
+        # A build from an untagged checkout reports "3.15.0+", which is not a
+        # PEP 440 version; the reference environment repairs it the same way.
+        version += "local"
+
     return {
         "implementation_name": sys.implementation.name,
-        "implementation_version": version,
+        "implementation_version": implementation_version_text(),
         "os_name": os.name,
         "platform_machine": platform.machine(),
         "platform_python_implementation": impl,
@@ -48,6 +69,21 @@ def default_environment(extra: str | None = None) -> dict[str, str]:
         "sys_platform": sys.platform,
         "extra": extra or "",
     }
+
+
+class InvalidSpecifier(ValueError):
+    """The text is not a version specifier PEP 440 permits.
+
+    A ``ValueError`` so that callers written against the older behaviour --
+    where a malformed clause surfaced as ``InvalidVersion`` or a bare
+    ``ValueError`` -- keep catching it.
+    """
+
+
+# Operators whose operand PEP 440 restricts to a public version: no local
+# label, and no `.*` prefix match. `==`/`!=` allow both; `===` is arbitrary
+# text and is not parsed at all.
+_PUBLIC_ONLY_OPERATORS = frozenset(("<", "<=", ">", ">=", "~="))
 
 
 class Specifier:
@@ -77,10 +113,34 @@ class Specifier:
             _write_is_wildcard(self, False)
             _write_parsed_version(self, None)
             return
-        if wildcard and operator not in ("==", "!="):
-            raise InvalidVersion(version)
+        if wildcard and operator in _PUBLIC_ONLY_OPERATORS:
+            raise InvalidSpecifier(
+                f"prefix matching is only valid with == and !=: {operator}{version}",
+            )
+        try:
+            parsed = Version(version[:-2] if wildcard else version)
+        except InvalidVersion as error:
+            raise InvalidSpecifier(
+                f"invalid version in specifier: {operator}{version}",
+            ) from error
+        if wildcard:
+            if parsed[2] != FINAL_SUFFIX or parsed[3]:
+                raise InvalidSpecifier(
+                    f"prefix matching cannot follow a pre, post, dev or local "
+                    f"segment: {operator}{version}",
+                )
+        elif parsed[3] and operator in _PUBLIC_ONLY_OPERATORS:
+            raise InvalidSpecifier(
+                f"a local version label is not permitted with {operator}: "
+                f"{operator}{version}",
+            )
+        if operator == "~=" and len(parsed.release) < 2:
+            raise InvalidSpecifier(
+                f"~= needs at least two release segments to have an upper "
+                f"bound: ~={version}",
+            )
         _write_is_wildcard(self, wildcard)
-        _write_parsed_version(self, Version(version[:-2] if wildcard else version))
+        _write_parsed_version(self, parsed)
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError(f"Specifier is immutable (tried to set {name!r})")
@@ -125,9 +185,15 @@ class Specifier:
             )
 
         if operator == ">=":
+            # No local strip needed: dropping the candidate's label only ever
+            # lowers it, and it can only cross an inclusive lower bound where
+            # the release parts are already equal -- which answers True either
+            # way. `<=` is not symmetric here, so it does strip.
             return version >= other
 
         if operator == "<=":
+            if version[3]:
+                return version[:3] <= other[:3]
             return version <= other
 
         if operator == ">":
@@ -276,6 +342,7 @@ class SpecifierSet:
         "_contains_with_prereleases",
         "_exact_version",
         "_explicitly_allows_prereleases",
+        "_has_arbitrary",
         "_is_pinned",
         "_text",
         "specifiers",
@@ -285,10 +352,11 @@ class SpecifierSet:
     _text: str
     _bounds: tuple[tuple[Version, bool] | None, tuple[Version, bool] | None]
     _exact_version: Version | None
+    _has_arbitrary: bool
     _is_pinned: bool
     _explicitly_allows_prereleases: bool
-    _contains: dict[Version, bool]
-    _contains_with_prereleases: dict[Version, bool]
+    _contains: dict[Version | str, bool]
+    _contains_with_prereleases: dict[Version | str, bool]
 
     def __new__(cls, value: str = "") -> SpecifierSet:
         key = value.strip()
@@ -297,6 +365,7 @@ class SpecifierSet:
             return cached
 
         clauses: list[Specifier] = []
+        has_arbitrary = False
         for part in key.split(","):
             clause = part.strip()
             if not clause:
@@ -323,6 +392,8 @@ class SpecifierSet:
             version = clause[len(operator) :].strip()
             if not version:
                 raise ValueError(f"invalid version specifier: {value!r}")
+            if operator == "===":
+                has_arbitrary = True
             clauses.append(Specifier(operator, version))
         specifiers = tuple(clauses)
         if key and not specifiers:
@@ -330,6 +401,7 @@ class SpecifierSet:
 
         self = object.__new__(cls)
         _write_specifiers(self, specifiers)
+        object.__setattr__(self, "_has_arbitrary", has_arbitrary)
         if len(_specifier_sets) >= _SPECIFIER_SET_CACHE_SIZE:
             _specifier_sets.clear()
         _specifier_sets[key] = self
@@ -371,6 +443,19 @@ class SpecifierSet:
             return exact
 
     @property
+    def has_arbitrary_clause(self) -> bool:
+        """Some ``===`` clause, whose operand is text rather than a version.
+
+        This decides how the containment memo is keyed. Every other operator
+        depends only on the comparison tuple, which is what a Version hashes
+        as; ``===`` compares the canonical *spelling*, and 1.0 and 1.0.0 are
+        one key but two spellings. Keying everything by text would cost a
+        property call and a string hash on the hot path for the sake of an
+        operator almost nothing uses.
+        """
+        return self._has_arbitrary
+
+    @property
     def is_pinned(self) -> bool:
         """Some ``==``/``===`` clause without a wildcard: the set admits at
         most one release (the yank and hash policy question)."""
@@ -394,12 +479,12 @@ class SpecifierSet:
         except AttributeError:
             allowed = False
             for specifier in self.specifiers:
+                if specifier.operator == "!=":
+                    continue
                 parsed = specifier.parsed_version
-                if (
-                    parsed is not None
-                    and specifier.operator != "!="
-                    and parsed.is_prerelease
-                ):
+                if parsed is None:
+                    parsed = version_of(specifier.version)
+                if parsed is not None and parsed.is_prerelease:
                     allowed = True
                     break
             object.__setattr__(self, "_explicitly_allows_prereleases", allowed)
@@ -437,7 +522,8 @@ class SpecifierSet:
                 "_contains_with_prereleases" if allow_prereleases else "_contains",
                 cache,
             )
-        cached = cache.get(parsed)
+        key: Version | str = parsed.public if self._has_arbitrary else parsed
+        cached = cache.get(key)
         if cached is not None:
             return cached
 
@@ -454,7 +540,7 @@ class SpecifierSet:
                     result = False
                     break
 
-        bounded_put(cache, parsed, result, _CONTAINS_CACHE_SIZE)
+        bounded_put(cache, key, result, _CONTAINS_CACHE_SIZE)
         return result
 
     def __bool__(self) -> bool:
@@ -493,6 +579,7 @@ class Requirement:
     """
 
     __slots__ = (
+        "_canonical_marker",
         "_canonical_name",
         "_is_unnamed_direct",
         "extras",
@@ -505,6 +592,7 @@ class Requirement:
 
     name: str
     _canonical_name: str
+    _canonical_marker: str
     specifier: SpecifierSet
     extras: frozenset[str]
     url: str | None
@@ -569,24 +657,47 @@ class Requirement:
     def __delattr__(self, name: str) -> None:
         raise AttributeError(f"Requirement is immutable (tried to delete {name!r})")
 
+    @property
+    def canonical_marker(self) -> str:
+        """The marker in its canonical spelling, computed on first read.
+
+        Identity has to be about meaning, not about how the metadata happened
+        to be typed: ``python_version<'3.7'`` and ``python_version < "3.7"``
+        are the same guard, and requirements carrying them must dedupe.
+        """
+        try:
+            return self._canonical_marker
+        except AttributeError:
+            from cpip.core.markers import canonical_marker
+
+            text = canonical_marker(self.marker) if self.marker else ""
+            object.__setattr__(self, "_canonical_marker", text)
+            return text
+
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Requirement) and (
             self.canonical_name,
             self.specifier,
             self.extras,
             self.url,
-            self.marker,
+            self.canonical_marker,
         ) == (
             other.canonical_name,
             other.specifier,
             other.extras,
             other.url,
-            other.marker,
+            other.canonical_marker,
         )
 
     def __hash__(self) -> int:
         return hash(
-            (self.canonical_name, self.specifier, self.extras, self.url, self.marker)
+            (
+                self.canonical_name,
+                self.specifier,
+                self.extras,
+                self.url,
+                self.canonical_marker,
+            )
         )
 
     def copy_with(self, **changes: object) -> Requirement:
@@ -621,7 +732,7 @@ class Requirement:
         else:
             parts.append(str(self.specifier))
         if self.marker:
-            parts.append("; " + self.marker.replace("'", '"'))
+            parts.append("; " + self.canonical_marker)
         return "".join(parts)
 
     def __repr__(self) -> str:
@@ -888,19 +999,25 @@ def split_marker(value: str) -> tuple[str, str | None]:
 
 
 def marker_applies(marker: str | None, *, extras: Iterable[str] = ()) -> bool:
+    """Whether a requirement guarded by ``marker`` applies here.
+
+    Extras are evaluated the way pip evaluates them: the marker is checked
+    once per requested extra with ``extra`` bound to that name, and the
+    results are OR-ed. A requirement with no extras requested is checked once
+    with ``extra`` bound to the empty string. Binding a *set* instead would
+    get ``extra != "x"`` wrong whenever more than one extra is requested.
+    """
     if not marker:
         return True
 
-    normalized_extras = tuple(sorted(safe_extra(extra) for extra in extras if extra))
+    normalized_extras = tuple(sorted({safe_extra(extra) for extra in extras if extra}))
 
     return _marker_applies_cached(marker, normalized_extras)
 
 
 @memoized(4096)
 def _marker_applies_cached(marker: str, extras: tuple[str, ...]) -> bool:
-    env = default_environment()
-
-    return marker_applies_internal(marker, env, set(extras))
+    return marker_applies_internal(marker, default_environment(), set(extras))
 
 
 def marker_applies_internal(
@@ -908,124 +1025,32 @@ def marker_applies_internal(
     env: dict[str, str],
     extras: set[str],
 ) -> bool:
-    or_clauses = re.split(r"\s+or\s+", marker, flags=re.IGNORECASE)
+    """Evaluate ``marker`` against ``env``, once per extra in ``extras``.
 
-    return any(marker_and_clause_matches(clause, env, extras) for clause in or_clauses)
+    An unparseable marker, or one naming a variable this environment does not
+    define, is treated as not applying rather than raising: a single bad
+    Requires-Dist line in one package's metadata must not abort a resolve.
+    """
+    from cpip.core.markers import (
+        InvalidMarker,
+        UndefinedComparison,
+        UndefinedEnvironmentName,
+        evaluate_marker,
+        parse_marker,
+    )
 
+    try:
+        tree = parse_marker(marker)
+    except InvalidMarker:
+        return False
 
-def marker_and_clause_matches(
-    clause_text: str,
-    env: dict[str, str],
-    extras: set[str],
-) -> bool:
-    clauses = re.split(r"\s+and\s+", clause_text, flags=re.IGNORECASE)
+    contexts = [{**env, "extra": extra} for extra in extras] or [{**env, "extra": ""}]
 
-    for clause in clauses:
-        clause = strip_grouping_parentheses(clause.strip())
-
-        match = re.match(
-            r"\s*([A-Za-z0-9_]+)\s*(==|!=|<=|>=|<|>|in|not in)\s*(['\"])(.*?)\3\s*$",
-            clause,
-        )
-
-        if match is None:
-            return False
-
-        key, op, _, expected = match.groups()
-
-        if key == "extra":
-            if not extra_marker_clause_matches(op, expected, extras):
-                return False
-
+    for context in contexts:
+        try:
+            if evaluate_marker(tree, context):
+                return True
+        except (UndefinedEnvironmentName, UndefinedComparison):
             continue
 
-        actual = env.get(key, "")
-
-        if op == "==" and actual != expected:
-            return False
-
-        if op == "!=" and actual == expected:
-            return False
-
-        if op == "in" and actual not in {part.strip() for part in expected.split(",")}:
-            return False
-
-        if op == "not in" and actual in {part.strip() for part in expected.split(",")}:
-            return False
-
-        if op in {"<", "<=", ">", ">="} and not _compare_marker_values(
-            actual, op, expected
-        ):
-            return False
-
-    return True
-
-
-def strip_grouping_parentheses(text: str) -> str:
-    while text.startswith("(") and text.endswith(")"):
-        depth = 0
-
-        balanced = True
-
-        for index, char in enumerate(text):
-            if char == "(":
-                depth += 1
-
-            elif char == ")":
-                depth -= 1
-
-                if depth == 0 and index != len(text) - 1:
-                    balanced = False
-
-                    break
-
-        if not balanced or depth != 0:
-            break
-
-        text = text[1:-1].strip()
-
-    return text
-
-
-def extra_marker_clause_matches(op: str, expected: str, extras: set[str]) -> bool:
-    if not extras:
-        extras = {""}
-
-    expected = safe_extra(expected)
-
-    if op == "==":
-        return expected in extras
-
-    if op == "!=":
-        return expected not in extras
-
-    if op == "in":
-        expected_values = {safe_extra(part.strip()) for part in expected.split(",")}
-
-        return any(extra in expected_values for extra in extras)
-
-    if op == "not in":
-        expected_values = {safe_extra(part.strip()) for part in expected.split(",")}
-
-        return all(extra not in expected_values for extra in extras)
-
-    return any(_compare_marker_values(extra, op, expected) for extra in extras)
-
-
-def _compare_marker_values(actual: str, op: str, expected: str) -> bool:
-    """Order two marker operands as versions when both parse, else as text."""
-    try:
-        left: Any = Version(actual)
-        right: Any = Version(expected)
-    except InvalidVersion:
-        left = actual
-        right = expected
-    if op == "<":
-        return left < right
-    if op == "<=":
-        return left <= right
-    if op == ">":
-        return left > right
-    if op == ">=":
-        return left >= right
-    raise ValueError(f"unsupported marker operator: {op}")
+    return False

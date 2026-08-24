@@ -14,10 +14,10 @@ Two assertions make this a ratchet rather than a snapshot:
 * every listed cause must still be observed -- a cause that no longer
   reproduces must be deleted from the list, so the list only shrinks.
 
-The causes are documented where they are classified. Most are cpip bugs
-relative to PEP 440 that a rewrite of ``Version``/``Specifier`` is expected
-to remove; one is a ``packaging`` bug (``~=`` with an unnormalised operand),
-and one is a deliberate leniency in cpip's specifier grammar.
+The causes are documented where they are classified. What remains is a
+``packaging`` bug (``~=`` with an unnormalised operand); cpip's own
+divergences -- a specifier grammar that accepted clauses PEP 440 forbids --
+have been removed rather than recorded.
 """
 
 from __future__ import annotations
@@ -224,9 +224,6 @@ def _packaging_disagrees_with_its_normalised_self(d: Divergence) -> bool:
 
 
 KNOWN_DIVERGENCES: dict[str, Callable[[Divergence], bool]] = {
-    "specifier grammar is more lenient than packaging": lambda d: (
-        d.observable == "specifier_validity" and d.ours is True and d.theirs is False
-    ),
     "packaging's ~= prefix is taken from the unnormalised operand": (
         _packaging_disagrees_with_its_normalised_self
     ),

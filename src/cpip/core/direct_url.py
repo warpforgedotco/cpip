@@ -188,11 +188,13 @@ class DirectUrl:
                     f"Unexpected type {type(raw).__name__} (expected dict) in 'vcs_info'",
                 )
             vcs_info = VcsInfo.from_dict(raw)  # ty:ignore[invalid-argument-type]
+        subdirectory = data.get("subdirectory")
         direct_url = cls(
             url=url,
             archive_info=archive_info,
             dir_info=dir_info,
             vcs_info=vcs_info,
+            info_subdir=subdirectory if isinstance(subdirectory, str) else None,
         )
         direct_url.validate()
         return direct_url
@@ -249,6 +251,8 @@ class DirectUrl:
         data: dict[str, object] = {
             "url": redacted_url,
         }
+        if self.info_subdir:
+            data["subdirectory"] = self.info_subdir
         if self.archive_info is not None:
             data["archive_info"] = self.archive_info.to_dict()
         if self.dir_info is not None:
@@ -279,14 +283,25 @@ class DirectUrl:
         return f"{name} @ {suffix}"
 
     def to_dict_compat(self) -> dict[str, object]:
-        """Serialize using the legacy single-hash field when needed."""
+        """Serialize with the legacy ``hash`` field alongside ``hashes``.
+
+        The spec says producers SHOULD emit ``hashes``; ``hash`` is the
+        deprecated single-digest spelling kept for readers that predate it.
+        Emitting only the legacy field -- as this used to -- drops every
+        digest but the first and leaves modern readers with nothing.
+        """
         data = self.to_dict()
         archive_info = data.get("archive_info")
         if isinstance(archive_info, dict):
             hashes = archive_info.get("hashes")
             if isinstance(hashes, dict) and hashes:
-                algorithm, digest = next(iter(hashes.items()))
+                # sha256 where the producer recorded one: a reader that
+                # understands only the legacy field should not be handed the
+                # weakest digest just because it was inserted first.
+                preferred = [
+                    (name, value) for name, value in hashes.items() if name == "sha256"
+                ]
+                algorithm, digest = (preferred or list(hashes.items()))[0]
                 if isinstance(algorithm, str) and isinstance(digest, str):
                     archive_info["hash"] = f"{algorithm}={digest}"  # ty:ignore[invalid-assignment]
-                    del archive_info["hashes"]  # ty:ignore[invalid-argument-type]
         return data

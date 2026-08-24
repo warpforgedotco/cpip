@@ -16,10 +16,11 @@ from collections.abc import Iterable
 from contextlib import nullcontext
 from threading import Lock
 
-from cpip.core.errors import InstallationError
+from cpip.core.errors import InstallationError, UnsupportedWheel
 from cpip.core.names import canonicalize_name
 from cpip.core.wheel import (
     WheelCandidate,
+    root_is_purelib_from_text,
     validate_wheel,
     validate_wheel_with_metadata,
     wheel_candidate,
@@ -62,11 +63,22 @@ from cpip.platform.clone import clone_path
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
+    from typing import Protocol
+
     from cpip.build.metadata import InstalledMetadataDistribution
     from cpip.core.direct_url import DirectUrl
     from cpip.install.wheel_state import InstalledWheelDistribution
 
     ExistingDistribution = InstalledMetadataDistribution | InstalledWheelDistribution
+
+    class MemberReader(Protocol):
+        """The one method the WHEEL re-read needs, of any archive reader.
+
+        Positional-only: the readers spell the parameter differently.
+        """
+
+        def read(self, name: str, /) -> bytes: ...
+
 
 DIRECT_CONTENT_LIMIT = 64 * 1024
 StagedEntry = tuple[str, str, str, int | None]
@@ -229,13 +241,14 @@ def install_wheel_internal(
     )
     with stage_context as temporary:
         stage_root_text = temporary
-        purelib_text = target.purelib
-        purelib_prefix = purelib_text.rstrip(os.sep) + os.sep
+        # Set once the wheel's Root-Is-Purelib is known, below.
+        library_root = target.purelib
+        library_prefix = library_root.rstrip(os.sep) + os.sep
 
         def record_relative_path(destination_text: str) -> str:
-            if destination_text.startswith(purelib_prefix):
-                return destination_text[len(purelib_prefix) :]
-            return os.path.relpath(destination_text, purelib_text)
+            if destination_text.startswith(library_prefix):
+                return destination_text[len(library_prefix) :]
+            return os.path.relpath(destination_text, library_root)
 
         staged: list[StagedEntry] = []
         record_destination: str | None = None
@@ -277,6 +290,13 @@ def install_wheel_internal(
                         archive,  # ty:ignore[invalid-argument-type]
                         os.path.basename(path)[:-4].split("-", 1)[0],
                     )
+            root_is_purelib = wheel_root_is_purelib(archive, validated_dist_info)
+            # RECORD keys, the dist-info directory and the metadata files cpip
+            # writes into it all have to land in the same root as the wheel
+            # body, or a platlib wheel on a split scheme ends up with its
+            # dist-info in purelib and RECORD rows that escape it.
+            library_root = target.purelib if root_is_purelib else target.platlib
+            library_prefix = library_root.rstrip(os.sep) + os.sep
             wheel_record_metadata: dict[str, tuple[str, str]] = {}
             try:
                 record_text = archive.read(f"{validated_dist_info}/RECORD").decode(
@@ -297,6 +317,7 @@ def install_wheel_internal(
                 stage_root_text,
                 resolved_directories=resolved_directories,
                 resolved_roots=resolved_roots,
+                root_is_purelib=root_is_purelib,
             )
             for member in archive.infolist():
                 if member.is_dir():
@@ -421,9 +442,9 @@ def install_wheel_internal(
         record_destination_text = record_destination
 
         managed_metadata = {
-            os.path.join(purelib_text, dist_info, "INSTALLER"),
-            os.path.join(purelib_text, dist_info, "REQUESTED"),
-            os.path.join(purelib_text, dist_info, "direct_url.json"),
+            os.path.join(library_root, dist_info, "INSTALLER"),
+            os.path.join(library_root, dist_info, "REQUESTED"),
+            os.path.join(library_root, dist_info, "direct_url.json"),
         }
         staged = [
             item
@@ -438,7 +459,7 @@ def install_wheel_internal(
 
         dist_info_stage = os.path.join(stage_root_text, dist_info)
         installer_source = os.path.join(dist_info_stage, "INSTALLER")
-        installer_destination = os.path.join(target.purelib, dist_info, "INSTALLER")
+        installer_destination = os.path.join(library_root, dist_info, "INSTALLER")
         installer_contents = b"cpip\n"
         if direct:
             write_direct(installer_destination, installer_contents)
@@ -456,7 +477,7 @@ def install_wheel_internal(
             ),
         )
 
-        requested_destination = os.path.join(target.purelib, dist_info, "REQUESTED")
+        requested_destination = os.path.join(library_root, dist_info, "REQUESTED")
         if requested:
             requested_source = os.path.join(dist_info_stage, "REQUESTED")
             if direct:
@@ -480,8 +501,8 @@ def install_wheel_internal(
             staged.append(
                 (
                     direct_url_source,
-                    os.path.join(target.purelib, dist_info, "direct_url.json"),
-                    os.path.join(target.purelib, dist_info, "direct_url.json"),
+                    os.path.join(library_root, dist_info, "direct_url.json"),
+                    os.path.join(library_root, dist_info, "direct_url.json"),
                     None,
                 ),
             )
@@ -654,6 +675,38 @@ def install_wheel_internal(
     return candidate
 
 
+def root_is_purelib_or_default(text: str) -> bool:
+    """``Root-Is-Purelib`` from WHEEL text, defaulting to purelib.
+
+    The field is required, but a wheel missing it has already passed
+    validation by the time either caller asks, and refusing it there would
+    reject an install over metadata neither path had to read. Both callers
+    take the same lenient answer so they cannot disagree about where a wheel
+    belongs.
+    """
+    try:
+        return root_is_purelib_from_text(text)
+    except UnsupportedWheel:
+        return True
+
+
+def wheel_root_is_purelib(archive: MemberReader, dist_info: str) -> bool:
+    """``Root-Is-Purelib`` for an already-validated wheel.
+
+    The WHEEL file has been read once by validation, but only its version was
+    kept; re-reading one small member is cheaper than threading the text
+    through every layout cache.
+    """
+    try:
+        raw = archive.read(f"{dist_info}/WHEEL")
+    except (KeyError, OSError):
+        return True
+    try:
+        return root_is_purelib_or_default(raw.decode())
+    except UnicodeDecodeError:
+        return True
+
+
 def validate_wheel_batch(
     paths: Iterable[str],
     *,
@@ -685,6 +738,7 @@ def validate_wheel_batch(
             candidates.append(candidate)
             if validation_cache is not None:
                 validation_cache[path] = dist_info
+            root_is_purelib = root_is_purelib_or_default(wheel_metadata_text)
             for member in archive.infolist():
                 if member.is_dir():
                     continue
@@ -695,6 +749,7 @@ def validate_wheel_batch(
                     member.filename,
                     resolved_directories=resolved_directories,
                     resolved_roots=resolved_roots,
+                    root_is_purelib=root_is_purelib,
                 )
                 destination_text = destination
                 if destination_text in destinations:

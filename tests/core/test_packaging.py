@@ -4,6 +4,7 @@ import random
 import re
 import pytest
 from cpip.core.packaging import (
+    InvalidSpecifier,
     SpecifierSet,
     canonicalize_name,
     canonicalize_requirement,
@@ -452,7 +453,9 @@ def test_specifier_clauses_share_one_version_per_text() -> None:
     wildcard = parse_requirement("c==1.1.*").specifier
     assert wildcard.contains(Version("1.1.5"))
     assert not wildcard.contains(Version("1.2"))
-    with pytest.raises(InvalidVersion, match="not-a-version"):
+    # A malformed operand is a malformed specifier: one exception type covers
+    # every way a clause can fail to parse.
+    with pytest.raises(InvalidSpecifier, match="not-a-version"):
         parse_requirement("d==not-a-version")
     limit = _table_limits()["versions"]
     for index in range(limit + 5):
@@ -508,9 +511,9 @@ class TestFrozenInternedSpecifiers:
         assert clause.is_wildcard
         assert clause.parsed_version == Version("1.1")
         assert SpecifierSet("==1.1.*").exact_version is None
-        with pytest.raises(InvalidVersion):
+        with pytest.raises(InvalidSpecifier):
             SpecifierSet(">=1.1.*")
-        with pytest.raises(InvalidVersion):
+        with pytest.raises(InvalidSpecifier):
             SpecifierSet("==1.0.")
 
     def test_contains_caches_are_bounded_per_mode(self) -> None:
@@ -563,8 +566,6 @@ class TestPep440ContainmentRules:
             ("~=1.2.0.0", "1.2.1.0a0", False),
             ("~=1.4.5a4", "1.4.6", True),
             ("~=2.2.post3", "2.3", True),
-            ("~=2", "2.9", True),
-            ("~=2", "3.0", False),
         ],
     )
     def test_contains(self, specifier: str, version: str, expected: bool) -> None:
@@ -577,8 +578,13 @@ class TestPep440ContainmentRules:
         assert not SpecifierSet("!=1.0a1").explicitly_allows_prereleases
         assert not SpecifierSet("!=1.0a1,>=0.5").contains("2.0b1")
         assert SpecifierSet(">=1.0a1").explicitly_allows_prereleases
-        assert SpecifierSet("==1.0a1.*").explicitly_allows_prereleases
-        assert not SpecifierSet("===1.0a1").explicitly_allows_prereleases
+        # `===` keeps its operand as text but still opts the set in when that
+        # text names a prerelease, as packaging's Specifier.prereleases does.
+        assert SpecifierSet("===1.0a1").explicitly_allows_prereleases
+        # `==1.0a1.*` is not a legal specifier: a prefix match cannot follow a
+        # pre-release segment.
+        with pytest.raises(InvalidSpecifier):
+            SpecifierSet("==1.0a1.*")
 
     def test_derived_attributes(self) -> None:
         assert SpecifierSet("==1.0,<2").is_pinned
@@ -625,11 +631,22 @@ class TestSpecifierClauseGrammar:
             if operator == "===":
                 continue
             wildcard = version.endswith(".*")
+            # PEP 440 restricts the operand by operator: `.*` prefix matching
+            # and a local label are only legal on == and !=, the two cannot be
+            # combined, and ~= needs a second release segment to have an upper
+            # bound at all.
             if wildcard and operator not in ("==", "!="):
                 return None
             try:
-                Version(version[:-2] if wildcard else version)
+                parsed = Version(version[:-2] if wildcard else version)
             except InvalidVersion:
+                return None
+            has_local = bool(parsed.local)
+            if operator not in ("==", "!=") and has_local:
+                return None
+            if wildcard and (parsed.public != parsed.base_version or has_local):
+                return None
+            if operator == "~=" and len(parsed.release) < 2:
                 return None
         return clauses
 

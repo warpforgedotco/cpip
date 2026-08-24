@@ -32,6 +32,10 @@ def direct_batch_preflight(
     target: InstallTarget,
 ) -> DestinationCache | None:
     """Check whether a batch can write final paths without staging files."""
+    if os.path.normcase(os.path.normpath(target.purelib)) != os.path.normcase(
+        os.path.normpath(target.platlib),
+    ):
+        return None
     destinations: set[str] = set()
     resolved_directories: DestinationCache = {}
     resolved_roots: ResolvedRoots = target.resolved_roots_internal

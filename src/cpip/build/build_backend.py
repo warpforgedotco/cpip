@@ -435,17 +435,14 @@ class ProjectBuilder:
         *,
         config_settings: dict[str, Any] | None = None,
     ) -> str:
-        if (
-            self.backend_spec is not None
-            and self.backend_spec.name.startswith("setuptools.build_meta")
-            and self.backend_spec.setup_py_present
-        ):
-            return self.build_external(
-                wheel_directory,
-                config_settings=config_settings,
-                editable=False,
-            )
+        """Build an editable wheel through the backend's PEP 660 hook.
 
+        Every declared backend gets ``build_editable``, setuptools included.
+        A backend too old to implement it raises rather than falling back to
+        ``build_wheel``, whose output installs as a copy: source edits would
+        have no effect while the direct_url.json beside it still recorded
+        ``"editable": true``.
+        """
         if self.backend_spec is not None:
             return self.build_external(
                 wheel_directory,

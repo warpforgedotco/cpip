@@ -323,3 +323,92 @@ def test_links_from_html_resolves_hrefs() -> None:
     ]
     assert links[0].hashes_internal == {"sha256": "ab"}
     assert links[1].requires_python == ">=3.9"
+
+
+def test_links_from_html_honours_base_href() -> None:
+    """A repository may serve its index and its artifacts from different hosts.
+
+    Resolving anchors against the page URL instead of the declared base sent
+    every download to a path on the index host that does not exist.
+    """
+    body = (
+        "<html><head>"
+        '<base href="https://cdn.invalid/files/">'
+        "</head><body>"
+        '<a href="pkg-1.0-py3-none-any.whl">pkg-1.0-py3-none-any.whl</a>'
+        '<a href="sub/pkg-1.1.tar.gz">pkg-1.1.tar.gz</a>'
+        "</body></html>"
+    )
+    links = IndexPageParser().links_from_html(body, PAGE_URL)
+    assert [link.url for link in links] == [
+        "https://cdn.invalid/files/pkg-1.0-py3-none-any.whl",
+        "https://cdn.invalid/files/sub/pkg-1.1.tar.gz",
+    ]
+
+
+def test_base_href_may_itself_be_relative() -> None:
+    body = (
+        '<html><head><base href="../packages/"></head>'
+        '<body><a href="pkg-1.0.tar.gz">pkg</a></body></html>'
+    )
+    links = IndexPageParser().links_from_html(body, PAGE_URL)
+    assert [link.url for link in links] == [
+        "https://example.invalid/simple/packages/pkg-1.0.tar.gz",
+    ]
+
+
+def test_only_the_first_base_href_counts() -> None:
+    body = (
+        "<html><head>"
+        '<base href="https://first.invalid/">'
+        '<base href="https://second.invalid/">'
+        "</head><body>"
+        '<a href="pkg-1.0.tar.gz">pkg</a>'
+        "</body></html>"
+    )
+    links = IndexPageParser().links_from_html(body, PAGE_URL)
+    assert [link.url for link in links] == ["https://first.invalid/pkg-1.0.tar.gz"]
+
+
+def test_base_without_href_is_ignored() -> None:
+    body = '<html><head><base></head><body><a href="pkg-1.0.tar.gz">p</a></body></html>'
+    links = IndexPageParser().links_from_html(body, PAGE_URL)
+    assert [link.url for link in links] == [
+        "https://example.invalid/simple/pkg/pkg-1.0.tar.gz",
+    ]
+
+
+def test_base_href_is_used_as_given() -> None:
+    """A base without a trailing slash names a file, not a directory.
+
+    RFC 3986 resolves "x.whl" against "https://cdn/files" to "https://cdn/x.whl";
+    appending a slash first would invent a directory the page never named.
+    """
+    body = (
+        '<html><head><base href="https://cdn.invalid/files"></head>'
+        '<body><a href="pkg-1.0.tar.gz">pkg</a></body></html>'
+    )
+    links = IndexPageParser().links_from_html(body, PAGE_URL)
+    assert [link.url for link in links] == ["https://cdn.invalid/pkg-1.0.tar.gz"]
+
+
+def test_empty_base_href_selects_the_page_and_consumes_the_slot() -> None:
+    """`<base href="">` is a base: it resolves to the page, and the next one
+    is ignored, as the reference parser does."""
+    body = (
+        '<html><head><base href=""><base href="https://second.invalid/"></head>'
+        '<body><a href="pkg-1.0.tar.gz">pkg</a></body></html>'
+    )
+    links = IndexPageParser().links_from_html(body, PAGE_URL)
+    assert [link.url for link in links] == [
+        "https://example.invalid/simple/pkg/pkg-1.0.tar.gz",
+    ]
+
+
+def test_base_without_an_href_attribute_does_not_consume_the_slot() -> None:
+    body = (
+        '<html><head><base><base href="https://second.invalid/"></head>'
+        '<body><a href="pkg-1.0.tar.gz">pkg</a></body></html>'
+    )
+    links = IndexPageParser().links_from_html(body, PAGE_URL)
+    assert [link.url for link in links] == ["https://second.invalid/pkg-1.0.tar.gz"]
