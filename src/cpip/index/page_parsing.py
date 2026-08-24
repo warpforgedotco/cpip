@@ -189,14 +189,21 @@ def link_parser_class() -> type:
             self, tag: str, attrs: list[tuple[str, str | None]]
         ) -> None:
             if tag == "base":
-                # Only the first <base> counts, as in the reference parser.
+                # The first <base> that carries an href wins, even an empty
+                # one -- which selects the page URL and still rules out a
+                # later <base>, as the reference parser does. The href is
+                # used as given: appending a slash would turn
+                # <base href="https://cdn/files"> into a directory it does
+                # not name.
                 if not self.saw_base_internal:
                     href = dict(attrs).get("href")
-                    if href:
+                    if href is not None:
                         self.saw_base_internal = True
-                        self.base_url_internal = ensure_trailing_slash(
-                            join_index_url(self.page_url, href),
-                        )
+                        if href:
+                            self.base_url_internal = join_index_url(
+                                self.page_url,
+                                href,
+                            )
                 return
             if tag != "a":
                 return
