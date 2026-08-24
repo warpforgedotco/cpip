@@ -7,7 +7,7 @@ import urllib.parse
 
 from cpip.core.caches import bounded_put, memoized, register_table
 from cpip.core.names import canonicalize_name
-from cpip.core.versions import FINAL_SUFFIX, Version, version_of
+from cpip.core.versions import FINAL_SUFFIX, InvalidVersion, Version, version_of
 
 TYPE_CHECKING = False
 
@@ -117,16 +117,22 @@ class Specifier:
             raise InvalidSpecifier(
                 f"prefix matching is only valid with == and !=: {operator}{version}",
             )
-        parsed = Version(version[:-2] if wildcard else version)
-        if operator in _PUBLIC_ONLY_OPERATORS and parsed[3]:
+        try:
+            parsed = Version(version[:-2] if wildcard else version)
+        except InvalidVersion as error:
+            raise InvalidSpecifier(
+                f"invalid version in specifier: {operator}{version}",
+            ) from error
+        if wildcard:
+            if parsed[2] != FINAL_SUFFIX or parsed[3]:
+                raise InvalidSpecifier(
+                    f"prefix matching cannot follow a pre, post, dev or local "
+                    f"segment: {operator}{version}",
+                )
+        elif parsed[3] and operator in _PUBLIC_ONLY_OPERATORS:
             raise InvalidSpecifier(
                 f"a local version label is not permitted with {operator}: "
                 f"{operator}{version}",
-            )
-        if wildcard and (parsed[2] != FINAL_SUFFIX or parsed[3]):
-            raise InvalidSpecifier(
-                f"prefix matching cannot follow a pre, post, dev or local "
-                f"segment: {operator}{version}",
             )
         if operator == "~=" and len(parsed.release) < 2:
             raise InvalidSpecifier(
@@ -357,6 +363,7 @@ class SpecifierSet:
             return cached
 
         clauses: list[Specifier] = []
+        has_arbitrary = False
         for part in key.split(","):
             clause = part.strip()
             if not clause:
@@ -383,6 +390,8 @@ class SpecifierSet:
             version = clause[len(operator) :].strip()
             if not version:
                 raise ValueError(f"invalid version specifier: {value!r}")
+            if operator == "===":
+                has_arbitrary = True
             clauses.append(Specifier(operator, version))
         specifiers = tuple(clauses)
         if key and not specifiers:
@@ -390,11 +399,7 @@ class SpecifierSet:
 
         self = object.__new__(cls)
         _write_specifiers(self, specifiers)
-        object.__setattr__(
-            self,
-            "_has_arbitrary",
-            any(specifier.operator == "===" for specifier in specifiers),
-        )
+        object.__setattr__(self, "_has_arbitrary", has_arbitrary)
         if len(_specifier_sets) >= _SPECIFIER_SET_CACHE_SIZE:
             _specifier_sets.clear()
         _specifier_sets[key] = self

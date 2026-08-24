@@ -453,7 +453,9 @@ def test_specifier_clauses_share_one_version_per_text() -> None:
     wildcard = parse_requirement("c==1.1.*").specifier
     assert wildcard.contains(Version("1.1.5"))
     assert not wildcard.contains(Version("1.2"))
-    with pytest.raises(InvalidVersion, match="not-a-version"):
+    # A malformed operand is a malformed specifier: one exception type covers
+    # every way a clause can fail to parse.
+    with pytest.raises(InvalidSpecifier, match="not-a-version"):
         parse_requirement("d==not-a-version")
     limit = _table_limits()["versions"]
     for index in range(limit + 5):
@@ -511,7 +513,7 @@ class TestFrozenInternedSpecifiers:
         assert SpecifierSet("==1.1.*").exact_version is None
         with pytest.raises(InvalidSpecifier):
             SpecifierSet(">=1.1.*")
-        with pytest.raises(InvalidVersion):
+        with pytest.raises(InvalidSpecifier):
             SpecifierSet("==1.0.")
 
     def test_contains_caches_are_bounded_per_mode(self) -> None:
