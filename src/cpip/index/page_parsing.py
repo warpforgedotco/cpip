@@ -179,6 +179,7 @@ def link_parser_class() -> type:
             super().__init__(convert_charrefs=True)
             self.page_url = page_url
             self.base_url_internal = ensure_trailing_slash(page_url)
+            self.saw_base_internal = False
             self.link_factory = link_factory
             self.links: list[Link] = []
             self.current_internal: dict[str, str | None] | None = None
@@ -187,6 +188,16 @@ def link_parser_class() -> type:
         def handle_starttag(
             self, tag: str, attrs: list[tuple[str, str | None]]
         ) -> None:
+            if tag == "base":
+                # Only the first <base> counts, as in the reference parser.
+                if not self.saw_base_internal:
+                    href = dict(attrs).get("href")
+                    if href:
+                        self.saw_base_internal = True
+                        self.base_url_internal = ensure_trailing_slash(
+                            join_index_url(self.page_url, href),
+                        )
+                return
             if tag != "a":
                 return
             self.current_internal = dict(attrs)
