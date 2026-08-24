@@ -843,7 +843,6 @@ def install_wheels_transactionally(
             parallel = (
                 len(requests) >= 4
                 and len(requests) <= 64
-                and not pycompile
                 and not existing_distributions
             )
             cache_for_workers = destination_cache
