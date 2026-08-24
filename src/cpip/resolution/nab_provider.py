@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 from cpip._vendor.nab_resolver.ranges import Range
 from cpip._vendor.nab_resolver.types import Incompatibility, RangeProtocol
-from cpip.core.metadata import find_installed
+from cpip.core.metadata import InstalledDistribution, find_installed
 from cpip.core.packaging import (
     Requirement,
     SpecifierSet,
@@ -35,9 +35,15 @@ _MISSING = object()
 class NabProvider:
     """Native NAB provider backed by cpip candidate discovery."""
 
-    def __init__(self, provider: CandidateProvider, context: ResolutionConfig) -> None:
+    def __init__(
+        self,
+        provider: CandidateProvider,
+        context: ResolutionConfig,
+        installed: Mapping[str, InstalledDistribution] | None = None,
+    ) -> None:
         self.provider = provider
         self.context = context
+        self.installed = installed
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -64,7 +70,7 @@ class NabProvider:
         self._dependency_cache: dict[
             tuple[str, Version, tuple[str, ...]], Mapping[str, Range[Version]]
         ] = {}
-        normalized_constraints = []
+        constraints_by_name: dict[str, list[Requirement]] = {}
         for value in self.constraints:
             requirement = parse_requirement(value)
             if requirement.url is not None and requirement.name.startswith(
@@ -80,8 +86,14 @@ class NabProvider:
                         marker=requirement.marker,
                         raw=requirement.raw,
                     )
-            normalized_constraints.append(requirement)
-        self.constraint_requirements = tuple(normalized_constraints)
+            if marker_applies(requirement.marker):
+                constraints_by_name.setdefault(requirement.canonical_name, []).append(
+                    requirement,
+                )
+        self.constraints_by_name = {
+            name: tuple(requirements)
+            for name, requirements in constraints_by_name.items()
+        }
 
     def _installed_candidate(self, package: str) -> InstalledCandidate | None:
         if self.context.ignore_installed:
@@ -91,7 +103,11 @@ class NabProvider:
         ):
             return None
         if package not in self._installed_cache:
-            distribution = find_installed(package)
+            distribution = (
+                find_installed(package)
+                if self.installed is None
+                else self.installed.get(package)
+            )
             if distribution is None:
                 candidate = None
             else:
@@ -107,13 +123,7 @@ class NabProvider:
 
     def _constraint_for(self, package: str) -> tuple[Requirement, ...]:
         name = canonicalize_name(package.split("[", 1)[0])
-        return tuple(
-            constraint
-            for constraint in self.constraint_requirements
-            if constraint is not None
-            and canonicalize_name(constraint.name) == name
-            and marker_applies(constraint.marker)
-        )
+        return self.constraints_by_name.get(name, ())
 
     def _versions(self, package: str) -> tuple[Version, ...]:
         requirement = self.requirements[package]

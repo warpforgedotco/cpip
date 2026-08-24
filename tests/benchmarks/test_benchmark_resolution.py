@@ -17,7 +17,13 @@ from cpip.resolution.files import parse_requirements
 from pytest_codspeed import BenchmarkFixture
 
 
-def resolve(wheelhouse: Path, requirements: list[str]) -> int:
+def resolve(
+    wheelhouse: Path,
+    requirements: list[str],
+    *,
+    constraints: list[str] | None = None,
+    ignore_installed: bool = True,
+) -> int:
     reset_caches()
     resolver = ResolutionEngine(
         provider=CandidateProvider.from_options(
@@ -25,7 +31,8 @@ def resolve(wheelhouse: Path, requirements: list[str]) -> int:
             no_index=True,
             wheel_cache_dir=cold_metadata_cache_dir(),
         ),
-        ignore_installed=True,
+        constraints=constraints,
+        ignore_installed=ignore_installed,
     )
     return len(resolver.resolve(requirements).candidates)
 
@@ -108,6 +115,39 @@ def test_top88_requirements_stress(
         return resolve(stress_wheelhouse, requirements)
 
     assert benchmark(resolve_stress) == 176
+
+
+def test_large_constraint_file_lookup(
+    benchmark: BenchmarkFixture,
+    stress_wheelhouse: Path,
+) -> None:
+    requirements = [f"stress-{index}" for index in range(88)]
+    constraints = [f"unrelated-{index}>=1" for index in range(1_000)]
+
+    def resolve_constrained() -> int:
+        return resolve(
+            stress_wheelhouse,
+            requirements,
+            constraints=constraints,
+        )
+
+    assert benchmark(resolve_constrained) == 176
+
+
+def test_resolution_installed_state_snapshot(
+    benchmark: BenchmarkFixture,
+    stress_wheelhouse: Path,
+) -> None:
+    requirements = [f"stress-{index}" for index in range(88)]
+
+    def resolve_with_installed_state() -> int:
+        return resolve(
+            stress_wheelhouse,
+            requirements,
+            ignore_installed=False,
+        )
+
+    assert benchmark(resolve_with_installed_state) == 176
 
 
 def test_candidate_scan_scaling(
