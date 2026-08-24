@@ -228,7 +228,9 @@ def preprocess_requirement_lines(content: str) -> list[tuple[int, str]]:
     pieces: list[str] = []
 
     for line_number, line in enumerate(content.splitlines(), start=1):
-        is_comment = COMMENT_RE.match(line) is not None
+        # No "#", no comment: skip the pattern on the lines that are the
+        # overwhelming majority of a requirements file.
+        is_comment = "#" in line and COMMENT_RE.match(line) is not None
         if line.endswith("\\") and not is_comment:
             if not pieces:
                 first_line_number = line_number
@@ -250,7 +252,7 @@ def preprocess_requirement_lines(content: str) -> list[tuple[int, str]]:
     return [
         (line_number, stripped)
         for line_number, line in joined
-        if (stripped := COMMENT_RE.sub("", line).strip())
+        if (stripped := (COMMENT_RE.sub("", line) if "#" in line else line).strip())
     ]
 
 
