@@ -44,10 +44,12 @@ def test_vendored_launcher_matches_documented_hash(
 ) -> None:
     launcher = VENDOR_ROOT / "launchers" / filename
 
+    digest = hashlib.sha256()
     with launcher.open("rb") as launcher_file:
-        actual_hash = hashlib.file_digest(launcher_file, "sha256").hexdigest()
+        while chunk := launcher_file.read(1024 * 1024):
+            digest.update(chunk)
 
-    assert actual_hash == expected_hash
+    assert digest.hexdigest() == expected_hash
 
 
 def test_launcher_hashes_match_vendored_documentation() -> None:
