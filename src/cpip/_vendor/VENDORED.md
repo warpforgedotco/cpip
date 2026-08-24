@@ -24,12 +24,12 @@ are intentionally frozen with this repository; their SHA-256 digests are:
 
 | File | SHA-256 |
 | --- | --- |
-| `t32.exe` | `6b4195e273829081ff4d7791bbd0b017225419137e3e33f6d923b39686602851` |
-| `t64-arm.exe` | `ebc4c06eff219664a64398a5e00ec81e3a6638f280b4a90ccf8c841e7613893a` |
-| `t64.exe` | `81a618ca943182b187a3c32f4ae568b95cfbba8a8e0868947a27ee595d68c94b` |
-| `w32.exe` | `47872c86af0b7489d7fd68cd9a3db115b34d890e304f47df028205fbb5efd191` |
-| `w64-arm.exe` | `c5dc988aa16622c2526218b19cfd25fbd08e04ed93fb843ca5e2c85c09db3411` |
-| `w64.exe` | `7a319ffa0897977b424381955759ee774146360bffebae16f4253f17040248c2` |
+| `t32.exe` | `6b4195e640a85ac32eb6f9628822a622057df1e459df7c17a12f97aeabc9415b` |
+| `t64-arm.exe` | `ebc4c06b7d95e74e315419ee7e88e1d0f71e9e9477538c00a93a9ff8c66a6cfc` |
+| `t64.exe` | `81a618f21cb87db9076134e70388b6e9cb7c2106739011b6a51772d22cae06b7` |
+| `w32.exe` | `47872cc77f8e18cf642f868f23340a468e537e64521d9a3a416c8b84384d064b` |
+| `w64-arm.exe` | `c5dc9884a8f458371550e09bd396e5418bf375820a31b9899f6499bf391c7b2e` |
+| `w64.exe` | `7a319ffaba23a017d7b1e18ba726ba6c54c53d6446db55f92af53c279894f8ad` |
 
 To refresh the Python stack, resolve each pinned release above for Python
 3.10, copy the package sources and license texts here, remove generated
