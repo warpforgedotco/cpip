@@ -41,16 +41,14 @@ def create_find_links(script: CpipTestEnvironment) -> FindLinks:
             base==0.1.0 --hash=sha256:{sdist_hash} --hash=sha256:{wheel_hash}
             base==0.1.0 --hash=sha256:{sdist_hash} --hash=sha256:{wheel_hash}
             """,
-            "Checked 2 links for project {name!r} against 2 hashes "
-            "(2 matches, 0 no digest): discarding no candidates",
+            "Using 2 sha256 hashes for requirement {name!r}",
         ),
         (
             """
             base==0.1.0 --hash=sha256:{sdist_hash} --hash=sha256:{wheel_hash}
             base==0.1.0 --hash=sha256:{sdist_hash}
             """,
-            "Checked 2 links for project {name!r} against 1 hashes "
-            "(1 matches, 0 no digest): discarding 1 non-matches",
+            "Using 1 sha256 hashes for requirement {name!r}",
         ),
     ],
     ids=["identical", "intersect"],
@@ -116,10 +114,7 @@ def test_new_resolver_hash_intersect_from_constraint(
         requirements_txt,
     )
 
-    message = (
-        "Checked 2 links for project {name!r} against 1 hashes "
-        "(1 matches, 0 no digest): discarding 1 non-matches"
-    ).format(name="base")
+    message = "Using 1 sha256 hashes for requirement {name!r}".format(name="base")
     assert message in result.stdout, str(result)
 
 
