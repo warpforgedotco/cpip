@@ -198,3 +198,30 @@ def test_session_revalidates_stale_cache_with_conditional_headers(
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+def test_environ_proxies_cached_per_host_and_port(
+    monkeypatch,
+) -> None:
+    """NO_PROXY can name a port; the bypass decision must not be shared
+    between two ports of the same host."""
+    import urllib.parse
+
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:3128")
+    monkeypatch.setenv("NO_PROXY", "internal.test:8080")
+    session = NetworkSession()
+
+    bypassed_url = "http://internal.test:8080/simple/"
+    proxied_url = "http://internal.test:9090/simple/"
+
+    bypassed = session.environ_proxies_for(
+        bypassed_url,
+        urllib.parse.urlsplit(bypassed_url),
+    )
+    proxied = session.environ_proxies_for(
+        proxied_url,
+        urllib.parse.urlsplit(proxied_url),
+    )
+
+    assert bypassed == {}
+    assert proxied.get("http") == "http://proxy.invalid:3128"

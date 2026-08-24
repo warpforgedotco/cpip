@@ -384,7 +384,7 @@ class NetworkSession:
 
         self.fresh_cached_response_cache: dict[str, float | None] = {}
 
-        self.environ_proxies_cache: dict[str, dict[str, str]] = {}
+        self.environ_proxies_cache: dict[tuple[str, int | None], dict[str, str]] = {}
 
         self.environ_ca_bundle: str | None = None
 
@@ -959,7 +959,7 @@ class NetworkSession:
             "verify": verify,
         }
 
-        proxies = self.environ_proxies_for(request.url, parsed.hostname)
+        proxies = self.environ_proxies_for(request.url, parsed)
 
         if self.proxies is not None:
             proxies = {**proxies, **self.proxies} if proxies else self.proxies
@@ -977,16 +977,23 @@ class NetworkSession:
     def environ_proxies_for(
         self,
         url: str,
-        hostname: str | None,
+        parsed: urllib.parse.SplitResult,
     ) -> dict[str, str]:
-        """Resolve environment and system proxies once per host.
+        """Resolve environment and system proxies once per host and port.
 
-        The transport session runs with ``trust_env`` off so requests does
-        not repeat this resolution (a native system-configuration call on
-        macOS) on every request.
+        NO_PROXY entries can name a port, so the bypass decision is keyed by
+        both. The transport session runs with ``trust_env`` off so requests
+        does not repeat this resolution (a native system-configuration call
+        on macOS) on every request.
         """
 
-        key = hostname or ""
+        try:
+            port = parsed.port
+
+        except ValueError:
+            port = None
+
+        key = (parsed.hostname or "", port)
 
         cached = self.environ_proxies_cache.get(key)
 
