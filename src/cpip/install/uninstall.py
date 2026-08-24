@@ -23,6 +23,21 @@ class DistributionUninstaller:
         return uninstall_distribution(name, paths=self.paths)
 
 
+def _inside_distribution(path: str, root: str) -> bool:
+    """Whether ``path`` is a file this distribution may remove.
+
+    Either it sits under the directory holding the ``.dist-info``, or it is a
+    console script in the environment's ``bin``/``Scripts`` directory -- the
+    one place a wheel's files legitimately land outside that root.
+    """
+    try:
+        if os.path.commonpath((path, root)) == root:
+            return True
+    except (OSError, ValueError):
+        pass
+    return os.path.basename(os.path.dirname(path)) in {"bin", "Scripts"}
+
+
 def uninstall_distribution(
     name: str,
     *,
@@ -62,16 +77,23 @@ def uninstall_distribution(
             if raw_relative.startswith("/") or (
                 os.name == "nt" and ntpath.isabs(raw_relative)
             ):
-                continue
+                # RECORD is whatever the wheel shipped, so an absolute row is
+                # followed only where a `..` row would be: inside this
+                # distribution, or in the environment's script directory.
+                relative_parts: tuple[str, ...] = ()
+                path_text = os.path.realpath(os.path.normpath(raw_relative))
 
-            relative_parts = tuple(
-                part for part in raw_relative.split("/") if part and part != "."
-            )
+                if not _inside_distribution(path_text, root):
+                    continue
+            else:
+                relative_parts = tuple(
+                    part for part in raw_relative.split("/") if part and part != "."
+                )
 
-            if not relative_parts:
-                continue
+                if not relative_parts:
+                    continue
 
-            path_text = os.path.join(root, *relative_parts)
+                path_text = os.path.join(root, *relative_parts)
 
             if ".." in relative_parts:
                 resolved_text = os.path.realpath(path_text)
