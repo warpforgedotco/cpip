@@ -569,6 +569,21 @@ def parse_wheel_file(path: str) -> WheelFile | None:
     return _parse_wheel_filename(name)
 
 
+_BUILD_TAG_RE = re.compile(r"^(\d+)(.*)$", re.ASCII)
+
+
+def _is_escaped_name(field: str) -> bool:
+    """Whether ``field`` could have come out of the PEP 427 escaping rule.
+
+    That rule replaces every run of non-word characters with a single
+    underscore, so a doubled underscore or a character outside
+    ``[\\w\\d._]`` means the name this decodes to is a guess.
+    """
+    if "__" in field:
+        return False
+    return field.isalnum() or field.replace(".", "").replace("_", "").isalnum()
+
+
 @memoized(4096)
 def _parse_wheel_filename(name: str) -> WheelFile | None:
     if not name.endswith(".whl"):
@@ -589,7 +604,10 @@ def _parse_wheel_filename(name: str) -> WheelFile | None:
     else:
         return None
 
-    if build_tag is not None and "_" in build_tag:
+    if not _is_escaped_name(distribution):
+        return None
+
+    if build_tag is not None and not ("0" <= build_tag[:1] <= "9"):
         return None
 
     try:
@@ -1387,24 +1405,20 @@ def parse_wheel(wheel_zip: zipfile.ZipFile, name: str) -> tuple[str, Message]:
 
 
 def legacy_build_tag(value: str | None) -> tuple[int, str] | tuple[()]:
+    """``(number, suffix)`` for a build tag, or ``()`` when there is none.
+
+    Filenames reach this only after :func:`_parse_wheel_filename` has checked
+    that the tag starts with a digit, so the number is always present.
+    """
     if value is None:
         return ()
 
-    digits = ""
+    match = _BUILD_TAG_RE.match(value)
 
-    suffix = ""
+    if match is None:
+        return ()
 
-    for index, char in enumerate(value):
-        if char.isdigit():
-            digits += char
-
-            continue
-
-        suffix = value[index:]
-
-        break
-
-    return (int(digits or 0), suffix)
+    return (int(match.group(1)), match.group(2))
 
 
 def tag_matches(supported: WheelTag, candidate: WheelTag) -> bool:

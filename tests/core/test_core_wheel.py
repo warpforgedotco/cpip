@@ -357,3 +357,52 @@ def test_lazy_wheel_layout_is_read_once_and_shared_by_copies() -> None:
 
     candidate.wheel_layout = None
     assert candidate.wheel_layout is None
+
+
+@pytest.mark.parametrize(
+    "filename, valid",
+    [
+        ("foo-1.0-py3-none-any.whl", True),
+        ("foo-1.0-py2.py3-none-any.whl", True),
+        ("foo_bar-1.0-py3-none-any.whl", True),
+        ("foo.bar-1.0-py3-none-any.whl", True),
+        ("foo-1.0-1-py3-none-any.whl", True),
+        ("foo-1.0-1abc-py3-none-any.whl", True),
+        ("foo-1.0.0-cp314-cp314-macosx_11_0_arm64.whl", True),
+        # A build tag must start with a digit; treating a non-numeric one as
+        # build 0 invented an ordering for a filename no builder produces.
+        ("foo-1.0-abc-py3-none-any.whl", False),
+        # PEP 427 escaping collapses runs of non-word characters to one
+        # underscore, so a doubled underscore cannot come out of that rule.
+        ("foo__bar-1.0-py3-none-any.whl", False),
+        ("foo-bar-1.0-py3-none-any.whl", False),
+        ("foo!x-1.0-py3-none-any.whl", False),
+        ("foo-notaversion-py3-none-any.whl", False),
+        ("foo-1.0-py3-none.whl", False),
+        ("foo-1.0-py3-none-any.zip", False),
+    ],
+)
+def test_wheel_filename_validation_matches_packaging(
+    filename: str,
+    valid: bool,
+) -> None:
+    from packaging.utils import InvalidWheelFilename, parse_wheel_filename
+
+    from cpip.core.wheel import _parse_wheel_filename
+
+    try:
+        parse_wheel_filename(filename)
+        reference = True
+    except InvalidWheelFilename:
+        reference = False
+
+    assert reference is valid, "the expectation disagrees with packaging"
+    assert (_parse_wheel_filename(filename) is not None) is valid
+
+
+def test_build_tag_keeps_its_number_and_suffix() -> None:
+    from cpip.core.wheel import legacy_build_tag
+
+    assert legacy_build_tag(None) == ()
+    assert legacy_build_tag("1") == (1, "")
+    assert legacy_build_tag("12rc1") == (12, "rc1")
