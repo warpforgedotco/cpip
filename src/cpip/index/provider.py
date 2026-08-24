@@ -29,8 +29,10 @@ from cpip.index.catalog_cache import (
     RECORD_YANKED,
     SDIST_RECORD,
     WHEEL_RECORD,
+    group_artifacts_by_version,
     link_from_record,
     load_catalog,
+    load_catalog_checked,
     load_choices,
     save_choices,
     wheel_file_from_record,
@@ -169,6 +171,11 @@ class CandidateProvider:
         self.catalog_artifact_group_cache: dict[
             tuple[str, str],
             dict[str, list[tuple[int, tuple[object, ...]]]],
+        ] = {}
+
+        self.catalog_checked_group_cache: dict[
+            tuple[str, str],
+            dict[str, list[tuple[int, tuple[object, ...]]]] | None,
         ] = {}
 
         self.catalog_choice_cache: dict[
@@ -447,6 +454,8 @@ class CandidateProvider:
     def catalog_groups(
         self,
         requirement: Requirement,
+        *,
+        allow_fetch: bool = False,
     ) -> tuple[CatalogSourceSummary, ...] | None:
         if self.find_links or requirement.is_unnamed_direct or not self.index_sources:
             return None
@@ -459,7 +468,10 @@ class CandidateProvider:
         result: list[CatalogSourceSummary] = []
 
         for source in self.index_sources:
-            cached = source.collect_cached_catalog_summary(requirement)
+            cached = source.collect_cached_catalog_summary(
+                requirement,
+                allow_fetch=allow_fetch,
+            )
 
             if cached is None:
                 return None
@@ -585,22 +597,74 @@ class CandidateProvider:
         groups = self.catalog_artifact_group_cache.get(key)
 
         if groups is None:
-            groups = {}
-
             loaded = load_catalog(persistent_cache, source_url)
 
-            if loaded is not None:
-                for name, version_text, artifacts, _facts in loaded[0]:
-                    if name == catalog_key[0]:
-                        existing = groups.get(version_text)
-                        if existing is None:
-                            groups[version_text] = list(artifacts)
-                        else:
-                            existing.extend(artifacts)
+            groups = (
+                {}
+                if loaded is None
+                else group_artifacts_by_version(loaded, catalog_key[0])
+            )
 
             self.catalog_artifact_group_cache[key] = groups
 
         return groups.get(version.public, [])
+
+    def _checked_catalog_groups_for(
+        self,
+        name: str,
+        persistent_cache: Any,
+        source_url: str,
+        generation: str,
+    ) -> dict[str, list[tuple[int, tuple[object, ...]]]] | None:
+        """One project's artifacts per version, or None when no stored
+        catalog still matches ``generation`` (missing blob, eviction, or a
+        concurrent regeneration)."""
+
+        key = (source_url, generation)
+
+        if key in self.catalog_checked_group_cache:
+            return self.catalog_checked_group_cache[key]
+
+        loaded = load_catalog_checked(persistent_cache, source_url, generation)
+
+        groups = None if loaded is None else group_artifacts_by_version(loaded, name)
+
+        self.catalog_checked_group_cache[key] = groups
+
+        return groups
+
+    def _fill_catalog_choice(
+        self,
+        catalog_key: tuple[str, bool, bool],
+        supported_tags: tuple[Any, ...],
+        choices: dict[str, tuple[tuple[object, ...], int, int | None] | None],
+        persistent_cache: Any,
+        source_url: str,
+        generation: str,
+        version: Version,
+    ) -> bool:
+        """Compute and store one release's choice with the exact inputs the
+        full path would use; False declines (the persisted catalog cannot
+        back a generation-verified fill)."""
+
+        groups = self._checked_catalog_groups_for(
+            catalog_key[0],
+            persistent_cache,
+            source_url,
+            generation,
+        )
+
+        if groups is None:
+            return False
+
+        choices[version.public] = self._select_catalog_choice(
+            catalog_key,
+            supported_tags,
+            groups.get(version.public, []),
+            version,
+        )
+
+        return True
 
     @staticmethod
     def _eligible_catalog_records(
@@ -820,18 +884,16 @@ class CandidateProvider:
                         version_text = version.public
 
                         if version_text not in choices:
-                            choices[version_text] = self._select_catalog_choice(
+                            if not self._fill_catalog_choice(
                                 catalog_key,
                                 supported_tags,
-                                self._catalog_artifacts_for(
-                                    catalog_key,
-                                    persistent_cache,
-                                    source_url,
-                                    generation,
-                                    version,
-                                ),
+                                choices,
+                                persistent_cache,
+                                source_url,
+                                generation,
                                 version,
-                            )
+                            ):
+                                continue
 
                             dirty_choices.add(
                                 (
@@ -1732,9 +1794,13 @@ class CandidateProvider:
         if len(self.index_sources) != 1 or not groups:
             return None
 
-        _supported_tags, target_key = self.catalog_target_internal()
+        supported_tags, target_key = self.catalog_target_internal()
 
         allow_binary, allow_source = self.allowed_formats_internal(requirement)
+
+        catalog_key = (requirement.canonical_name, allow_binary, allow_source)
+
+        persistent_cache = getattr(self.session, "cache", None)
 
         cache_identity = (
             source_url,
@@ -1748,7 +1814,7 @@ class CandidateProvider:
 
         if choices is None:
             choices = load_choices(
-                getattr(self.session, "cache", None),
+                persistent_cache,
                 source_url,
                 generation,
                 target_key,
@@ -1760,6 +1826,8 @@ class CandidateProvider:
 
         if not choices:
             return None
+
+        dirty = False
 
         start, stop = self.catalog_summary_bounds(groups, requirement)
 
@@ -1807,7 +1875,18 @@ class CandidateProvider:
                 continue
 
             if version_text not in choices:
-                return None
+                if not self._fill_catalog_choice(
+                    catalog_key,
+                    supported_tags,
+                    choices,
+                    persistent_cache,
+                    source_url,
+                    generation,
+                    version,
+                ):
+                    return None
+
+                dirty = True
 
             seen_versions.add(version)
 
@@ -1841,6 +1920,17 @@ class CandidateProvider:
 
             descriptor_buckets[bucket].append(
                 (version, record, record_kind, tag_rank, source_url),
+            )
+
+        if dirty:
+            save_choices(
+                persistent_cache,
+                source_url,
+                generation,
+                target_key,
+                allow_binary,
+                allow_source,
+                choices,
             )
 
         if self.prefer_binary:
@@ -1911,8 +2001,6 @@ class CandidateProvider:
             for index, descriptor in enumerate(descriptors)
             if index not in preferred_set
         )
-
-        catalog_key = (requirement.canonical_name, allow_binary, allow_source)
 
         return self._generate_catalog_candidates(catalog_key, ordered)
 
@@ -2061,6 +2149,8 @@ class CandidateProvider:
 
         persistent_cache = getattr(self.session, "cache", None)
 
+        dirty_choices: set[tuple[str, str, str, bool, bool]] = set()
+
         descriptor_list: list[
             tuple[Version, tuple[object, ...], int, int | None, str]
         ] = []
@@ -2109,7 +2199,18 @@ class CandidateProvider:
                 version_text = version.public
 
                 if version_text not in choices:
-                    return None
+                    if not self._fill_catalog_choice(
+                        catalog_key,
+                        supported_tags,
+                        choices,
+                        persistent_cache,
+                        source_url,
+                        generation,
+                        version,
+                    ):
+                        return None
+
+                    dirty_choices.add(cache_identity)
 
                 choice = choices[version_text]
 
@@ -2139,6 +2240,17 @@ class CandidateProvider:
 
             if best is not None:
                 descriptor_list.append(best)
+
+        for dirty_identity in dirty_choices:
+            save_choices(
+                persistent_cache,
+                dirty_identity[0],
+                dirty_identity[1],
+                dirty_identity[2],
+                dirty_identity[3],
+                dirty_identity[4],
+                self.catalog_choice_cache[dirty_identity],
+            )
 
         exact_pin = any(
             specifier.operator in {"==", "==="} and not specifier.version.endswith(".*")
@@ -2373,7 +2485,7 @@ class CandidateProvider:
 
         records_by_version: dict[Version, tuple[object, ...]] = {}
 
-        cached_groups = self.catalog_groups(requirement)
+        cached_groups = self.catalog_groups(requirement, allow_fetch=True)
 
         ordered_summaries: list[CandidateSummary] | None = (
             [] if cached_groups is not None and len(cached_groups) == 1 else None

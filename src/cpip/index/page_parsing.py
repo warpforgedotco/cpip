@@ -17,6 +17,8 @@ from cpip.index.source_models import MetadataFile
 
 LinkFactory = Callable[..., Link]
 
+_FROM_URL_FUNCTION = Link.from_url.__func__
+
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
@@ -56,6 +58,9 @@ class IndexPageParser:
             if getattr(response, "status_code", None) == 404:
                 return []
             raise
+        return self.links_from_content(content, url)
+
+    def links_from_content(self, content: IndexContent, url: str) -> list[Link]:
         if content.from_cache:
             cached = load_links(getattr(self.session, "cache", None), url)
             if cached is not None:
@@ -114,6 +119,8 @@ class IndexPageParser:
         links: list[Link] = []
         append = links.append
         link_factory = self.link_factory
+        if getattr(link_factory, "__func__", None) is _FROM_URL_FUNCTION:
+            link_factory = Link.from_index_page
         base_url = ensure_trailing_slash(url)
         for file_data in data.get("files", []):
             if not isinstance(file_data, dict):

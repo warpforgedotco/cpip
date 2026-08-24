@@ -194,3 +194,30 @@ def test_catalog_with_an_unparseable_version_is_a_miss(tmp_path: Path) -> None:
 
     assert load_catalog(cache, page_url) is None
     assert load_summary(cache, page_url) is None
+
+
+def test_catalog_with_an_unparseable_upload_time_is_a_miss(tmp_path: Path) -> None:
+    """A shape-valid record with a corrupt date must not raise out of
+    load_links; validation treats it as a cache miss."""
+    cache = SafeFileCache(str(tmp_path))
+    page_url = "https://example.test/simple/demo/"
+    url = "https://files.example.test/demo-1.0.0-py3-none-any.whl"
+    record = (
+        url,
+        "demo-1.0.0-py3-none-any.whl",
+        {},
+        None,
+        None,
+        None,
+        "not-a-date",
+        None,
+        ("https", "files.example.test", "/demo-1.0.0-py3-none-any.whl", "", ""),
+    )
+    groups = [("demo", "1.0.0", [(WHEEL_RECORD, record)], [])]
+    cache.set_atomic(
+        cache_key(page_url),
+        marshal.dumps(("cpip-index-catalog", groups, [])),
+    )
+
+    assert load_catalog(cache, page_url) is None
+    assert load_links(cache, page_url) is None

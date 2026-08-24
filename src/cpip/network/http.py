@@ -12,11 +12,12 @@ import sys
 import threading
 import time
 import urllib.parse
+from collections.abc import MutableMapping
 
 from cpip.core.cpip_version import get_cpip_version
 from cpip.core.urls import redact_auth_from_url, url_to_path
 from cpip.core.utils import current_version
-from cpip.network.auth import MultiDomainBasicAuth
+from cpip.network.auth import MultiDomainBasicAuth, get_netrc_auth
 from cpip.network.cache import SafeFileCache
 from cpip.network.exceptions import (
     ConnectionFailedError,
@@ -37,6 +38,17 @@ logger = logging.getLogger(__name__)
 
 RETRY_STATUS_CODES = frozenset((500, 502, 503, 520, 527))
 
+_NOT_UPDATED_BY_304 = frozenset(
+    (
+        "content-length",
+        "content-encoding",
+        "content-range",
+        "content-type",
+        "transfer-encoding",
+        "connection",
+    ),
+)
+
 
 class _MissingCacheExpiry(enum.Enum):
     """Single-member enum so ``is not`` narrowing keeps the ``float | None`` type."""
@@ -45,6 +57,60 @@ class _MissingCacheExpiry(enum.Enum):
 
 
 _MISSING_CACHE_EXPIRY = _MissingCacheExpiry.TOKEN
+
+
+class _NeverRaised(Exception):
+    """Placeholder transport exception for sessions that never hit the network."""
+
+
+class _FileTransportExceptions:
+    Timeout = _NeverRaised
+
+    SSLError = _NeverRaised
+
+    ProxyError = _NeverRaised
+
+    ConnectionError = _NeverRaised
+
+
+class HeaderDict(MutableMapping[str, str]):
+    """Case-insensitive header mapping for cache- and file-backed responses."""
+
+    __slots__ = ("data",)
+
+    def __init__(self, headers: Mapping[str, Any] | None = None) -> None:
+        self.data: dict[str, tuple[str, str]] = {}
+
+        if headers:
+            for name, value in headers.items():
+                self.data[name.lower()] = (name, str(value))
+
+    def __setitem__(self, name: str, value: str) -> None:
+        self.data[name.lower()] = (name, value)
+
+    def __getitem__(self, name: str) -> str:
+        return self.data[name.lower()][1]
+
+    def __delitem__(self, name: str) -> None:
+        del self.data[name.lower()]
+
+    def __contains__(self, name: object) -> bool:
+        return isinstance(name, str) and name.lower() in self.data
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __iter__(self) -> Iterator[str]:
+        for name, _ in self.data.values():
+            yield name
+
+    def get(self, name: Any, default: Any = None, /) -> Any:
+        entry = self.data.get(name.lower())
+
+        return default if entry is None else entry[1]
+
+    def items(self) -> Any:
+        return self.data.values()
 
 
 class HttpRequest:
@@ -75,7 +141,7 @@ class HttpResponse:
         status_code: int,
         reason: str,
         url: str,
-        headers: Mapping[str, str] | email.message.Message,
+        headers: Mapping[str, str] | email.message.Message | HeaderDict,
         raw: Any,
         transport_response: Any = None,
         streaming: bool = False,
@@ -175,7 +241,13 @@ class InFlightRequest:
         self.event = threading.Event()
 
         self.response: (
-            tuple[int, str, str, Mapping[str, str] | email.message.Message, bytes]
+            tuple[
+                int,
+                str,
+                str,
+                Mapping[str, str] | email.message.Message | HeaderDict,
+                bytes,
+            ]
             | None
         ) = None
 
@@ -312,6 +384,10 @@ class NetworkSession:
 
         self.fresh_cached_response_cache: dict[str, float | None] = {}
 
+        self.environ_proxies_cache: dict[tuple[str, int | None], dict[str, str]] = {}
+
+        self.environ_ca_bundle: str | None = None
+
         self.network_stats = (
             NetworkStats()
             if os.environ.get("CPIP_BENCH_NETWORK_STATS") == "1"
@@ -331,10 +407,53 @@ class NetworkSession:
             from cpip._vendor import requests
             from cpip._vendor.requests.adapters import HTTPAdapter
 
-            session = requests.Session()
+            network_session = self
+
+            class RedirectEnvironmentSession(requests.Session):
+                """Restore trust_env's redirect-time behavior from cpip's caches.
+
+                trust_env is off so requests does not re-resolve environment
+                proxies and netrc on every request; redirects still need the
+                per-destination half of that behavior -- an environment proxy
+                for the new host and its netrc credentials.
+                """
+
+                def rebuild_proxies(self, prepared_request, proxies):
+                    merged = dict(proxies) if proxies else {}
+
+                    parsed = urllib.parse.urlsplit(prepared_request.url)
+
+                    if parsed.scheme in ("http", "https"):
+                        environ = network_session.environ_proxies_for(
+                            prepared_request.url,
+                            parsed,
+                        )
+
+                        proxy = environ.get(parsed.scheme, environ.get("all"))
+
+                        if proxy:
+                            merged.setdefault(parsed.scheme, proxy)
+
+                    return super().rebuild_proxies(prepared_request, merged)
+
+                def rebuild_auth(self, prepared_request, response):
+                    super().rebuild_auth(prepared_request, response)
+
+                    new_auth = get_netrc_auth(prepared_request.url)
+
+                    if new_auth is not None:
+                        prepared_request.prepare_auth(new_auth)
+
+            session = RedirectEnvironmentSession()
             adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64)
             session.mount("https://", adapter)
             session.mount("http://", adapter)
+
+            session.trust_env = False
+
+            self.environ_ca_bundle = os.environ.get(
+                "REQUESTS_CA_BUNDLE",
+            ) or os.environ.get("CURL_CA_BUNDLE")
 
             self.requests_session = session
 
@@ -393,7 +512,7 @@ class NetworkSession:
         cached_metadata = None
 
         if method == "GET" and not stream and "Range" not in request_headers:
-            cached = self.cached_response(request)
+            cached, cached_metadata = self.cache_lookup(request)
 
             if cached is not None:
                 if self.network_stats is not None:
@@ -401,22 +520,28 @@ class NetworkSession:
 
                 return cached
 
-            cached_metadata = self.stale_cache_metadata(request)
-
             if cached_metadata is not None:
-                for name in ("etag", "last-modified"):
-                    value = cached_metadata.get(name)
+                etag = cached_metadata.get("etag")
 
-                    if value:
-                        request_headers[name.title()] = str(value)
+                if etag:
+                    request_headers["If-None-Match"] = str(etag)
+
+                last_modified = cached_metadata.get("last_modified")
+
+                if last_modified:
+                    request_headers["If-Modified-Since"] = str(last_modified)
 
                 request.headers = request_headers
 
-        self.ensure_requests_backend()
+        if request_url.startswith("file:"):
+            requests_exceptions: Any = _FileTransportExceptions
 
-        requests_exceptions = self.requests_exceptions
+        else:
+            self.ensure_requests_backend()
 
-        assert requests_exceptions is not None
+            requests_exceptions = self.requests_exceptions
+
+            assert requests_exceptions is not None
 
         attempts = self.retries + 1
 
@@ -490,7 +615,11 @@ class NetworkSession:
             if response.status_code == 304 and cached_metadata is not None:
                 response.close()
 
-                return self.revalidated_response(request, cached_metadata)
+                return self.revalidated_response(
+                    request,
+                    cached_metadata,
+                    response.headers,
+                )
 
             if method == "GET" and not stream and response.status_code == 200:
                 self.cache_response(response)
@@ -594,22 +723,41 @@ class NetworkSession:
 
             flight.event.set()
 
-    def cached_response(self, request: HttpRequest) -> HttpResponse | None:
+    def cache_lookup(
+        self,
+        request: HttpRequest,
+    ) -> tuple[HttpResponse | None, dict[str, Any] | None]:
+        """One cache read: a fresh response, stale metadata for revalidation, or neither."""
+
         if self.cache is None:
-            return None
+            return None, None
 
-        metadata = self.cache.get(request.url)
+        get_with_body = getattr(self.cache, "get_with_body", None)
 
-        body = self.cache.get_body(request.url)
+        if get_with_body is not None:
+            metadata, body = get_with_body(request.url)
 
-        if metadata is None or body is None:
+        else:
+            metadata = self.cache.get(request.url)
+
+            body = self.cache.get_body(request.url)
+
+        if metadata is None:
             if body is not None:
                 body.close()
 
-            return None
+            return None, None
 
         try:
             values = json.loads(metadata.decode("utf-8"))
+
+            expires_at = values.get("expires_at")
+
+            if expires_at is not None and float(expires_at) <= time.time():
+                if body is not None:
+                    body.close()
+
+                return None, values
 
             headers = values["headers"]
 
@@ -617,34 +765,24 @@ class NetworkSession:
 
             reason = str(values["reason"])
 
-            expires_at = values.get("expires_at")
+        except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            if body is not None:
+                body.close()
 
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-            body.close()
+            return None, None
 
-            return None
-
-        if expires_at is not None and float(expires_at) <= time.time():
-            body.close()
-
-            return None
-
-        import email.message
-
-        response_headers = email.message.Message()
-
-        for name, value in headers.items():
-            response_headers[name] = str(value)
+        if body is None:
+            return None, None
 
         return HttpResponse(
             status_code=status,
             reason=reason,
             url=request.url,
-            headers=response_headers,
+            headers=HeaderDict(headers),
             raw=body,
             request=request,
             from_cache=True,
-        )
+        ), None
 
     def has_fresh_cached_response(self, url: str) -> bool:
         """Check cache freshness without reading the cached response body."""
@@ -685,38 +823,12 @@ class NetworkSession:
 
         return True
 
-    def stale_cache_metadata(self, request: HttpRequest) -> dict[str, Any] | None:
-        if self.cache is None:
-            return None
-
-        metadata = self.cache.get(request.url)
-
-        if metadata is None:
-            return None
-
-        try:
-            values = json.loads(metadata.decode("utf-8"))
-
-            if not isinstance(values, dict):
-                return None
-
-            expires_at = values.get("expires_at")
-
-            if expires_at is None or float(expires_at) > time.time():
-                return None
-
-            return values
-
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return None
-
     def revalidated_response(
         self,
         request: HttpRequest,
         metadata: dict[str, Any],
+        response_headers: Any = None,
     ) -> HttpResponse:
-        import email.message
-
         self.fresh_cached_response_cache.pop(request.url, None)
 
         headers = metadata.get("headers", {})
@@ -724,14 +836,42 @@ class NetworkSession:
         if not isinstance(headers, dict):
             headers = {}
 
-        expires_at = self.cache_expiry(headers)
+        if response_headers is not None:
+            headers = dict(headers)
+
+            lowered = {name.lower(): name for name in headers}
+
+            for name, value in response_headers.items():
+                key = name.lower()
+
+                if key in _NOT_UPDATED_BY_304:
+                    continue
+
+                existing = lowered.get(key)
+
+                if existing is not None and existing != name:
+                    del headers[existing]
+
+                headers[name] = str(value)
+
+                lowered[key] = name
+
+        merged = HeaderDict(headers)
+
+        expires_at = self.cache_expiry(merged)
 
         if expires_at is None:
             expires_at = time.time()
 
         updated = dict(metadata)
 
+        updated["headers"] = headers
+
         updated["expires_at"] = expires_at
+
+        updated["etag"] = merged.get("ETag")
+
+        updated["last_modified"] = merged.get("Last-Modified")
 
         self.cache.set(request.url, json.dumps(updated).encode("utf-8"))
 
@@ -742,16 +882,11 @@ class NetworkSession:
                 f"Cached response body missing for url: {request.url}",
             )
 
-        response_headers = email.message.Message()
-
-        for name, value in headers.items():
-            response_headers[name] = str(value)
-
         return HttpResponse(
             status_code=int(metadata.get("status", 200)),
             reason=str(metadata.get("reason", "OK")),
             url=request.url,
-            headers=response_headers,
+            headers=merged,
             raw=body,
             request=request,
             from_cache=True,
@@ -759,7 +894,7 @@ class NetworkSession:
 
     @staticmethod
     def cache_expiry(
-        headers: Mapping[str, str] | email.message.Message,
+        headers: Mapping[str, str] | email.message.Message | HeaderDict,
     ) -> float | None:
         import email.utils
 
@@ -849,6 +984,9 @@ class NetworkSession:
         if parsed.hostname and parsed.hostname.lower() in self.trusted_hosts:
             verify = False
 
+        elif verify is True and self.environ_ca_bundle is not None:
+            verify = self.environ_ca_bundle
+
         kwargs: dict[str, Any] = {
             "headers": request.headers,
             "data": request.body,
@@ -858,14 +996,60 @@ class NetworkSession:
             "verify": verify,
         }
 
+        proxies = self.environ_proxies_for(request.url, parsed)
+
         if self.proxies is not None:
-            kwargs["proxies"] = self.proxies
+            proxies = {**proxies, **self.proxies} if proxies else self.proxies
+
+        if proxies:
+            kwargs["proxies"] = proxies
 
         if self.cert is not None:
             kwargs["cert"] = self.cert
 
         raw = self.requests_session.request(request.method, request.url, **kwargs)
 
+        return self.wrap_transport_response(raw, request, stream=stream)
+
+    def environ_proxies_for(
+        self,
+        url: str,
+        parsed: urllib.parse.SplitResult,
+    ) -> dict[str, str]:
+        """Resolve environment and system proxies once per host and port.
+
+        NO_PROXY entries can name a port, so the bypass decision is keyed by
+        both. The transport session runs with ``trust_env`` off so requests
+        does not repeat this resolution (a native system-configuration call
+        on macOS) on every request.
+        """
+
+        try:
+            port = parsed.port
+
+        except ValueError:
+            port = None
+
+        key = (parsed.hostname or "", port)
+
+        cached = self.environ_proxies_cache.get(key)
+
+        if cached is None:
+            from cpip._vendor.requests.utils import get_environ_proxies
+
+            cached = get_environ_proxies(url, no_proxy=None)
+
+            self.environ_proxies_cache[key] = cached
+
+        return cached
+
+    def wrap_transport_response(
+        self,
+        raw: Any,
+        request: HttpRequest,
+        *,
+        stream: bool,
+    ) -> HttpResponse:
         content: bytes | None = None
 
         if not stream:
@@ -902,25 +1086,21 @@ class NetworkSession:
 
     @staticmethod
     def open_file(request: HttpRequest) -> HttpResponse:
-        import email.message
-
         try:
             with open(url_to_path(request.url), "rb") as file:
                 body = file.read()
 
         except OSError as exc:
-            headers = email.message.Message()
-
             return HttpResponse(
                 status_code=404,
                 reason=type(exc).__name__,
                 url=request.url,
-                headers=headers,
+                headers=HeaderDict(),
                 raw=io.BytesIO(f"{type(exc).__name__}: {exc}".encode()),
                 request=request,
             )
 
-        headers = email.message.Message()
+        headers = HeaderDict()
 
         headers["Content-Length"] = str(len(body))
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime
 import hashlib
 import marshal
 import posixpath
@@ -164,6 +163,39 @@ def _load_catalog_uncached(
         return None
 
 
+def load_catalog_checked(cache: Any, url: str, generation: str) -> CatalogData | None:
+    """The stored catalog only if its payload still hashes to ``generation``.
+
+    Bypasses the pending-catalog handoff on purpose: the handoff carries no
+    generation, and the hash check is the point -- callers persist derived
+    data (choices) under this generation and must not do so from a blob that
+    was evicted or replaced since the summary was read.
+    """
+    loaded = _load_catalog_uncached(cache, url)
+    if loaded is None:
+        return None
+    catalog, raw = loaded
+    if raw is None or catalog_generation(raw) != generation:
+        return None
+    return catalog
+
+
+def group_artifacts_by_version(
+    catalog: CatalogData,
+    name: str,
+) -> dict[str, list[CatalogArtifact]]:
+    """Collect one project's artifacts per version text, merging duplicates."""
+    groups: dict[str, list[CatalogArtifact]] = {}
+    for group_name, version_text, artifacts, _facts in catalog[0]:
+        if group_name == name:
+            existing = groups.get(version_text)
+            if existing is None:
+                groups[version_text] = list(artifacts)
+            else:
+                existing.extend(artifacts)
+    return groups
+
+
 def load_summary(cache: Any, url: str) -> CatalogSummary | None:
     """Load the release-only resolver view, compiling it locally if needed."""
     if cache is None:
@@ -315,22 +347,28 @@ def valid_version_text(value: object) -> bool:
 
 
 def valid_group(value: object) -> bool:
-    return (
-        isinstance(value, tuple)
-        and len(value) == 4
-        and isinstance(value[0], str)
-        and valid_version_text(value[1])
-        and isinstance(value[2], list)
-        and isinstance(value[3], list)
-        and all(
-            isinstance(artifact, tuple)
-            and len(artifact) == 2
-            and isinstance(artifact[0], int)
-            and valid_record(artifact[1])
-            for artifact in value[2]
-        )
-        and all(valid_fact(fact) for fact in value[3])
-    )
+    if type(value) is not tuple or len(value) != 4:
+        return False
+    name, version, artifacts, facts = value
+    if (
+        type(name) is not str
+        or type(artifacts) is not list
+        or type(facts) is not list
+        or not valid_version_text(version)
+    ):
+        return False
+    for artifact in artifacts:
+        if (
+            type(artifact) is not tuple
+            or len(artifact) != 2
+            or type(artifact[0]) is not int
+            or not valid_record(artifact[1])
+        ):
+            return False
+    for fact in facts:
+        if not valid_fact(fact):
+            return False
+    return True
 
 
 def valid_summary_group(value: object) -> bool:
@@ -346,40 +384,79 @@ def valid_summary_group(value: object) -> bool:
     )
 
 
-def valid_record(value: object) -> bool:
-    if not isinstance(value, tuple) or len(value) != 8:
+def valid_str_dict(value: object) -> bool:
+    if type(value) is not dict:
         return False
+    for key, item in value.items():
+        if type(key) is not str or type(item) is not str:
+            return False
+    return True
+
+
+def valid_record(value: object) -> bool:
+    """One full validation at load time: link_from_record trusts its input.
+
+    Marshal only rebuilds exact built-in types, so ``type(...) is`` checks
+    are equivalent to ``isinstance`` here and keep this loop cheap.
+    """
+    if type(value) is not tuple or len(value) != 9:
+        return False
+    (url, text, hashes, requires_python, yanked, metadata, upload_time, _, parts) = (
+        value
+    )
+    if type(url) is not str or type(text) is not str:
+        return False
+    if not valid_str_dict(hashes):
+        return False
+    if requires_python is not None and type(requires_python) is not str:
+        return False
+    if yanked is not None and type(yanked) is not str:
+        return False
+    if metadata is not None and not valid_str_dict(metadata):
+        return False
+    if upload_time is not None:
+        if type(upload_time) is not str:
+            return False
+        try:
+            parse_iso_datetime(upload_time)
+        except ValueError:
+            return False
+    if type(parts) is not tuple or len(parts) != 5:
+        return False
+    for part in parts:
+        if type(part) is not str:
+            return False
     identity = value[RECORD_WHEEL_IDENTITY]
     if identity is None:
         return True
-    if not isinstance(identity, tuple) or len(identity) != 4:
+    if type(identity) is not tuple or len(identity) != 4:
         return False
     tags = identity[WHEEL_IDENTITY_TAGS]
-    if not isinstance(tags, tuple):
+    if (
+        type(tags) is not tuple
+        or type(identity[WHEEL_IDENTITY_NAME]) is not str
+        or type(identity[WHEEL_IDENTITY_VERSION]) is not str
+    ):
         return False
-    return (
-        isinstance(identity[WHEEL_IDENTITY_NAME], str)
-        and isinstance(identity[WHEEL_IDENTITY_VERSION], str)
-        and (
-            identity[WHEEL_IDENTITY_BUILD_TAG] is None
-            or isinstance(identity[WHEEL_IDENTITY_BUILD_TAG], str)
-        )
-        and all(
-            isinstance(tag, tuple)
-            and len(tag) == 3
-            and all(isinstance(part, str) for part in tag)
-            for tag in tags
-        )
-    )
+    build_tag = identity[WHEEL_IDENTITY_BUILD_TAG]
+    if build_tag is not None and type(build_tag) is not str:
+        return False
+    for tag in tags:
+        if type(tag) is not tuple or len(tag) != 3:
+            return False
+        for part in tag:
+            if type(part) is not str:
+                return False
+    return True
 
 
 def valid_fact(value: object) -> bool:
     return (
-        isinstance(value, tuple)
+        type(value) is tuple
         and len(value) == 3
-        and isinstance(value[0], int)
-        and (value[1] is None or isinstance(value[1], str))
-        and (value[2] is None or isinstance(value[2], str))
+        and type(value[0]) is int
+        and (value[1] is None or type(value[1]) is str)
+        and (value[2] is None or type(value[2]) is str)
     )
 
 
@@ -668,11 +745,13 @@ def link_record(
         None if metadata is None else dict(metadata.hashes or {}),
         None if upload_time is None else upload_time.isoformat(),
         wheel_identity(parsed_wheel),
+        tuple(link.parsed_url_internal),
     )
 
 
 def link_from_record(record: object, *, source_url: str | None = None) -> Link:
-    if not isinstance(record, tuple) or len(record) != 8:
+    """Materialize a record that ``valid_record`` accepted at load time."""
+    if not isinstance(record, tuple) or len(record) != 9:
         raise ValueError("invalid catalog record")
     (
         url,
@@ -683,40 +762,20 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
         metadata,
         upload_time,
         _wheel_identity,
+        parts,
     ) = record
-    if not isinstance(url, str) or not isinstance(text, str):
-        raise ValueError("invalid catalog link")
-    if source_url is not None and not isinstance(source_url, str):
-        raise ValueError("invalid catalog source")
-    if hashes is not None and (
-        not isinstance(hashes, dict)
-        or not all(isinstance(key, str) for key in hashes)
-        or not all(isinstance(value, str) for value in hashes.values())
-    ):
-        raise ValueError("invalid catalog hashes")
-    if metadata is not None and (
-        not isinstance(metadata, dict)
-        or not all(isinstance(key, str) for key in metadata)
-        or not all(isinstance(value, str) for value in metadata.values())
-    ):
-        raise ValueError("invalid catalog metadata")
-    hashes_value = hashes if isinstance(hashes, dict) else None
-    metadata_value = metadata if isinstance(metadata, dict) else None
-    parsed_upload_time: datetime.datetime | None = None
-    if upload_time is not None:
-        if not isinstance(upload_time, str):
-            raise ValueError("invalid catalog upload time")
-        parsed_upload_time = parse_iso_datetime(upload_time)
     return Link.from_cached_record(
-        url,
-        parsed_url=urllib.parse.urlsplit(url),
+        url,  # ty:ignore[invalid-argument-type]
+        parsed_url=urllib.parse.SplitResult(*parts),  # ty:ignore[not-iterable]
         source_url=source_url,
-        text=text,
-        hashes=hashes_value or {},  # ty:ignore[invalid-argument-type]
-        requires_python=requires_python if isinstance(requires_python, str) else None,
-        yanked_reason=yanked if isinstance(yanked, str) else None,
+        text=text,  # ty:ignore[invalid-argument-type]
+        hashes=hashes,  # ty:ignore[invalid-argument-type]
+        requires_python=requires_python,  # ty:ignore[invalid-argument-type]
+        yanked_reason=yanked,  # ty:ignore[invalid-argument-type]
         metadata_file=(
-            MetadataFile(metadata_value) if metadata_value is not None else None  # ty:ignore[invalid-argument-type]
+            MetadataFile(metadata) if metadata is not None else None  # ty:ignore[invalid-argument-type]
         ),
-        upload_time=parsed_upload_time,
+        upload_time=(
+            parse_iso_datetime(upload_time) if upload_time is not None else None  # ty:ignore[invalid-argument-type]
+        ),
     )

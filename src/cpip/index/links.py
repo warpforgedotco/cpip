@@ -172,6 +172,66 @@ class Link:
         )
 
     @classmethod
+    def from_index_page(
+        cls,
+        url: str,
+        *,
+        source_url: str | None,
+        text: str = "",
+        hashes: Mapping[str, object] | None = None,
+        requires_python: str | None = None,
+        yanked_reason: str | None = None,
+        metadata_file: MetadataFile | None = None,
+        upload_time: datetime.datetime | None = None,
+    ) -> Link:
+        """Build a link for an artifact URL listed on a remote index page.
+
+        Index artifact URLs are not local paths and, on the JSON API, carry
+        no hash or egg fragments, so this skips the general constructor's
+        fragment and filesystem handling; anything unusual falls back to
+        from_url.
+        """
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme not in ("https", "http") or "#" in url or "&" in url:
+            return cls.from_url(
+                url,
+                source_url=source_url,
+                text=text,
+                hashes=hashes,
+                requires_python=requires_python,
+                yanked_reason=yanked_reason,
+                metadata_file=metadata_file,
+                upload_time=upload_time,
+            )
+        link = cls.__new__(cls)
+        link.parsed_url_internal = parsed
+        link.url = url
+        link._hash = hash(url)
+        path = urllib.parse.unquote(parsed.path)
+        link.path_internal = path
+        link.filename_internal = None
+        link.file_path_internal = None
+        link.hashes_internal = (
+            {}
+            if hashes is None
+            else {str(name): str(value) for name, value in hashes.items()}
+        )
+        link.comes_from = source_url
+        link.requires_python = requires_python or None
+        link.yanked_reason = yanked_reason
+        link.metadata_file_data = metadata_file
+        link.upload_time = upload_time
+        link.cache_link_parsing = True
+        link.egg_fragment = None
+        link.text = text
+        link.local_identity_internal = None
+        link.local_is_dir_internal = None
+        link.kind = cls.artifact_kind_from_filename(
+            posixpath.basename(path.rstrip("/")),
+        )
+        return link
+
+    @classmethod
     def from_cached_record(
         cls,
         url: str,
