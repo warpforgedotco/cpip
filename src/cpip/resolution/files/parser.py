@@ -192,23 +192,7 @@ def parse_requirements_internal(
             continue
 
         next_stack = [*task.stack, normalized]
-        processed: list[tuple[int, str]] = []
-        continuation: tuple[int, str] | None = None
-        for line_number, raw_line in enumerate(content.splitlines(), start=1):
-            line = raw_line.split(" #", 1)[0].rstrip() if " #" in raw_line else raw_line
-            if line.strip().startswith("#"):
-                line = ""
-            if continuation is not None:
-                processed.append(continuation)
-                continuation = None
-                if not line:
-                    continue
-            if line.endswith("\\"):
-                continuation = (line_number, line[:-1].rstrip())
-            else:
-                processed.append((line_number, line))
-        if continuation is not None:
-            processed.append(continuation)
+        processed = preprocess_requirement_lines(content)
         prefetch_remote_includes(processed, normalized, prefetcher, task.stack)
         pending.extend(
             _RequirementLineTask(
@@ -219,9 +203,55 @@ def parse_requirements_internal(
                 next_stack,
             )
             for line_number, line in reversed(processed)
-            if line.strip() and not line.strip().startswith("#")
         )
     return results
+
+
+def preprocess_requirement_lines(content: str) -> list[tuple[int, str]]:
+    """Numbered logical lines: continuations joined, comments removed.
+
+    A backslash at end of line continues onto the next one, and the two
+    become a single requirement -- which is how ``pip-compile
+    --generate-hashes`` writes every entry it produces::
+
+        demopkg==1.0 \\
+            --hash=sha256:...
+
+    Joining has to happen before comments are stripped, so that a ``#``
+    anywhere in the joined line comments out the rest of it; and a line that
+    is entirely a comment ends a continuation rather than being swallowed by
+    it. The line number reported for a joined line is that of its first
+    physical line, which is the one a user looking for the error will find.
+    """
+    joined: list[tuple[int, str]] = []
+    first_line_number = 0
+    pieces: list[str] = []
+
+    for line_number, line in enumerate(content.splitlines(), start=1):
+        is_comment = COMMENT_RE.match(line) is not None
+        if line.endswith("\\") and not is_comment:
+            if not pieces:
+                first_line_number = line_number
+            pieces.append(line.rstrip("\\"))
+            continue
+        if is_comment:
+            # Keep it separated, so the stripping pass still sees a comment.
+            line = " " + line
+        if pieces:
+            pieces.append(line)
+            joined.append((first_line_number, "".join(pieces)))
+            pieces = []
+        else:
+            joined.append((line_number, line))
+
+    if pieces:
+        joined.append((first_line_number, "".join(pieces)))
+
+    return [
+        (line_number, stripped)
+        for line_number, line in joined
+        if (stripped := COMMENT_RE.sub("", line).strip())
+    ]
 
 
 def _read_requirement_content(
