@@ -313,6 +313,29 @@ def _text_compare(left: str, operator: str, right: Any) -> bool:
     )
 
 
+_SPECIFIER_LIMIT = 1024
+_specifiers: dict[tuple[str, str], Specifier | None] = register_table({})
+
+
+def _specifier_for(operator: str, text: str) -> Specifier | None:
+    """The Specifier for one marker clause, interned; None if it is not one.
+
+    A marker's operator and literal are fixed by its text, so a resolve that
+    evaluates the same marker against thousands of candidates would otherwise
+    rebuild -- and revalidate -- the same clause every time.
+    """
+    key = (operator, text)
+    try:
+        return _specifiers[key]
+    except KeyError:
+        try:
+            value: Specifier | None = Specifier(operator, text)
+        except ValueError:
+            value = None
+        bounded_put(_specifiers, key, value, _SPECIFIER_LIMIT)
+        return value
+
+
 def _version_compare(left: str, operator: str, right: Any) -> bool:
     """Compare as versions when the clause is a version specifier, else as text.
 
@@ -323,9 +346,8 @@ def _version_compare(left: str, operator: str, right: Any) -> bool:
     """
     if operator in ("in", "not in") or not isinstance(right, str):
         return _text_compare(left, operator, right)
-    try:
-        specifier = Specifier(operator, right)
-    except ValueError:
+    specifier = _specifier_for(operator, right)
+    if specifier is None:
         return _text_compare(left, operator, right)
     try:
         parsed = Version(left)
