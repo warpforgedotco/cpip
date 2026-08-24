@@ -147,11 +147,11 @@ def test_libc_version_matching(runtime: str, wheel_tag: str, expected: bool) -> 
 @pytest.mark.parametrize(
     "platform_tag, expected",
     [
-        ("manylinux_2_17_x86_64", ("manylinux", "2", "17", "x86_64")),
-        ("musllinux_1_2_aarch64", ("musllinux", "1", "2", "aarch64")),
-        ("manylinux2014_x86_64", ("manylinux", "2", "17", "x86_64")),
-        ("manylinux2010_i686", ("manylinux", "2", "12", "i686")),
-        ("manylinux1_x86_64", ("manylinux", "2", "5", "x86_64")),
+        ("manylinux_2_17_x86_64", ("manylinux", 2, 17, "x86_64")),
+        ("musllinux_1_2_aarch64", ("musllinux", 1, 2, "aarch64")),
+        ("manylinux2014_x86_64", ("manylinux", 2, 17, "x86_64")),
+        ("manylinux2010_i686", ("manylinux", 2, 12, "i686")),
+        ("manylinux1_x86_64", ("manylinux", 2, 5, "x86_64")),
         ("linux_x86_64", None),
         ("manylinux_x_y_x86_64", None),
         ("manylinux2014", None),

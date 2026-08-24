@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     import zipfile
     from email import parser
     from email.message import Message
-    from typing import IO, NoReturn, Protocol
+    from typing import IO, Any, NoReturn, Protocol
 
     class ZipEntryInfo(Protocol):
         """The subset of ``zipfile.ZipInfo`` these functions read.
@@ -118,7 +118,7 @@ _LEGACY_MANYLINUX_GLIBC = {
 }
 
 
-def linux_platform_parts(platform_tag: str) -> tuple[str, ...] | None:
+def linux_platform_parts(platform_tag: str) -> tuple[str, int, int, str] | None:
     """``(family, major, minor, arch)`` for a manylinux or musllinux tag.
 
     Both the PEP 600 spelling (``manylinux_2_17_x86_64``) and the three
@@ -133,13 +133,13 @@ def linux_platform_parts(platform_tag: str) -> tuple[str, ...] | None:
         family, major, minor, arch = fields
         if not major.isdigit() or not minor.isdigit() or not arch:
             return None
-        return (family, major, minor, arch)
+        return (family, int(major), int(minor), arch)
 
     prefix, _, arch = platform_tag.partition("_")
     glibc = _LEGACY_MANYLINUX_GLIBC.get(prefix)
     if glibc is None or not arch:
         return None
-    return ("manylinux", str(glibc[0]), str(glibc[1]), arch)
+    return ("manylinux", glibc[0], glibc[1], arch)
 
 
 def Parser() -> parser.Parser:
@@ -361,7 +361,7 @@ class WheelTag:
 
     _platform_lower: str
 
-    _platform_parts: tuple[str, ...] | None
+    _platform_parts: tuple[Any, ...] | None
 
     _hash: int
 
@@ -1485,47 +1485,38 @@ def interpreter_matches(runtime: str, wheel: str, abi: str) -> bool:
 def platform_matches(
     runtime: str,
     wheel: str,
-    runtime_parts: tuple[str, ...] | None,
-    wheel_parts: tuple[str, ...] | None,
+    runtime_parts: tuple[Any, ...] | None,
+    wheel_parts: tuple[Any, ...] | None,
 ) -> bool:
     if runtime == wheel:
         return True
 
     if runtime == "any" or wheel == "any":
-        return runtime == wheel
+        return False
 
-    if runtime.startswith("macosx_") and wheel.startswith("macosx_"):
-        assert runtime_parts is not None
-        assert wheel_parts is not None
+    if runtime_parts is None or wheel_parts is None:
+        return False
 
+    family = runtime_parts[0]
+
+    if family != wheel_parts[0]:
+        return False
+
+    if family == "macosx":
         return _macos_platform_matches_parts(runtime_parts, wheel_parts)
 
-    if runtime.startswith("ios_") and wheel.startswith("ios_"):
-        assert runtime_parts is not None
-        assert wheel_parts is not None
-
+    if family == "ios":
         return _ios_platform_matches_parts(runtime_parts, wheel_parts)
 
-    if runtime.startswith("android_") and wheel.startswith("android_"):
-        assert runtime_parts is not None
-        assert wheel_parts is not None
-
+    if family == "android":
         return _android_platform_matches_parts(runtime_parts, wheel_parts)
 
-    if runtime.startswith(("manylinux", "musllinux")) and wheel.startswith(
-        ("manylinux", "musllinux"),
-    ):
-        if runtime_parts is None or wheel_parts is None:
-            return False
-
-        return _linux_platform_matches_parts(runtime_parts, wheel_parts)
-
-    return False
+    return _linux_platform_matches_parts(runtime_parts, wheel_parts)
 
 
 def _linux_platform_matches_parts(
-    runtime_parts: tuple[str, ...],
-    wheel_parts: tuple[str, ...],
+    runtime_parts: tuple[Any, ...],
+    wheel_parts: tuple[Any, ...],
 ) -> bool:
     """A libc-tagged wheel runs here if it names the same libc and architecture
     and asks for no newer a version than the one installed.
@@ -1535,16 +1526,13 @@ def _linux_platform_matches_parts(
     forty-odd the reference implementation generates. PEP 600 lets us compare
     across major versions directly: a newer glibc satisfies every older one.
     """
-    runtime_family, runtime_major, runtime_minor, runtime_arch = runtime_parts
-    wheel_family, wheel_major, wheel_minor, wheel_arch = wheel_parts
+    _, runtime_major, runtime_minor, runtime_arch = runtime_parts
+    _, wheel_major, wheel_minor, wheel_arch = wheel_parts
 
-    if runtime_family != wheel_family or runtime_arch != wheel_arch:
+    if runtime_arch != wheel_arch:
         return False
 
-    return (int(wheel_major), int(wheel_minor)) <= (
-        int(runtime_major),
-        int(runtime_minor),
-    )
+    return (wheel_major, wheel_minor) <= (runtime_major, runtime_minor)
 
 
 def _macos_platform_matches_parts(
