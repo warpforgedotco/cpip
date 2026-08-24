@@ -10,8 +10,9 @@ from cpip.cli.fast import read_requirements
 from cpip.cli.lock_format import LOCK_HEADER, toml_string, write_lock_output
 from cpip.cli.parsers.lock import create_parser
 from cpip.core.appdirs import configured_cache_dir
-from cpip.core.errors import CommandError
+from cpip.core.errors import CommandError, CpipError
 from cpip.core.format_control import FormatControl
+from cpip.core.hashes import file_hashes
 from cpip.core.packaging import parse_requirement
 from cpip.core.temp_dir import remove_temp_directory
 from cpip.core.urls import path_to_url, url_to_path
@@ -195,8 +196,6 @@ def run_lock(args: list[str]) -> int:
         item = install_req_from_line(value)
 
         if item.link is not None and not item.link.is_vcs:
-            import hashlib
-
             from cpip.build.build_backend import prepare_project_metadata
 
             source = artifact_locator.ensure_local(item.link.url)
@@ -221,8 +220,7 @@ def run_lock(args: list[str]) -> int:
 
                 metadata = prepare_project_metadata(project, build_isolation=False)
 
-            with open(source, "rb") as file:
-                source_digest = hashlib.sha256(file.read()).hexdigest()
+            source_digest = file_hashes(source)["sha256"]
 
             archive_packages.append(
                 {
@@ -426,10 +424,7 @@ def run_lock(args: list[str]) -> int:
                 archive_path = artifact_locator.ensure_local(source)
 
                 if archive_digest is None:
-                    import hashlib
-
-                    with open(archive_path, "rb") as file:
-                        archive_digest = hashlib.sha256(file.read()).hexdigest()
+                    archive_digest = file_hashes(archive_path)["sha256"]
 
                 package_name = candidate.name
                 with tempfile.TemporaryDirectory(prefix="cpip-lock-") as temp_dir:
@@ -440,7 +435,7 @@ def run_lock(args: list[str]) -> int:
                             unpack_source(archive_path, temp_dir),
                             build_isolation=False,
                         )
-                    except Exception:
+                    except (CpipError, OSError, ValueError):
                         pass
                     else:
                         package_name = project.name
@@ -462,10 +457,7 @@ def run_lock(args: list[str]) -> int:
         digest = (candidate.source_hashes or {}).get("sha256")
 
         if digest is None:
-            import hashlib
-
-            with open(source_path, "rb") as source_file:
-                digest = hashlib.sha256(source_file.read()).hexdigest()
+            digest = file_hashes(source_path)["sha256"]
 
         if candidate_path is not None:
             artifact_url = source

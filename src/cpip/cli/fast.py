@@ -763,6 +763,7 @@ def run_lock(args: list[str]) -> int | None:
         return 0
 
     from cpip.resolution.api import ResolutionEngine
+    from cpip.core.hashes import file_hashes
 
     plan = ResolutionEngine.resolve_wheelhouse(options.find_links, options.requirements)
     if plan is None:
@@ -775,11 +776,8 @@ def run_lock(args: list[str]) -> int | None:
             return None
         digest = (candidate.source_hashes or {}).get("sha256")
         if digest is None:
-            import hashlib
-
             try:
-                with open(candidate.path, "rb") as wheel_file:
-                    digest = hashlib.sha256(wheel_file.read()).hexdigest()
+                digest = file_hashes(candidate.path)["sha256"]
             except OSError:
                 return None
         packages.append(
