@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import os
-import re
 import sys
 from collections.abc import Collection
 from types import SimpleNamespace
 
 from cpip.core.direct_url import DirectUrl
+from cpip.core.egg_link import egg_link_path_from_sys_path
 from cpip.core.metadata import find_installed, iter_installed_distributions
 from cpip.core.packaging import (
     SpecifierSet,
@@ -27,28 +27,6 @@ if TYPE_CHECKING:
 
     from cpip.core.metadata import InstalledDistribution
     from cpip.core.packaging import Requirement
-
-
-def egg_link_names(raw_name: str) -> list[str]:
-    """Return the filename variants used by setuptools for an egg-link."""
-
-    return [
-        re.sub("[^A-Za-z0-9.]+", "-", raw_name) + ".egg-link",
-        f"{raw_name}.egg-link",
-    ]
-
-
-def egg_link_path_from_sys_path(raw_name: str) -> str | None:
-    """Find an egg-link for ``raw_name`` by walking the interpreter path."""
-
-    for path_item in sys.path:
-        for egg_link_name in egg_link_names(raw_name):
-            egg_link = os.path.join(path_item, egg_link_name)
-
-            if os.path.isfile(egg_link):
-                return egg_link
-
-    return None
 
 
 def parse_entry_points(text: str | None) -> list[SimpleNamespace]:
