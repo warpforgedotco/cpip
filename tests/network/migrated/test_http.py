@@ -232,7 +232,6 @@ def test_redirect_gains_environment_proxy_for_destination(
 ) -> None:
     """trust_env is off, so the redirect hook must add the destination's
     environment proxy itself (and still honor NO_PROXY for it)."""
-    import urllib.parse
 
     from cpip._vendor import requests
 
