@@ -185,8 +185,10 @@ class Specifier:
             )
 
         if operator == ">=":
-            if version[3]:
-                return version[:3] >= other[:3]
+            # No local strip needed: dropping the candidate's label only ever
+            # lowers it, and it can only cross an inclusive lower bound where
+            # the release parts are already equal -- which answers True either
+            # way. `<=` is not symmetric here, so it does strip.
             return version >= other
 
         if operator == "<=":
