@@ -9,6 +9,7 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 
 from cpip._vendor.nab_resolver.ranges import Range
+from cpip.core.errors import CpipError
 from cpip.core.metadata import InstalledDistribution
 from cpip.core.packaging import Requirement, SpecifierSet, canonicalize_name
 from cpip.core.versions import Version
@@ -58,7 +59,7 @@ def _dependencies_or_none(candidate: object) -> tuple[Requirement, ...] | None:
     """
     try:
         return tuple(getattr(candidate, "dependencies", ()))
-    except Exception:
+    except (CpipError, OSError, ValueError):
         return None
 
 
