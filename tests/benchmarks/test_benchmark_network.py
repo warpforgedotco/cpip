@@ -50,6 +50,17 @@ class FakeTransportSession(NetworkSession):
         *,
         stream: bool = False,
     ) -> HttpResponse:
+        if_none_match = request.headers.get("If-None-Match")
+        if if_none_match and if_none_match == self.response_headers.get("ETag"):
+            return HttpResponse(
+                status_code=304,
+                reason="Not Modified",
+                url=request.url,
+                headers=dict(self.response_headers),
+                raw=io.BytesIO(b""),
+                content_internal=b"",
+                request=request,
+            )
         body = self.bodies[request.url.partition("#")[0]]
         range_header = request.headers.get("Range")
         status = 200
@@ -131,6 +142,37 @@ def test_session_requests_cache_hit(
         return total
 
     assert benchmark(fetch_all) == len(PAGE_BODY) * len(PAGE_URLS)
+
+
+def test_session_requests_revalidation_304(
+    benchmark: BenchmarkFixture,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Conditional GETs answered 304, served from the revalidated cache."""
+    cache_dir = str(tmp_path_factory.mktemp("network-revalidation-cache"))
+    session = FakeTransportSession(
+        bodies=dict.fromkeys(PAGE_URLS, PAGE_BODY),
+        response_headers={
+            "Content-Type": "text/html",
+            "Cache-Control": "max-age=0",
+            "ETag": '"stale-page"',
+        },
+        index_urls=INDEX_URLS,
+        cache=cache_dir,
+    )
+    for url in PAGE_URLS:
+        session.get(url).close()
+
+    def revalidate_all() -> int:
+        total = 0
+        for url in PAGE_URLS:
+            response = session.get(url)
+            assert response.from_cache
+            total += len(response.content)
+            response.close()
+        return total
+
+    assert benchmark(revalidate_all) == len(PAGE_BODY) * len(PAGE_URLS)
 
 
 def test_session_fresh_cache_probe(

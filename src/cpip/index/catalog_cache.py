@@ -163,6 +163,39 @@ def _load_catalog_uncached(
         return None
 
 
+def load_catalog_checked(cache: Any, url: str, generation: str) -> CatalogData | None:
+    """The stored catalog only if its payload still hashes to ``generation``.
+
+    Bypasses the pending-catalog handoff on purpose: the handoff carries no
+    generation, and the hash check is the point -- callers persist derived
+    data (choices) under this generation and must not do so from a blob that
+    was evicted or replaced since the summary was read.
+    """
+    loaded = _load_catalog_uncached(cache, url)
+    if loaded is None:
+        return None
+    catalog, raw = loaded
+    if raw is None or catalog_generation(raw) != generation:
+        return None
+    return catalog
+
+
+def group_artifacts_by_version(
+    catalog: CatalogData,
+    name: str,
+) -> dict[str, list[CatalogArtifact]]:
+    """Collect one project's artifacts per version text, merging duplicates."""
+    groups: dict[str, list[CatalogArtifact]] = {}
+    for group_name, version_text, artifacts, _facts in catalog[0]:
+        if group_name == name:
+            existing = groups.get(version_text)
+            if existing is None:
+                groups[version_text] = list(artifacts)
+            else:
+                existing.extend(artifacts)
+    return groups
+
+
 def load_summary(cache: Any, url: str) -> CatalogSummary | None:
     """Load the release-only resolver view, compiling it locally if needed."""
     if cache is None:

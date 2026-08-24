@@ -217,7 +217,7 @@ class FindLinksSource:
 
 
 class SimpleIndexSource:
-    __slots__ = ("index_url", "session", "trusted_hosts")
+    __slots__ = ("index_url", "page_fetch_outcomes", "session", "trusted_hosts")
 
     def __init__(
         self,
@@ -231,8 +231,15 @@ class SimpleIndexSource:
 
         self.session = session
 
+        self.page_fetch_outcomes: dict[str, tuple[list[Link]]] = {}
+
     def collect_links(self, requirement: Requirement) -> list[Link]:
         project_url = self.project_page_url(self.index_url, requirement.canonical_name)
+
+        outcome = self.page_fetch_outcomes.pop(project_url, None)
+
+        if outcome is not None:
+            return outcome[0]
 
         return IndexPageParser(
             trusted_hosts=self.trusted_hosts,
@@ -242,18 +249,59 @@ class SimpleIndexSource:
     def collect_cached_catalog_summary(
         self,
         requirement: Requirement,
+        *,
+        allow_fetch: bool = False,
     ) -> CatalogSummary | None:
-        """Return the compact release view when the HTTP page is fresh."""
+        """Return the compact release view when the page is fresh, or -- with
+        ``allow_fetch`` -- after one revalidation proves it unchanged."""
 
         if self.session is None:
             return None
 
         project_url = self.project_page_url(self.index_url, requirement.canonical_name)
 
-        if not self.has_fresh_cached_page(requirement):
+        cache = getattr(self.session, "cache", None)
+
+        if self.has_fresh_cached_page(requirement):
+            return load_summary(cache, project_url)
+
+        if not allow_fetch or not project_url.startswith(("http://", "https://")):
             return None
 
-        return load_summary(getattr(self.session, "cache", None), project_url)
+        parser = IndexPageParser(
+            trusted_hosts=self.trusted_hosts,
+            session=self.session,
+        )
+
+        try:
+            content = parser.read(project_url)
+
+        except OSError:
+            self.page_fetch_outcomes[project_url] = ([],)
+
+            return None
+
+        except Exception as exc:
+            response = getattr(exc, "response", None)
+
+            if getattr(response, "status_code", None) == 404:
+                self.page_fetch_outcomes[project_url] = ([],)
+
+                return None
+
+            raise
+
+        if content.from_cache:
+            summary = load_summary(cache, project_url)
+
+            if summary is not None:
+                return summary
+
+        links = parser.links_from_content(content, project_url)
+
+        self.page_fetch_outcomes[project_url] = (links,)
+
+        return None
 
     def has_fresh_cached_page(self, requirement: Requirement) -> bool:
         """Return whether catalog discovery can avoid remote I/O."""

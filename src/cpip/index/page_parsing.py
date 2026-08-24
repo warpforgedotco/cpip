@@ -58,6 +58,9 @@ class IndexPageParser:
             if getattr(response, "status_code", None) == 404:
                 return []
             raise
+        return self.links_from_content(content, url)
+
+    def links_from_content(self, content: IndexContent, url: str) -> list[Link]:
         if content.from_cache:
             cached = load_links(getattr(self.session, "cache", None), url)
             if cached is not None:
