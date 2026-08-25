@@ -934,8 +934,13 @@ class ProjectMetadataReader:
 
                     scripts = project.get("scripts", {})
 
-                    if not isinstance(scripts, dict):
-                        scripts = {}
+                    if not isinstance(scripts, dict) or not all(
+                        isinstance(key, str) and isinstance(value, str)
+                        for key, value in scripts.items()
+                    ):
+                        raise BuildError(
+                            f"Cannot build {source_dir}: project.scripts is invalid",
+                        )
 
                     summary = (
                         project.get("description")
@@ -966,21 +971,26 @@ class ProjectMetadataReader:
 
                     optional_dependencies_raw = project.get("optional-dependencies", {})
 
+                    if not isinstance(optional_dependencies_raw, dict):
+                        raise BuildError(
+                            f"Cannot build {source_dir}: "
+                            "project.optional-dependencies is invalid",
+                        )
+
                     optional_dependencies: dict[str, tuple[str, ...]] = {}
 
-                    if isinstance(optional_dependencies_raw, dict):
-                        for extra, values in optional_dependencies_raw.items():
-                            if not isinstance(extra, str) or not isinstance(
-                                values,
-                                list,
-                            ):
-                                continue
+                    for extra, values in optional_dependencies_raw.items():
+                        if (
+                            not isinstance(extra, str)
+                            or not isinstance(values, list)
+                            or not all(isinstance(item, str) for item in values)
+                        ):
+                            raise BuildError(
+                                f"Cannot build {source_dir}: "
+                                "project.optional-dependencies is invalid",
+                            )
 
-                            items = [
-                                str(item) for item in values if isinstance(item, str)
-                            ]
-
-                            optional_dependencies[extra] = tuple(items)
+                        optional_dependencies[extra] = tuple(values)
 
                     return ProjectMetadata(
                         name=name,
@@ -989,9 +999,7 @@ class ProjectMetadataReader:
                         requires_python=requires_python,
                         dependencies=tuple(dependencies),
                         optional_dependencies=optional_dependencies,
-                        scripts={
-                            str(key): str(value) for key, value in scripts.items()
-                        },
+                        scripts=scripts,
                         provided_extras=frozenset(optional_dependencies),
                         license_expression=license_expression,
                         license_files=tuple(license_files_raw),
