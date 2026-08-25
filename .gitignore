@@ -12,6 +12,3 @@ __pycache__/
 !src/cpip/build/
 dist/
 *.egg-info/
-
-# Recorded cpip-bench baselines (cpip-bench-record).
-benchmark-runs/
