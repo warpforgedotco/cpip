@@ -832,6 +832,7 @@ def install_wheels_transactionally(
             requests,
             planned_candidates,
             target=target,
+            pycompile=pycompile,
         )
     if direct_destination_cache is not None:
         return install_wheels_directly(

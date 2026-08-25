@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 
 from cpip.core.errors import InstallationError
@@ -30,6 +31,7 @@ def direct_batch_preflight(
     candidates: tuple[WheelCandidate, ...],
     *,
     target: InstallTarget,
+    pycompile: bool,
 ) -> DestinationCache | None:
     """Check whether a batch can write final paths without staging files."""
     if os.path.normcase(os.path.normpath(target.purelib)) != os.path.normcase(
@@ -79,6 +81,15 @@ def direct_batch_preflight(
             if destination_text in destinations or os.path.lexists(destination_text):
                 return None
             destinations.add(destination_text)
+            if pycompile and os.path.splitext(destination_text)[1] == ".py":
+                compiled_destination = importlib.util.cache_from_source(
+                    destination_text,
+                )
+                if compiled_destination in destinations or os.path.lexists(
+                    compiled_destination
+                ):
+                    return None
+                destinations.add(compiled_destination)
     return resolved_directories
 
 

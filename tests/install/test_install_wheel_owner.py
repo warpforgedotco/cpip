@@ -791,6 +791,59 @@ def test_direct_compiled_batch_rolls_back_bytecode_on_later_failure(
     assert list(target.rglob("*.dist-info")) == []
 
 
+def test_compiled_batch_preserves_existing_bytecode_on_later_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_wheel = make_wheel_internal(
+        tmp_path,
+        extra_files={"owner_demo/large.py": "#" * (5 * 1024 * 1024)},
+    )
+    second_wheel = make_wheel_internal(tmp_path, name="other-demo")
+    candidates = []
+    for wheel, dist_info in (
+        (first_wheel, "owner_demo-1.0.dist-info"),
+        (second_wheel, "other_demo-1.0.dist-info"),
+    ):
+        with zipfile.ZipFile(wheel) as archive:
+            candidates.append(
+                wheel_candidate(
+                    wheel,
+                    archive=archive,
+                    dist_info_dir=dist_info,
+                )
+            )
+    target = tmp_path / "target"
+    bytecode = Path(
+        importlib.util.cache_from_source(str(target / "owner_demo" / "large.py"))
+    )
+    bytecode.parent.mkdir(parents=True)
+    sentinel = b"pre-existing-bytecode"
+    bytecode.write_bytes(sentinel)
+    original_install = WheelInstaller.install
+    calls = 0
+
+    def fail_second(self, path, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected compiled install failure")
+        return original_install(self, path, *args, **kwargs)
+
+    monkeypatch.setattr(WheelInstaller, "install", fail_second)
+    with pytest.raises(RuntimeError, match="compiled install failure"):
+        install_wheels_transactionally(
+            [(first_wheel, True, None), (second_wheel, False, None)],
+            target=InstallTarget.from_options("owner-demo", target=str(target)),
+            pycompile=True,
+            lookup_existing=False,
+            candidates=candidates,
+        )
+
+    assert bytecode.read_bytes() == sentinel
+    assert not (target / "owner_demo" / "large.py").exists()
+
+
 def test_install_rejects_wheel_member_path_traversal(tmp_path: Path) -> None:
     wheel = make_wheel_internal(tmp_path, extra_files={"../escape.txt": "escape"})
     target = tmp_path / "target"
