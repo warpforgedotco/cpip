@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from cpip.core.direct_url import DirectUrl
 
 DIRECT_CONTENT_BATCH_LIMIT = 4 * 1024 * 1024
+DIRECT_MEMBER_BATCH_THRESHOLD = 1_024
 
 
 def direct_batch_preflight(
@@ -42,18 +43,28 @@ def direct_batch_preflight(
     resolved_directories: DestinationCache = {}
     resolved_roots: ResolvedRoots = target.resolved_roots_internal
     member_sets: list[tuple[tuple[str, int, int, int, int, int], ...]] = []
+    member_count = 0
     total_size = 0
     for request, candidate in zip(requests, candidates):
         if request[2] is not None or not isinstance(candidate.wheel_layout, tuple):
             return None
         _, raw_members, _ = candidate.wheel_layout
         member_sets.append(raw_members)  # ty:ignore[invalid-argument-type]
+        member_count += sum(
+            not raw_member[0].endswith("/")
+            for raw_member in raw_members  # ty:ignore[not-iterable]
+        )
         total_size += sum(
             raw_member[4]
             for raw_member in raw_members  # ty:ignore[not-iterable]
             if not raw_member[0].endswith("/")
         )
-    if total_size <= DIRECT_CONTENT_BATCH_LIMIT:
+    # Small batches are cheaper to stage. Direct installation pays off once
+    # either the buffered content or per-member filesystem work grows large.
+    if (
+        total_size <= DIRECT_CONTENT_BATCH_LIMIT
+        and member_count <= DIRECT_MEMBER_BATCH_THRESHOLD
+    ):
         return None
     for raw_members in member_sets:
         for raw_member in raw_members:
