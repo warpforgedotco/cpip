@@ -93,7 +93,7 @@ def install_wheels_directly(
 ) -> tuple[WheelCandidate, ...]:
     """Install a preflighted fresh batch directly with transactional rollback."""
     with InstallTransaction() as transaction:
-        parallel = 4 <= len(requests) <= 64 and not pycompile
+        parallel = 4 <= len(requests) <= 64
 
         def install_one(
             index: int,

@@ -46,6 +46,20 @@ def graph_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def compiled_large_wheels(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, ...]:
+    wheelhouse = tmp_path_factory.mktemp("compiled-large-wheelhouse")
+    return tuple(
+        make_wheel(
+            wheelhouse,
+            f"compiled-large-{index}",
+            "1.0.0",
+            payload_bytes=1_100 * 1024,
+        )
+        for index in range(4)
+    )
+
+
+@pytest.fixture(scope="session")
 def backtracking_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
     wheelhouse = tmp_path_factory.mktemp("backtracking-wheelhouse")
     make_backtracking_graph(wheelhouse)

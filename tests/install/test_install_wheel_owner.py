@@ -661,6 +661,38 @@ def test_large_fresh_batch_writes_without_staging(tmp_path: Path, monkeypatch) -
     assert (target / "owner_demo" / "0.bin").read_text() == "x" * (128 * 1024)
 
 
+def test_large_compiled_batch_writes_without_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheel = make_wheel_internal(
+        tmp_path,
+        extra_files={"owner_demo/large.py": "#" * (5 * 1024 * 1024)},
+    )
+    target = tmp_path / "target"
+    with zipfile.ZipFile(wheel) as archive:
+        candidate = wheel_candidate(
+            wheel,
+            archive=archive,
+            dist_info_dir="owner_demo-1.0.dist-info",
+        )
+
+    def fail_commit(*args: object, **kwargs: object) -> None:
+        raise AssertionError("compiled direct installation should not commit staging")
+
+    monkeypatch.setattr(InstallTransaction, "commit", fail_commit)
+    install_wheels_transactionally(
+        [(wheel, True, None)],
+        target=InstallTarget.from_options("owner-demo", target=str(target)),
+        pycompile=True,
+        lookup_existing=False,
+        candidates=[candidate],
+    )
+
+    assert (target / "owner_demo" / "large.py").exists()
+    assert len(list(target.rglob("*.pyc"))) == 2
+
+
 def test_direct_batch_rolls_back_final_writes_on_later_failure(
     tmp_path: Path,
     monkeypatch,
@@ -721,6 +753,42 @@ def test_direct_batch_rolls_back_final_writes_on_later_failure(
     assert (target / ".existing").exists()
     assert list(target.rglob("*.bin")) == []
     assert not (target / "owner_demo-1.0.dist-info" / "INSTALLER").exists()
+
+
+def test_direct_compiled_batch_rolls_back_bytecode_on_later_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_wheel = make_wheel_internal(
+        tmp_path,
+        extra_files={"owner_demo/large.py": "#" * (5 * 1024 * 1024)},
+    )
+    second_wheel = make_wheel_internal(tmp_path, name="other-demo")
+    candidates = [wheel_candidate(first_wheel), wheel_candidate(second_wheel)]
+    target = tmp_path / "target"
+    original_install = WheelInstaller.install
+    calls = 0
+
+    def fail_second(self, path, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected compiled direct-install failure")
+        return original_install(self, path, *args, **kwargs)
+
+    monkeypatch.setattr(WheelInstaller, "install", fail_second)
+    with pytest.raises(RuntimeError, match="compiled direct-install failure"):
+        install_wheels_transactionally(
+            [(first_wheel, True, None), (second_wheel, False, None)],
+            target=InstallTarget.from_options("owner-demo", target=str(target)),
+            pycompile=True,
+            lookup_existing=False,
+            candidates=candidates,
+        )
+
+    assert list(target.rglob("*.py")) == []
+    assert list(target.rglob("*.pyc")) == []
+    assert list(target.rglob("*.dist-info")) == []
 
 
 def test_install_rejects_wheel_member_path_traversal(tmp_path: Path) -> None:

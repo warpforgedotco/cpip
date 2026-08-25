@@ -23,7 +23,11 @@ from pathlib import Path
 
 from benchmark_support import reset_caches
 from cpip.core.hashes import Hashes, hash_file
-from cpip.core.wheel import read_metadata_message, validate_wheel
+from cpip.core.wheel import (
+    read_metadata_message,
+    validate_wheel,
+    wheel_candidate_from_path,
+)
 from cpip.install.output import materialize_candidates
 from cpip.install.target import InstallTarget
 from cpip.platform.unpacking import untar_file, unzip_file
@@ -101,6 +105,34 @@ def test_install_compiled_dependency_graph(
             requests,
             target=target,
             pycompile=True,
+            candidates=candidates,
+        )
+
+    benchmark(install_compiled)
+
+
+def test_install_compiled_large_wheels_directly(
+    benchmark: BenchmarkFixture,
+    compiled_large_wheels: tuple[Path, ...],
+    tmp_path: Path,
+) -> None:
+    candidates = tuple(
+        wheel_candidate_from_path(path) for path in compiled_large_wheels
+    )
+    requests = tuple((str(path), True, None) for path in compiled_large_wheels)
+    counter = itertools.count()
+
+    def install_compiled() -> None:
+        destination = tmp_path / f"compiled-large-{next(counter)}"
+        target = InstallTarget.from_options(
+            "compiled-large-0",
+            target=str(destination),
+        )
+        install_wheels_transactionally(
+            requests,
+            target=target,
+            pycompile=True,
+            lookup_existing=False,
             candidates=candidates,
         )
 

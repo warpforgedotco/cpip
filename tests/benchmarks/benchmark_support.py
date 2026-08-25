@@ -31,6 +31,7 @@ def make_wheel(
     *,
     requires: list[str] | None = None,
     payload_files: int = 0,
+    payload_bytes: int = 0,
     requires_python: str = ">=3.9",
 ) -> Path:
     """Write a metadata-only wheel with an optional synthetic payload."""
@@ -60,6 +61,8 @@ def make_wheel(
         files[f"{distribution}/module_{index}.py"] = (
             f"VALUE = {index}\n\n\ndef compute() -> int:\n    return VALUE * 2\n"
         )
+    if payload_bytes:
+        files[f"{distribution}/large_module.py"] = "#" * payload_bytes
     rows = []
     for name, data in files.items():
         raw = data.encode()

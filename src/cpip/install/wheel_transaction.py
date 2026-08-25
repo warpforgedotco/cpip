@@ -598,7 +598,12 @@ def install_wheel_internal(
                 )
 
         if pycompile:
-            staged.extend(compiled_files(stage_root_text, staged))
+            compiled = compiled_files(stage_root_text, staged)
+            staged.extend(compiled)
+            if direct:
+                assert transaction is not None
+                for _, _, destination_text, _ in compiled:
+                    transaction.record_created(destination_text)
 
         record_rows = []
         for source, destination, destination_text, _ in staged:
@@ -822,7 +827,7 @@ def install_wheels_transactionally(
     )
     installer.target_inventory = target_inventory
     direct_destination_cache = None
-    if not pycompile and not force and not existing_distributions:
+    if not force and not existing_distributions:
         direct_destination_cache = direct_batch_preflight(
             requests,
             planned_candidates,
