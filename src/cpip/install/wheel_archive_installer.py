@@ -675,6 +675,18 @@ def _remove_stage_files(stage: str, paths: set[str]) -> None:
             pass
 
 
+def _target_exceeds_entry_limit(root: str, limit: int) -> bool:
+    entries_seen = 0
+
+    for _, directories, files in os.walk(root):
+        entries_seen += len(directories) + len(files)
+
+        if entries_seen > limit:
+            return True
+
+    return False
+
+
 def install_wheels_from_archive_cache(
     requests: tuple[WheelRequest, ...],
     candidates: tuple[InstallCandidate, ...],
@@ -738,8 +750,6 @@ def install_wheels_from_archive_cache(
                 discover_installed_wheels,
                 existing_paths,
             )
-
-            clone_path(root, stage)
 
             names = {plan.candidate.canonical_name for plan in plans}
 
@@ -808,6 +818,9 @@ def install_wheels_from_archive_cache(
             if not active_plans:
                 return candidates
 
+            if len(active_plans) < 4 and _target_exceeds_entry_limit(root, 128):
+                return None
+
             for plan in active_plans:
                 destinations = destinations_by_plan.get(plan)
 
@@ -821,6 +834,8 @@ def install_wheels_from_archive_cache(
                         not in allowed_existing
                     ):
                         return None
+
+            clone_path(root, stage)
 
             staged_removals: set[str] = set()
 
