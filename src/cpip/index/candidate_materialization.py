@@ -74,6 +74,7 @@ logger = logging.getLogger(__name__)
 _EXTRA_MARKER_RE = re.compile(r"extra\s*(?:==|in)\s*['\"]([^'\"]+)['\"]")
 
 _METADATA_WORKERS = 32
+_PREPARED_SDIST_LIMIT = 8
 
 
 class _ArchiveMemberInfo(NamedTuple):
@@ -519,6 +520,11 @@ class CandidateMaterializer:
 
         self.source_hash_cache: dict[str, dict[str, str] | None] = {}
 
+        self.prepared_sdist_sources: dict[
+            str,
+            tuple[tempfile.TemporaryDirectory[str], str],
+        ] = {}
+
         self.local_artifacts: dict[str, str] = {}
 
         self.vcs_revisions: dict[str, str] = {}
@@ -651,6 +657,35 @@ class CandidateMaterializer:
         self.source_hash_cache[fingerprint] = result
 
         return dict(result)
+
+    def remember_prepared_sdist(
+        self,
+        candidate: CandidateRecord,
+        temporary: tempfile.TemporaryDirectory[str],
+        source: str,
+    ) -> None:
+        fingerprint = self.artifact_fingerprint(candidate)
+
+        previous = self.prepared_sdist_sources.pop(fingerprint, None)
+
+        if previous is not None:
+            previous[0].cleanup()
+
+        self.prepared_sdist_sources[fingerprint] = (temporary, source)
+
+        while len(self.prepared_sdist_sources) > _PREPARED_SDIST_LIMIT:
+            oldest = next(iter(self.prepared_sdist_sources))
+            expired, _ = self.prepared_sdist_sources.pop(oldest)
+            expired.cleanup()
+
+    def take_prepared_sdist(
+        self,
+        candidate: CandidateRecord,
+    ) -> tuple[tempfile.TemporaryDirectory[str], str] | None:
+        return self.prepared_sdist_sources.pop(
+            self.artifact_fingerprint(candidate),
+            None,
+        )
 
     def prepare_record(
         self,
@@ -941,11 +976,17 @@ class CandidateMaterializer:
                     ):
                         path = os.path.join(path, candidate.link.subdirectory_fragment)
 
-                    with tempfile.TemporaryDirectory(
-                        prefix="cpip-metadata-"
-                    ) as temp_dir:
+                    prepared_temporary: tempfile.TemporaryDirectory[str] | None = None
+
+                    try:
                         if candidate.link.kind is ArtifactKind.SDIST:
-                            path = unpack_source_internal(path, temp_dir)
+                            prepared_temporary = tempfile.TemporaryDirectory(
+                                prefix="cpip-metadata-",
+                            )
+                            path = unpack_source_internal(
+                                path,
+                                prepared_temporary.name,
+                            )
 
                         def remember_wheel_if_reusable(wheel_path: str) -> None:
                             if candidate.link.kind is ArtifactKind.SDIST or (
@@ -985,6 +1026,17 @@ class CandidateMaterializer:
                                 provided_extras=project_provided_extras(project),
                                 requires_python=project.requires_python,
                             )
+
+                            if prepared_temporary is not None:
+                                self.remember_prepared_sdist(
+                                    candidate,
+                                    prepared_temporary,
+                                    path,
+                                )
+                                prepared_temporary = None
+                    finally:
+                        if prepared_temporary is not None:
+                            prepared_temporary.cleanup()
                 finally:
                     if vcs_path is not None:
                         remove_temp_directory(vcs_path)
@@ -1316,6 +1368,15 @@ class CandidateMaterializer:
 
                     key = requirement.raw
 
+                    prepared_sdist = (
+                        self.take_prepared_sdist(candidate)
+                        if candidate.link.kind is ArtifactKind.SDIST
+                        else None
+                    )
+
+                    if prepared_sdist is not None:
+                        path = prepared_sdist[1]
+
                     logger.debug(
                         "build source candidate %s from %s",
                         display_name,
@@ -1325,12 +1386,16 @@ class CandidateMaterializer:
                     emit_build_message(f"Building wheel for {display_name}")
 
                     try:
-                        path = build_wheel_from_source(
-                            path,
-                            config_settings=(self.build_options or {}).get(key),
-                            build_constraints=self.build_constraints,
-                            build_isolation=self.build_isolation,
-                        )
+                        try:
+                            path = build_wheel_from_source(
+                                path,
+                                config_settings=(self.build_options or {}).get(key),
+                                build_constraints=self.build_constraints,
+                                build_isolation=self.build_isolation,
+                            )
+                        finally:
+                            if prepared_sdist is not None:
+                                prepared_sdist[0].cleanup()
 
                     except BuildError as exc:
                         emit_build_message(f"Failed to build '{display_name}'")
