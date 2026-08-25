@@ -891,6 +891,13 @@ class CandidateMaterializer:
         if prefetcher is not None:
             prefetcher.close()
 
+        prepared_sources = tuple(self.prepared_sdist_sources.values())
+
+        self.prepared_sdist_sources.clear()
+
+        for temporary, _ in prepared_sources:
+            temporary.cleanup()
+
     def metadata_loader(
         self,
         candidate: CandidateRecord,

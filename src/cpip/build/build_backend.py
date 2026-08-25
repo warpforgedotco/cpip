@@ -40,6 +40,10 @@ MINIMUM_PEP517_SETUPTOOLS = Version("40.8.0")
 PKG_RESOURCES_REMOVAL_VERSION = Version("81")
 
 
+class BuildHookMissing(BuildError):
+    """A required build backend hook is unavailable."""
+
+
 @dataclass(frozen=True)
 class BackendSpec:
     """The build backend and requirements declared by a project."""
@@ -110,8 +114,10 @@ class BackendSpec:
         for item in requires:
             try:
                 parsed_requires.append(parse_requirement(item))
-            except ValueError:
-                continue
+            except ValueError as exc:
+                raise BuildError(
+                    f"Invalid PEP 518 build requirement in {pyproject}: {item!r}",
+                ) from exc
 
         for requirement in parsed_requires:
             if canonicalize_name(requirement.name) != "setuptools":
@@ -548,7 +554,7 @@ class ProjectBuilder:
 
         except HookMissing as exc:
             if editable:
-                raise BuildError(
+                raise BuildHookMissing(
                     "Cannot build editable "
                     f"{self.source_dir} because the build backend is missing "
                     "the 'build_editable' hook",
@@ -688,16 +694,6 @@ class ProjectBuilder:
 
         if static_metadata is not None and not editable:
             return static_metadata
-
-        if (
-            not editable
-            and self.backend_spec is not None
-            and self.backend_spec.name == "cpip.build.build_backend"
-        ):
-            static_metadata = read_static_project_metadata(self.source_dir)
-
-            if static_metadata is not None:
-                return static_metadata
 
         if self.backend_spec is None:
             return ProjectMetadataReader(self.source_dir).read()
@@ -1352,30 +1348,6 @@ def read_legacy_metadata(
         )
 
     return None
-
-
-def read_static_project_metadata(
-    source_dir: str | os.PathLike[str],
-) -> ProjectMetadata | None:
-    pyproject = os.path.join(os.fspath(source_dir), "pyproject.toml")
-
-    try:
-        with open(pyproject, encoding="utf-8") as file:
-            data = loads(file.read())
-    except (OSError, ValueError):
-        return None
-
-    project = data.get("project")
-
-    if not isinstance(project, dict):
-        return None
-
-    dynamic = project.get("dynamic", ())
-
-    if dynamic:
-        return None
-
-    return ProjectMetadataReader(source_dir).read()
 
 
 def _read_legacy_requirements(path: str) -> list[str]:

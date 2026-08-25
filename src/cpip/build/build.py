@@ -49,7 +49,7 @@ def build_editable_from_source(
     build_constraints: list[str] | None = None,
     build_isolation: bool = True,
 ) -> str:
-    from .build_backend import ProjectBuilder
+    from .build_backend import BuildHookMissing, ProjectBuilder
 
     source_text = os.fspath(source)
     output_text = (
@@ -73,9 +73,7 @@ def build_editable_from_source(
                 output_text,
                 config_settings=config_settings,
             )
-        except BuildError as exc:
-            if "build_editable" not in str(exc):
-                raise
+        except BuildHookMissing as exc:
             if os.path.isfile(os.path.join(source_text, "setup.py")) and os.path.isfile(
                 os.path.join(source_text, "pyproject.toml"),
             ):
