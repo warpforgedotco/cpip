@@ -36,6 +36,12 @@ from cpip.install.build_env.venv import create_isolated_venv
 
 
 LEGACY_SETUPTOOLS_REQUIREMENT = "setuptools>=40.8.0,<82"
+MINIMUM_PEP517_SETUPTOOLS = Version("40.8.0")
+PKG_RESOURCES_REMOVAL_VERSION = Version("81")
+
+
+class BuildHookMissing(BuildError):
+    """A required build backend hook is unavailable."""
 
 
 @dataclass(frozen=True)
@@ -62,6 +68,11 @@ class BackendSpec:
             with open(pyproject, encoding="utf-8") as file:
                 data = loads(file.read())
 
+        except ValueError as exc:
+            raise BuildError(
+                f"Invalid PEP 518 build requirements in {pyproject}: {exc}",
+            ) from exc
+
         except OSError:
             try:
                 with open(setup_py, encoding="utf-8"):
@@ -82,6 +93,48 @@ class BackendSpec:
         if not isinstance(build_system, dict):
             return None
 
+        if "requires" not in build_system:
+            raise BuildError(
+                f"Invalid PEP 518 [build-system] table in {pyproject}: "
+                "mandatory `requires` key is missing",
+            )
+
+        requires = build_system.get("requires")
+
+        if not isinstance(requires, list) or not all(
+            isinstance(item, str) for item in requires
+        ):
+            raise BuildError(
+                f"Invalid PEP 518 build requirements in {pyproject}: "
+                "build-system.requires is not a list of strings",
+            )
+
+        parsed_requires = []
+
+        for item in requires:
+            try:
+                parsed_requires.append(parse_requirement(item))
+            except ValueError as exc:
+                raise BuildError(
+                    f"Invalid PEP 518 build requirement in {pyproject}: {item!r}",
+                ) from exc
+
+        for requirement in parsed_requires:
+            if canonicalize_name(requirement.name) != "setuptools":
+                continue
+
+            _, upper_bound = requirement.specifier.bounds
+
+            if upper_bound is not None and (
+                upper_bound[0] < MINIMUM_PEP517_SETUPTOOLS
+                or (upper_bound[0] == MINIMUM_PEP517_SETUPTOOLS and not upper_bound[1])
+            ):
+                raise BuildError(
+                    f"Some build dependencies for {source_text} conflict with "
+                    "PEP 517/518 supported requirements: setuptools==1.0 is "
+                    "incompatible with setuptools>=40.8.0,<82.",
+                )
+
         backend = build_system.get("build-backend", "setuptools.build_meta")
 
         if not isinstance(backend, str) or backend in {
@@ -89,13 +142,6 @@ class BackendSpec:
             "uv_build",
         }:
             return None
-
-        requires = build_system.get("requires", [])
-
-        if not isinstance(requires, list) or not all(
-            isinstance(item, str) for item in requires
-        ):
-            raise BuildError(f"Invalid build-system.requires in {pyproject}")
 
         try:
             with open(setup_py, encoding="utf-8") as file:
@@ -113,12 +159,12 @@ class BackendSpec:
             and setup_contents is not None
             and setup_uses_pkg_resources
             and not any(
-                canonicalize_name(parse_requirement(item).name) == "setuptools"
-                and not parse_requirement(item).specifier.contains(
-                    Version("81"),
+                canonicalize_name(requirement.name) == "setuptools"
+                and not requirement.specifier.contains(
+                    PKG_RESOURCES_REMOVAL_VERSION,
                     allow_prereleases=True,
                 )
-                for item in requires
+                for requirement in parsed_requires
             )
         ):
             requires.append("setuptools<82")
@@ -178,7 +224,10 @@ class BackendRunner:
         with tempfile.TemporaryDirectory(prefix="pip-build-env-") as env_dir:
             env_path = env_dir
 
-            python = create_isolated_venv(env_path).python_executable
+            python = create_isolated_venv(
+                env_path,
+                with_pip=bool(self.spec.requirements),
+            ).python_executable
 
             if self.spec.requirements:
                 constraint_args = [
@@ -505,7 +554,7 @@ class ProjectBuilder:
 
         except HookMissing as exc:
             if editable:
-                raise BuildError(
+                raise BuildHookMissing(
                     "Cannot build editable "
                     f"{self.source_dir} because the build backend is missing "
                     "the 'build_editable' hook",
@@ -925,8 +974,13 @@ class ProjectMetadataReader:
 
                     scripts = project.get("scripts", {})
 
-                    if not isinstance(scripts, dict):
-                        scripts = {}
+                    if not isinstance(scripts, dict) or not all(
+                        isinstance(key, str) and isinstance(value, str)
+                        for key, value in scripts.items()
+                    ):
+                        raise BuildError(
+                            f"Cannot build {source_dir}: project.scripts is invalid",
+                        )
 
                     summary = (
                         project.get("description")
@@ -957,21 +1011,26 @@ class ProjectMetadataReader:
 
                     optional_dependencies_raw = project.get("optional-dependencies", {})
 
+                    if not isinstance(optional_dependencies_raw, dict):
+                        raise BuildError(
+                            f"Cannot build {source_dir}: "
+                            "project.optional-dependencies is invalid",
+                        )
+
                     optional_dependencies: dict[str, tuple[str, ...]] = {}
 
-                    if isinstance(optional_dependencies_raw, dict):
-                        for extra, values in optional_dependencies_raw.items():
-                            if not isinstance(extra, str) or not isinstance(
-                                values,
-                                list,
-                            ):
-                                continue
+                    for extra, values in optional_dependencies_raw.items():
+                        if (
+                            not isinstance(extra, str)
+                            or not isinstance(values, list)
+                            or not all(isinstance(item, str) for item in values)
+                        ):
+                            raise BuildError(
+                                f"Cannot build {source_dir}: "
+                                "project.optional-dependencies is invalid",
+                            )
 
-                            items = [
-                                str(item) for item in values if isinstance(item, str)
-                            ]
-
-                            optional_dependencies[extra] = tuple(items)
+                        optional_dependencies[extra] = tuple(values)
 
                     return ProjectMetadata(
                         name=name,
@@ -980,9 +1039,8 @@ class ProjectMetadataReader:
                         requires_python=requires_python,
                         dependencies=tuple(dependencies),
                         optional_dependencies=optional_dependencies,
-                        scripts={
-                            str(key): str(value) for key, value in scripts.items()
-                        },
+                        scripts=scripts,
+                        provided_extras=frozenset(optional_dependencies),
                         license_expression=license_expression,
                         license_files=tuple(license_files_raw),
                     )

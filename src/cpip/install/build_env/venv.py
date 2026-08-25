@@ -65,7 +65,7 @@ class CreatedVenv:
     python_executable: str
 
 
-def create_isolated_venv(env_path: str) -> CreatedVenv:
+def create_isolated_venv(env_path: str, *, with_pip: bool = True) -> CreatedVenv:
     """Create a fresh virtualenv (or stdlib ``venv`` fallback) at ``env_path``.
 
     Used by ``BackendRunner.caller()`` in ``build.build_backend`` (the
@@ -92,20 +92,21 @@ def create_isolated_venv(env_path: str) -> CreatedVenv:
                 for key, value in os.environ.items()
                 if not key.startswith("CPIP_") and key != "PYTHONPATH"
             }
-            subprocess.run(
-                [
-                    context.env_exec_cmd,
-                    "-m",
-                    "ensurepip",
-                    "--upgrade",
-                    "--default-pip",
-                ],
-                check=True,
-                cwd=env_path,
-                env=bootstrap_environment,
-                capture_output=True,
-                text=True,
-            )
+            if with_pip:
+                subprocess.run(
+                    [
+                        context.env_exec_cmd,
+                        "-m",
+                        "ensurepip",
+                        "--upgrade",
+                        "--default-pip",
+                    ],
+                    check=True,
+                    cwd=env_path,
+                    env=bootstrap_environment,
+                    capture_output=True,
+                    text=True,
+                )
         except (OSError, subprocess.CalledProcessError) as e:
             detail = str(e)
             if isinstance(e, subprocess.CalledProcessError):
@@ -115,7 +116,10 @@ def create_isolated_venv(env_path: str) -> CreatedVenv:
             raise VenvCreationError(detail)
     else:
         try:
-            virtualenv.cli_run([env_path, "--no-download", "--clear"])
+            arguments = [env_path, "--no-download", "--clear"]
+            if not with_pip:
+                arguments.append("--no-seed")
+            virtualenv.cli_run(arguments)
         except (OSError, RuntimeError) as e:
             raise VenvCreationError(str(e))
 

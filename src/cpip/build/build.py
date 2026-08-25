@@ -49,7 +49,7 @@ def build_editable_from_source(
     build_constraints: list[str] | None = None,
     build_isolation: bool = True,
 ) -> str:
-    from .build_backend import ProjectBuilder
+    from .build_backend import BuildHookMissing, ProjectBuilder
 
     source_text = os.fspath(source)
     output_text = (
@@ -69,15 +69,11 @@ def build_editable_from_source(
             build_isolation=build_isolation,
         )
         try:
-            editable_metadata = not (
-                builder.backend_spec is not None
-                and builder.backend_spec.name.startswith("setuptools.build_meta")
-                and builder.backend_spec.setup_py_present
+            wheel_name = builder.build_editable(
+                output_text,
+                config_settings=config_settings,
             )
-            builder.prepare_metadata(editable=editable_metadata)
-        except BuildError as exc:
-            if "build_editable" not in str(exc):
-                raise
+        except BuildHookMissing as exc:
             if os.path.isfile(os.path.join(source_text, "setup.py")) and os.path.isfile(
                 os.path.join(source_text, "pyproject.toml"),
             ):
@@ -91,9 +87,6 @@ def build_editable_from_source(
             raise BuildError(
                 f"Build backend for {source_text} is missing the 'build_editable' hook",
             ) from exc
-        wheel_name = builder.build_editable(
-            output_text, config_settings=config_settings
-        )
     wheel_path = os.path.join(output_text, wheel_name)
     if not os.path.isfile(wheel_path):
         raise BuildError(f"Build backend did not create expected wheel: {wheel_name}")

@@ -27,7 +27,6 @@ from cpip.core.packaging import (
 )
 from cpip.core.versions import Version, ZERO_VERSION
 from cpip.core.temp_dir import remove_temp_directory
-from cpip.core.urls import path_to_url
 from cpip.core.wheel import (
     LazyWheelLayout,
     WheelCandidate,
@@ -75,6 +74,7 @@ logger = logging.getLogger(__name__)
 _EXTRA_MARKER_RE = re.compile(r"extra\s*(?:==|in)\s*['\"]([^'\"]+)['\"]")
 
 _METADATA_WORKERS = 32
+_PREPARED_SDIST_LIMIT = 8
 
 
 class _ArchiveMemberInfo(NamedTuple):
@@ -520,6 +520,11 @@ class CandidateMaterializer:
 
         self.source_hash_cache: dict[str, dict[str, str] | None] = {}
 
+        self.prepared_sdist_sources: dict[
+            str,
+            tuple[tempfile.TemporaryDirectory[str], str],
+        ] = {}
+
         self.local_artifacts: dict[str, str] = {}
 
         self.vcs_revisions: dict[str, str] = {}
@@ -652,6 +657,35 @@ class CandidateMaterializer:
         self.source_hash_cache[fingerprint] = result
 
         return dict(result)
+
+    def remember_prepared_sdist(
+        self,
+        candidate: CandidateRecord,
+        temporary: tempfile.TemporaryDirectory[str],
+        source: str,
+    ) -> None:
+        fingerprint = self.artifact_fingerprint(candidate)
+
+        previous = self.prepared_sdist_sources.pop(fingerprint, None)
+
+        if previous is not None:
+            previous[0].cleanup()
+
+        self.prepared_sdist_sources[fingerprint] = (temporary, source)
+
+        while len(self.prepared_sdist_sources) > _PREPARED_SDIST_LIMIT:
+            oldest = next(iter(self.prepared_sdist_sources))
+            expired, _ = self.prepared_sdist_sources.pop(oldest)
+            expired.cleanup()
+
+    def take_prepared_sdist(
+        self,
+        candidate: CandidateRecord,
+    ) -> tuple[tempfile.TemporaryDirectory[str], str] | None:
+        return self.prepared_sdist_sources.pop(
+            self.artifact_fingerprint(candidate),
+            None,
+        )
 
     def prepare_record(
         self,
@@ -857,6 +891,13 @@ class CandidateMaterializer:
         if prefetcher is not None:
             prefetcher.close()
 
+        prepared_sources = tuple(self.prepared_sdist_sources.values())
+
+        self.prepared_sdist_sources.clear()
+
+        for temporary, _ in prepared_sources:
+            temporary.cleanup()
+
     def metadata_loader(
         self,
         candidate: CandidateRecord,
@@ -942,13 +983,17 @@ class CandidateMaterializer:
                     ):
                         path = os.path.join(path, candidate.link.subdirectory_fragment)
 
-                    with tempfile.TemporaryDirectory(
-                        prefix="cpip-metadata-"
-                    ) as temp_dir:
-                        if candidate.link.kind is ArtifactKind.SDIST:
-                            path = unpack_source_internal(path, temp_dir)
+                    prepared_temporary: tempfile.TemporaryDirectory[str] | None = None
 
-                        validate_build_requirements(path)
+                    try:
+                        if candidate.link.kind is ArtifactKind.SDIST:
+                            prepared_temporary = tempfile.TemporaryDirectory(
+                                prefix="cpip-metadata-",
+                            )
+                            path = unpack_source_internal(
+                                path,
+                                prepared_temporary.name,
+                            )
 
                         def remember_wheel_if_reusable(wheel_path: str) -> None:
                             if candidate.link.kind is ArtifactKind.SDIST or (
@@ -988,6 +1033,17 @@ class CandidateMaterializer:
                                 provided_extras=project_provided_extras(project),
                                 requires_python=project.requires_python,
                             )
+
+                            if prepared_temporary is not None:
+                                self.remember_prepared_sdist(
+                                    candidate,
+                                    prepared_temporary,
+                                    path,
+                                )
+                                prepared_temporary = None
+                    finally:
+                        if prepared_temporary is not None:
+                            prepared_temporary.cleanup()
                 finally:
                     if vcs_path is not None:
                         remove_temp_directory(vcs_path)
@@ -1317,9 +1373,16 @@ class CandidateMaterializer:
                 else:
                     emit_build_message("Preparing build dependencies")
 
-                    validate_build_requirements(path)
-
                     key = requirement.raw
+
+                    prepared_sdist = (
+                        self.take_prepared_sdist(candidate)
+                        if candidate.link.kind is ArtifactKind.SDIST
+                        else None
+                    )
+
+                    if prepared_sdist is not None:
+                        path = prepared_sdist[1]
 
                     logger.debug(
                         "build source candidate %s from %s",
@@ -1330,12 +1393,16 @@ class CandidateMaterializer:
                     emit_build_message(f"Building wheel for {display_name}")
 
                     try:
-                        path = build_wheel_from_source(
-                            path,
-                            config_settings=(self.build_options or {}).get(key),
-                            build_constraints=self.build_constraints,
-                            build_isolation=self.build_isolation,
-                        )
+                        try:
+                            path = build_wheel_from_source(
+                                path,
+                                config_settings=(self.build_options or {}).get(key),
+                                build_constraints=self.build_constraints,
+                                build_isolation=self.build_isolation,
+                            )
+                        finally:
+                            if prepared_sdist is not None:
+                                prepared_sdist[0].cleanup()
 
                     except BuildError as exc:
                         emit_build_message(f"Failed to build '{display_name}'")
@@ -1501,70 +1568,6 @@ class CandidateMaterializer:
 
 
 def validate_build_requirements(source: str | os.PathLike[str]) -> None:
-    pyproject = os.path.join(os.fspath(source), "pyproject.toml")
+    from cpip.build.build_backend import BackendSpec
 
-    try:
-        with open(pyproject, encoding="utf-8") as file:
-            contents = file.read()
-
-    except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
-        return
-
-    try:
-        from tomllib import TOMLDecodeError, loads
-
-    except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
-        from cpip._vendor.tomli import TOMLDecodeError, loads
-
-    try:
-        data = loads(contents)
-
-    except TOMLDecodeError as exc:
-        raise BuildError(
-            f"Invalid PEP 518 build requirements in {pyproject}: {exc}",
-        ) from exc
-
-    if "build-system" not in data:
-        return
-
-    build_system = data["build-system"]
-
-    if not isinstance(build_system, dict):
-        raise BuildError(
-            f"Invalid PEP 518 [build-system] table in {pyproject}: mandatory `requires` key is missing",
-        )
-
-    if "requires" not in build_system:
-        raise BuildError(
-            f"Invalid PEP 518 [build-system] table in {pyproject}: mandatory `requires` key is missing",
-        )
-
-    requires = build_system.get("requires")
-
-    if not isinstance(requires, list) or not all(
-        isinstance(item, str) for item in requires
-    ):
-        raise BuildError(
-            f"Invalid PEP 518 build requirements in {pyproject}: build-system.requires is not a list of strings",
-        )
-
-    for item in requires:
-        try:
-            req = parse_requirement(item)
-
-        except ValueError:
-            continue
-
-        if canonicalize_name(req.name) == "setuptools":
-            minimum = Version("40.8.0")
-
-            _, upper_bound = req.specifier.bounds
-
-            if upper_bound is not None and (
-                upper_bound[0] < minimum
-                or (upper_bound[0] == minimum and not upper_bound[1])
-            ):
-                raise BuildError(
-                    f"Some build dependencies for {path_to_url(os.path.abspath(os.fspath(source)))} conflict with PEP 517/518 supported requirements: "
-                    "setuptools==1.0 is incompatible with setuptools>=40.8.0,<82.",
-                )
+    BackendSpec.from_project(source)
