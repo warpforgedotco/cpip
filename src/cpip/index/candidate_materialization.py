@@ -27,7 +27,6 @@ from cpip.core.packaging import (
 )
 from cpip.core.versions import Version, ZERO_VERSION
 from cpip.core.temp_dir import remove_temp_directory
-from cpip.core.urls import path_to_url
 from cpip.core.wheel import (
     LazyWheelLayout,
     WheelCandidate,
@@ -948,8 +947,6 @@ class CandidateMaterializer:
                         if candidate.link.kind is ArtifactKind.SDIST:
                             path = unpack_source_internal(path, temp_dir)
 
-                        validate_build_requirements(path)
-
                         def remember_wheel_if_reusable(wheel_path: str) -> None:
                             if candidate.link.kind is ArtifactKind.SDIST or (
                                 candidate.link.kind is ArtifactKind.SOURCE_TREE
@@ -1317,8 +1314,6 @@ class CandidateMaterializer:
                 else:
                     emit_build_message("Preparing build dependencies")
 
-                    validate_build_requirements(path)
-
                     key = requirement.raw
 
                     logger.debug(
@@ -1501,70 +1496,6 @@ class CandidateMaterializer:
 
 
 def validate_build_requirements(source: str | os.PathLike[str]) -> None:
-    pyproject = os.path.join(os.fspath(source), "pyproject.toml")
+    from cpip.build.build_backend import BackendSpec
 
-    try:
-        with open(pyproject, encoding="utf-8") as file:
-            contents = file.read()
-
-    except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
-        return
-
-    try:
-        from tomllib import TOMLDecodeError, loads
-
-    except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
-        from cpip._vendor.tomli import TOMLDecodeError, loads
-
-    try:
-        data = loads(contents)
-
-    except TOMLDecodeError as exc:
-        raise BuildError(
-            f"Invalid PEP 518 build requirements in {pyproject}: {exc}",
-        ) from exc
-
-    if "build-system" not in data:
-        return
-
-    build_system = data["build-system"]
-
-    if not isinstance(build_system, dict):
-        raise BuildError(
-            f"Invalid PEP 518 [build-system] table in {pyproject}: mandatory `requires` key is missing",
-        )
-
-    if "requires" not in build_system:
-        raise BuildError(
-            f"Invalid PEP 518 [build-system] table in {pyproject}: mandatory `requires` key is missing",
-        )
-
-    requires = build_system.get("requires")
-
-    if not isinstance(requires, list) or not all(
-        isinstance(item, str) for item in requires
-    ):
-        raise BuildError(
-            f"Invalid PEP 518 build requirements in {pyproject}: build-system.requires is not a list of strings",
-        )
-
-    for item in requires:
-        try:
-            req = parse_requirement(item)
-
-        except ValueError:
-            continue
-
-        if canonicalize_name(req.name) == "setuptools":
-            minimum = Version("40.8.0")
-
-            _, upper_bound = req.specifier.bounds
-
-            if upper_bound is not None and (
-                upper_bound[0] < minimum
-                or (upper_bound[0] == minimum and not upper_bound[1])
-            ):
-                raise BuildError(
-                    f"Some build dependencies for {path_to_url(os.path.abspath(os.fspath(source)))} conflict with PEP 517/518 supported requirements: "
-                    "setuptools==1.0 is incompatible with setuptools>=40.8.0,<82.",
-                )
+    BackendSpec.from_project(source)

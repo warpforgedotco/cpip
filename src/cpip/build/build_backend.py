@@ -36,6 +36,8 @@ from cpip.install.build_env.venv import create_isolated_venv
 
 
 LEGACY_SETUPTOOLS_REQUIREMENT = "setuptools>=40.8.0,<82"
+MINIMUM_PEP517_SETUPTOOLS = Version("40.8.0")
+PKG_RESOURCES_REMOVAL_VERSION = Version("81")
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,11 @@ class BackendSpec:
             with open(pyproject, encoding="utf-8") as file:
                 data = loads(file.read())
 
+        except ValueError as exc:
+            raise BuildError(
+                f"Invalid PEP 518 build requirements in {pyproject}: {exc}",
+            ) from exc
+
         except OSError:
             try:
                 with open(setup_py, encoding="utf-8"):
@@ -82,6 +89,46 @@ class BackendSpec:
         if not isinstance(build_system, dict):
             return None
 
+        if "requires" not in build_system:
+            raise BuildError(
+                f"Invalid PEP 518 [build-system] table in {pyproject}: "
+                "mandatory `requires` key is missing",
+            )
+
+        requires = build_system.get("requires")
+
+        if not isinstance(requires, list) or not all(
+            isinstance(item, str) for item in requires
+        ):
+            raise BuildError(
+                f"Invalid PEP 518 build requirements in {pyproject}: "
+                "build-system.requires is not a list of strings",
+            )
+
+        parsed_requires = []
+
+        for item in requires:
+            try:
+                parsed_requires.append(parse_requirement(item))
+            except ValueError:
+                continue
+
+        for requirement in parsed_requires:
+            if canonicalize_name(requirement.name) != "setuptools":
+                continue
+
+            _, upper_bound = requirement.specifier.bounds
+
+            if upper_bound is not None and (
+                upper_bound[0] < MINIMUM_PEP517_SETUPTOOLS
+                or (upper_bound[0] == MINIMUM_PEP517_SETUPTOOLS and not upper_bound[1])
+            ):
+                raise BuildError(
+                    f"Some build dependencies for {source_text} conflict with "
+                    "PEP 517/518 supported requirements: setuptools==1.0 is "
+                    "incompatible with setuptools>=40.8.0,<82.",
+                )
+
         backend = build_system.get("build-backend", "setuptools.build_meta")
 
         if not isinstance(backend, str) or backend in {
@@ -89,13 +136,6 @@ class BackendSpec:
             "uv_build",
         }:
             return None
-
-        requires = build_system.get("requires", [])
-
-        if not isinstance(requires, list) or not all(
-            isinstance(item, str) for item in requires
-        ):
-            raise BuildError(f"Invalid build-system.requires in {pyproject}")
 
         try:
             with open(setup_py, encoding="utf-8") as file:
@@ -113,12 +153,12 @@ class BackendSpec:
             and setup_contents is not None
             and setup_uses_pkg_resources
             and not any(
-                canonicalize_name(parse_requirement(item).name) == "setuptools"
-                and not parse_requirement(item).specifier.contains(
-                    Version("81"),
+                canonicalize_name(requirement.name) == "setuptools"
+                and not requirement.specifier.contains(
+                    PKG_RESOURCES_REMOVAL_VERSION,
                     allow_prereleases=True,
                 )
-                for item in requires
+                for requirement in parsed_requires
             )
         ):
             requires.append("setuptools<82")
