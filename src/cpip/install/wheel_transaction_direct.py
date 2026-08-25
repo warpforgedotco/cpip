@@ -59,6 +59,8 @@ def direct_batch_preflight(
             for raw_member in raw_members  # ty:ignore[not-iterable]
             if not raw_member[0].endswith("/")
         )
+    # Small batches are cheaper to stage. Direct installation pays off once
+    # either the buffered content or per-member filesystem work grows large.
     if (
         total_size <= DIRECT_CONTENT_BATCH_LIMIT
         and member_count <= DIRECT_MEMBER_BATCH_THRESHOLD
