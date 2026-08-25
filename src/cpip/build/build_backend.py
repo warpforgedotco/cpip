@@ -178,7 +178,10 @@ class BackendRunner:
         with tempfile.TemporaryDirectory(prefix="pip-build-env-") as env_dir:
             env_path = env_dir
 
-            python = create_isolated_venv(env_path).python_executable
+            python = create_isolated_venv(
+                env_path,
+                with_pip=bool(self.spec.requirements),
+            ).python_executable
 
             if self.spec.requirements:
                 constraint_args = [
@@ -646,6 +649,12 @@ class ProjectBuilder:
         if static_metadata is not None and not editable:
             return static_metadata
 
+        if not editable:
+            static_metadata = read_static_project_metadata(self.source_dir)
+
+            if static_metadata is not None:
+                return static_metadata
+
         if self.backend_spec is None:
             return ProjectMetadataReader(self.source_dir).read()
 
@@ -983,6 +992,7 @@ class ProjectMetadataReader:
                         scripts={
                             str(key): str(value) for key, value in scripts.items()
                         },
+                        provided_extras=frozenset(optional_dependencies),
                         license_expression=license_expression,
                         license_files=tuple(license_files_raw),
                     )
@@ -1290,6 +1300,30 @@ def read_legacy_metadata(
         )
 
     return None
+
+
+def read_static_project_metadata(
+    source_dir: str | os.PathLike[str],
+) -> ProjectMetadata | None:
+    pyproject = os.path.join(os.fspath(source_dir), "pyproject.toml")
+
+    try:
+        with open(pyproject, encoding="utf-8") as file:
+            data = loads(file.read())
+    except (OSError, ValueError):
+        return None
+
+    project = data.get("project")
+
+    if not isinstance(project, dict):
+        return None
+
+    dynamic = project.get("dynamic", ())
+
+    if dynamic:
+        return None
+
+    return ProjectMetadataReader(source_dir).read()
 
 
 def _read_legacy_requirements(path: str) -> list[str]:
