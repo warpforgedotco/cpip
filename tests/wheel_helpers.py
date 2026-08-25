@@ -1,4 +1,18 @@
+"""Shared sdist/wheel construction helpers for tests.
+
+Consolidated from what were three near-identical copies
+(tests/cli/functional/wheel_helpers.py, tests/index/wheel_helpers.py,
+tests/resolution/wheel_helpers.py) that had drifted via independent small
+feature additions: wheel_version and a standalone (non-cpip) fake PEP 517
+backend, both needed by tests/index/'s tests; an unused provides_extra
+parameter and an entirely unused copy in tests/resolution/ -- nothing
+imported it, tests/resolution/test_forward_check.py gets make_wheel from
+tests/benchmarks/benchmark_support.py instead via a sys.path insert.
+provides_extra wasn't carried forward here since nothing calls it.
+"""
+
 from __future__ import annotations
+
 import base64
 import hashlib
 import tarfile
