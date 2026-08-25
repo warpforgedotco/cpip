@@ -649,7 +649,11 @@ class ProjectBuilder:
         if static_metadata is not None and not editable:
             return static_metadata
 
-        if not editable:
+        if (
+            not editable
+            and self.backend_spec is not None
+            and self.backend_spec.name == "cpip.build.build_backend"
+        ):
             static_metadata = read_static_project_metadata(self.source_dir)
 
             if static_metadata is not None:
