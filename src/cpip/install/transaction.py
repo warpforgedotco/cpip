@@ -84,7 +84,7 @@ class InstallTransaction:
         self.backups: list[tuple[str, str]] = []
         self.created_internal: list[str] = []
         self.destination_presence: dict[str, bool] = {}
-        self.temporary_internal = tempfile.mkdtemp(prefix="cpip-install-stage-")
+        self.temporary_internal: str | None = None
         self.finished = False
 
     def add(
@@ -304,6 +304,8 @@ class InstallTransaction:
                 return
         elif not os.path.lexists(path_text):
             return
+        if self.temporary_internal is None:
+            self.temporary_internal = tempfile.mkdtemp(prefix="cpip-install-stage-")
         backup = os.path.join(self.temporary_internal, str(len(self.backups)))
         os.makedirs(os.path.dirname(backup), exist_ok=True)
         shutil.move(path_text, backup)
@@ -319,7 +321,8 @@ class InstallTransaction:
             current = os.path.dirname(current)
 
     def finish_successfully(self) -> None:
-        shutil.rmtree(self.temporary_internal, ignore_errors=True)
+        if self.temporary_internal is not None:
+            shutil.rmtree(self.temporary_internal, ignore_errors=True)
         self.finished = True
 
     def __enter__(self) -> InstallTransaction:

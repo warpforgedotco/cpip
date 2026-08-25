@@ -7,6 +7,7 @@ import pytest
 import cpip.resolution.nab_provider
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
+from cpip.index.provider import CandidateProvider
 from cpip.resolution.models import ResolutionConfig
 from cpip.resolution.nab_provider import NabProvider
 
@@ -62,6 +63,32 @@ class FakeProvider:
         return (self.candidates[(requirement.name, next(iter(allowed_versions)))],)
 
 
+class IndexedFakeProvider(CandidateProvider):
+    def __init__(self) -> None:
+        self.candidate = SimpleNamespace(
+            name="app",
+            canonical_name="app",
+            version=Version("1"),
+            dependencies=(),
+            source_url="file:///app.whl",
+            source_kind="wheel",
+        )
+        self.release_calls = 0
+
+    def available_versions(self, requirement):
+        return (SimpleNamespace(version=Version("1")),)
+
+    def find_candidates(self, requirement, *, allowed_versions):
+        raise AssertionError("indexed releases should not rescan the catalog")
+
+    def release_candidates(self, requirement, version):
+        self.release_calls += 1
+        return (self.candidate,)
+
+    def get_materializer_internal(self):
+        return SimpleNamespace(materialize=lambda requirement, records: records)
+
+
 def test_constraints_are_indexed_once(monkeypatch: pytest.MonkeyPatch) -> None:
     marker_calls = 0
     marker_applies = cpip.resolution.nab_provider.marker_applies
@@ -87,6 +114,16 @@ def test_constraints_are_indexed_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert adapter._constraint_for("dep[extra]") == (parse_requirement("dep==1"),)
     assert adapter._constraint_for("unrelated") == ()
     assert marker_calls == 2
+
+
+def test_selected_release_materializes_without_catalog_rescan() -> None:
+    provider = IndexedFakeProvider()
+    adapter = NabProvider(provider, ResolutionConfig())
+
+    package, version_range = adapter.add_root(parse_requirement("app"))
+
+    assert adapter.choose_version(package, version_range) == Version("1")
+    assert provider.release_calls == 1
 
 
 def test_constraints_apply_to_transitive_dependencies() -> None:

@@ -320,11 +320,7 @@ class NabProvider:
         if installed is not None and selected == installed.version:
             self.records[(package, selected)] = installed
             return selected
-        candidates = tuple(
-            self.provider.find_candidates(
-                candidate_requirement, allowed_versions=frozenset({selected})
-            )
-        )
+        candidates = self._candidates_for_version(candidate_requirement, selected)
         if not candidates and requirement.url is None:
             candidates = tuple(
                 self.provider.find_candidates(
@@ -398,6 +394,34 @@ class NabProvider:
 
         self.records[(package, selected)] = candidate
         return selected
+
+    def _candidates_for_version(
+        self,
+        requirement: Requirement,
+        version: Version,
+    ) -> tuple[WheelCandidate, ...]:
+        """Materialize one release without rescanning the package catalog."""
+        if isinstance(self.provider, CandidateProvider):
+            cached = self._catalog_candidate_cache.get(
+                (requirement.canonical_name, version),
+                _MISSING,
+            )
+            if not requirement.extras and isinstance(cached, WheelCandidate):
+                return (cached,)
+            records = self.provider.release_candidates(requirement, version)
+            if records is not None:
+                return tuple(
+                    self.provider.get_materializer_internal().materialize(
+                        requirement,
+                        records,
+                    )
+                )
+        return tuple(
+            self.provider.find_candidates(
+                requirement,
+                allowed_versions=frozenset({version}),
+            )
+        )
 
     def _newest_viable(self, package: str, matching: list[Version]) -> Version:
         """Pick the newest version whose exact pins are not already impossible.

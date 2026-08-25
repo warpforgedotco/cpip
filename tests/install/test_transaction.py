@@ -372,6 +372,22 @@ def test_validate_propagates_permission_errors(
         install_transaction.validate()
 
 
+def test_fresh_transaction_does_not_allocate_backup_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_backup_directory(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("fresh transaction should not need backup storage")
+
+    monkeypatch.setattr(transaction.tempfile, "mkdtemp", unexpected_backup_directory)
+    install_transaction = InstallTransaction()
+    install_transaction.add_contents(str(tmp_path / "demo.py"), b"payload")
+
+    install_transaction.commit()
+
+    assert (tmp_path / "demo.py").read_bytes() == b"payload"
+
+
 def test_validate_treats_file_parent_component_as_absent(tmp_path: Path) -> None:
     """A destination whose parent path component is a regular file lstats
     to ENOTDIR -- nothing installable exists there, matching the old
