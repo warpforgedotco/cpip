@@ -186,3 +186,16 @@ def test_decision_snapshot_tracks_later_derivations() -> None:
         3,
         3,
     ]
+
+
+def test_snapshot_truthiness_stays_pinned() -> None:
+    solution: PartialSolution[str, int] = PartialSolution()
+    empty_decisions = solution.decisions()
+
+    solution.decide("alpha", 3)
+    active_decisions = solution.decisions()
+    solution.backtrack(0)
+
+    assert not empty_decisions
+    assert active_decisions
+    assert not solution.decisions()

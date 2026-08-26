@@ -195,7 +195,7 @@ index c771106..22c8e81 100644
 +    _register_fallback_parent(resolver, existing_pkg.package, existing_index)
      return True
 diff --git a/src/cpip/_vendor/nab_resolver/partial_solution.py b/src/cpip/_vendor/nab_resolver/partial_solution.py
-index 5e2e9aa..023829b 100644
+index 5e2e9aa..c66d312 100644
 --- a/src/cpip/_vendor/nab_resolver/partial_solution.py
 +++ b/src/cpip/_vendor/nab_resolver/partial_solution.py
 @@ -16,7 +16,6 @@ from __future__ import annotations
@@ -206,7 +206,23 @@ index 5e2e9aa..023829b 100644
  from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast, overload
  from weakref import ref
  
-@@ -164,10 +163,24 @@ def _detach_snapshots(
+@@ -139,6 +138,15 @@ class _Snapshot(Mapping[PackageType, _ValueType]):
+     def __len__(self) -> int:
+         return sum(1 for _ in self)
+ 
++    def __bool__(self) -> bool:
++        """Test the common untouched snapshot in constant time."""
++        shadow = self._shadow
++        if not shadow:
++            return bool(self._live)
++        if any(value is not _ABSENT for value in shadow.values()):
++            return True
++        return any(package not in shadow for package in self._live)
++
+ 
+ def _take_snapshot(
+     live: dict[PackageType, _ValueType],
+@@ -164,10 +172,24 @@ def _detach_snapshots(
              snapshot.detach()
  
  
@@ -232,7 +248,7 @@ index 5e2e9aa..023829b 100644
      package: PackageType
      """Which package this assignment constrains."""
  
-@@ -180,24 +193,99 @@ class Assignment(Generic[PackageType, VersionType]):
+@@ -180,24 +202,99 @@ class Assignment(Generic[PackageType, VersionType]):
      is_decision: bool
      """True if this is a version choice; False if derived by propagation."""
  
@@ -338,7 +354,7 @@ index 5e2e9aa..023829b 100644
  
  class PartialSolution(Generic[PackageType, VersionType]):
      """Tracks the resolver's current partial solution as a decision trail.
-@@ -289,7 +377,9 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -289,7 +386,9 @@ class PartialSolution(Generic[PackageType, VersionType]):
          """
          cached = self._effective_range_cache.get(package, _UNSET)
          if cached is not _UNSET:
@@ -349,7 +365,7 @@ index 5e2e9aa..023829b 100644
  
          positive = self._positive_ranges.get(package)
          negative = self._negative_ranges.get(package)
-@@ -340,6 +430,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -340,6 +439,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
              positive=True,
              cum_positive=exact_range,
              cum_negative=self._negative_ranges.get(package),
@@ -357,7 +373,7 @@ index 5e2e9aa..023829b 100644
          )
          self._assignments.append(assignment)
          self._assignments_by_package[package].append(assignment)
-@@ -386,6 +477,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -386,6 +486,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
              positive=positive,
              cum_positive=self._positive_ranges.get(package),
              cum_negative=self._negative_ranges.get(package),
@@ -365,7 +381,7 @@ index 5e2e9aa..023829b 100644
          )
          self._assignments.append(assignment)
          self._assignments_by_package[package].append(assignment)
-@@ -406,20 +498,22 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -406,20 +507,22 @@ class PartialSolution(Generic[PackageType, VersionType]):
          # Trail levels never decrease, so this pops exactly the assignments above
          # target_level; every other package keeps the positive and negative ranges
          # its cached effective range was derived from.
@@ -391,7 +407,7 @@ index 5e2e9aa..023829b 100644
                  self._positive_ranges.pop(package, None)
                  self._negative_ranges.pop(package, None)
                  self._decided_versions.pop(package, None)
-@@ -427,9 +521,6 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -427,9 +530,6 @@ class PartialSolution(Generic[PackageType, VersionType]):
              else:
                  self._update_package_state_after_backtrack(package, entries)
  
@@ -401,7 +417,7 @@ index 5e2e9aa..023829b 100644
      def _update_package_state_after_backtrack(
          self,
          package: PackageType,
-@@ -442,18 +533,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -442,18 +542,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
          never decrease, so popping a decision pops every later entry for the
          same package; a surviving decision is always the current one.
          """
@@ -424,7 +440,7 @@ index 5e2e9aa..023829b 100644
  
          if last_pos is None:
              self._positive_ranges.pop(package, None)
-@@ -482,6 +565,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -482,6 +574,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
          """
          return _take_snapshot(self._decided_versions, self._decision_snapshots)
  
@@ -435,7 +451,7 @@ index 5e2e9aa..023829b 100644
      def _freeze_decisions(self, package: PackageType) -> None:
          """Preserve the package's decided version in outstanding snapshots."""
          for holder in self._decision_snapshots:
-@@ -546,13 +633,16 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -546,13 +642,16 @@ class PartialSolution(Generic[PackageType, VersionType]):
          if is_positive and cum_positive is None:
              return False
  
