@@ -58,7 +58,7 @@ from cpip.index.source_models import (
 )
 from cpip.index.vcs import git_revision, is_immutable_vcs_link
 from cpip.index.vcs import vcs_scheme
-from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
+from cpip.core.archive import WheelArchive, WheelhouseUnavailable
 
 TYPE_CHECKING = False
 

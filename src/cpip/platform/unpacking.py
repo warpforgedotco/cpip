@@ -13,7 +13,7 @@ from zipfile import ZipInfo
 
 from cpip.core.errors import InstallationError
 from cpip.core.utils import ensure_dir
-from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
+from cpip.core.archive import WheelArchive, WheelhouseUnavailable
 from cpip.platform.tar_reader import fast_untar
 
 TYPE_CHECKING = False

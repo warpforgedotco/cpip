@@ -817,7 +817,7 @@ def wheel_metadata(
 
             return list(dependencies), pure
 
-    from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
+    from cpip.core.archive import WheelArchive, WheelhouseUnavailable
 
     try:
         with open(path, "rb") as wheel_file:
@@ -1041,7 +1041,7 @@ def install_resolved_pure_wheels(
     """Install an already-resolved pure-wheel plan into an empty target."""
 
     from cpip.install.wheel_archive import mode_from_external_attr
-    from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
+    from cpip.core.archive import WheelArchive, WheelhouseUnavailable
 
     target = os.path.abspath(target)
 

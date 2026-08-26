@@ -192,8 +192,8 @@ Invariants:
 
 | Package | Owns | Must not own |
 | --- | --- | --- |
-| `core` | value types, packaging rules, hashes, URLs, wheels, cache primitives | command policy |
-| `platform` | config locations, install schemes, cloning, secure archive extraction, host behavior | selection policy |
+| `core` | value types, packaging rules, hashes, URLs, wheels, archive reading, cache primitives | command policy |
+| `platform` | config locations, install schemes, cloning, secure archive extraction, host behavior | archive reading, selection policy |
 | `build` | backend hooks, metadata generation, build isolation | resolver decisions |
 | `index` | sources, links, catalogs, discovery, artifact localization, materialization | backtracking, installation |
 | `network` | sessions, auth, HTTP transport, HTTP cache | resolver state |

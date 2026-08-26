@@ -1,4 +1,11 @@
-"""Low-level wheel archive reading shared by platform-facing workflows."""
+"""Low-level wheel archive reading.
+
+A ``struct`` and ``zlib`` reader over the zip container, with no first-party
+dependencies and nothing host-specific in it. It lives in ``core`` because
+every layer above reads wheels -- ``index`` to pull metadata out of a
+candidate, ``install`` to clone one into a target, ``cli`` on the fast path --
+and ``core`` is the only package all of them may import.
+"""
 
 from __future__ import annotations
 
