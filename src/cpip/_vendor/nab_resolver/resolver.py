@@ -521,8 +521,6 @@ class Resolver(Generic[PackageType, VersionType]):
         )
 
         dependencies = self.provider.get_dependencies(next_package, chosen_version)
-        if not dependencies:
-            return next_package
         exact_range = self.range_type.singleton(chosen_version)
         widened = self.provider.widen_decision(next_package, chosen_version)
         parent_range = exact_range if widened is None else widened
@@ -551,7 +549,43 @@ class Resolver(Generic[PackageType, VersionType]):
                 decide.absorb_redundant_requirement(
                     self, dependency_package, dependency_range, incompatibility
                 )
+        invalidated = self._backtrack_dependency_invalidations()
+        if invalidated is not None:
+            return invalidated
         return next_package
+
+    def _backtrack_dependency_invalidations(self) -> Any | None:
+        """Revisit decisions whose dependency features expanded after selection."""
+        consume = getattr(self.provider, "consume_dependency_invalidations", None)
+        if consume is None:
+            return None
+
+        decisions = self.solution.decisions()
+        earliest: tuple[int, Any] | None = None
+        for package in consume():
+            if package not in decisions:
+                continue
+            decision = next(
+                (
+                    assignment
+                    for assignment in self.solution.assignments_for(package)
+                    if assignment.is_decision
+                ),
+                None,
+            )
+            if decision is None or decision.decision_level <= 1:
+                continue
+            candidate = (decision.decision_level, package)
+            if earliest is None or candidate[0] < earliest[0]:
+                earliest = candidate
+
+        if earliest is None:
+            return None
+
+        self.solution.backtrack(earliest[0] - 1)
+        self.priority_keys.clear()
+        self.relation_cache.clear()
+        return earliest[1]
 
     def _build_result(self) -> dict[PackageType, VersionType]:
         """Build the final result, including only reachable packages.

@@ -70,6 +70,8 @@ class NabProvider:
         self._dependency_cache: dict[
             tuple[str, Version, tuple[str, ...]], Mapping[str, Range[Version]]
         ] = {}
+        self._active_decisions: dict[str, Version] = {}
+        self._dependency_invalidations: dict[str, None] = {}
         constraints_by_name: dict[str, list[Requirement]] = {}
         for value in self.constraints:
             requirement = parse_requirement(value)
@@ -937,19 +939,13 @@ class NabProvider:
                     marker=existing_requirement.marker,
                     raw=existing_requirement.raw,
                 )
-                selected_dependency_version = next(
-                    (
-                        candidate_version
-                        for (candidate_name, candidate_version) in self.records
-                        if candidate_name == dependency_key
-                    ),
-                    None,
-                )
+                selected_dependency_version = self._active_decisions.get(dependency_key)
                 if selected_dependency_version is not None:
                     self.choose_version(
                         dependency_key,
                         Range.singleton(selected_dependency_version),
                     )
+                    self._dependency_invalidations.setdefault(dependency_key, None)
                     record = self.records.get(
                         (dependency_key, selected_dependency_version), record
                     )
@@ -1025,7 +1021,14 @@ class NabProvider:
         positive_ranges: Mapping[str, RangeProtocol[Version]],
         decisions: Mapping[str, Version],
     ) -> None:
-        return None
+        del positive_ranges
+        self._active_decisions = dict(decisions)
+
+    def consume_dependency_invalidations(self) -> list[str]:
+        """Return selected packages whose extras changed after expansion."""
+        invalidated = list(self._dependency_invalidations)
+        self._dependency_invalidations.clear()
+        return invalidated
 
     def consume_pending_clauses(self) -> list[Incompatibility[str, Version]]:
         return []

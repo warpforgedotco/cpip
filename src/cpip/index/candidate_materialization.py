@@ -410,6 +410,11 @@ class LazyWheelCandidate(WheelCandidate):
         return self.record_internal.link.url
 
     @property
+    def source_filename(self) -> str:
+        """Artifact filename from the index record, without materializing it."""
+        return str(self.record_internal.link.filename)
+
+    @property
     def source_hashes(self) -> dict[str, str] | None:
         return self.materializer_internal.source_hashes_for(self.record_internal)
 

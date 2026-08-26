@@ -41,6 +41,36 @@ def read_requirement_lines(filename: str) -> list[str]:
     return values
 
 
+def remote_hashed_wheel(candidate: object) -> dict[str, object] | None:
+    """Render a remote wheel from its index facts without opening the archive."""
+    if getattr(candidate, "source_kind", None) != "wheel":
+        return None
+    source = getattr(candidate, "source_url", None)
+    filename = getattr(candidate, "source_filename", None)
+    hashes = getattr(candidate, "source_hashes", None) or {}
+    digest = hashes.get("sha256")
+    if (
+        not isinstance(source, str)
+        or not source.startswith(("http://", "https://"))
+        or not isinstance(filename, str)
+        or not filename
+        or not isinstance(digest, str)
+        or not digest
+    ):
+        return None
+    return {
+        "name": getattr(candidate, "name"),
+        "version": str(getattr(candidate, "version")),
+        "wheels": [
+            {
+                "name": filename,
+                "url": source,
+                "hashes": {"sha256": digest},
+            },
+        ],
+    }
+
+
 def render_lock(packages: list[dict[str, object]]) -> str:
     lines = list(LOCK_HEADER)
 
@@ -368,6 +398,11 @@ def run_lock(args: list[str]) -> int:
         source = candidate.source_url
 
         if source is None:
+            continue
+
+        remote_wheel = remote_hashed_wheel(candidate)
+        if remote_wheel is not None:
+            packages.append(remote_wheel)
             continue
 
         candidate_path = None
