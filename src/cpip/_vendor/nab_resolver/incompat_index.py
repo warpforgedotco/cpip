@@ -128,6 +128,12 @@ def add_dependency_incompatibility(
         existing = resolver.incompatibilities[existing_index]
         existing_package, existing_dependency = existing.terms
         if package_range.is_subset(existing_package.constraint):
+            if exact_parent_version is _MISSING:
+                _register_fallback_parent(resolver, package, existing_index)
+            else:
+                _register_exact_parent(
+                    resolver, package, exact_parent_version, existing_index
+                )
             return existing
 
         merged = Incompatibility(

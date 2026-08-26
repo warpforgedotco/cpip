@@ -76,8 +76,8 @@ class NabProvider:
         self._dependency_cache: dict[
             tuple[str, Version, tuple[str, ...]], Mapping[str, Range[Version]]
         ] = {}
-        self._active_decisions: dict[str, Version] = {}
-        self._active_positive_ranges: dict[str, RangeProtocol[Version]] = {}
+        self._active_decisions: Mapping[str, Version] = {}
+        self._active_positive_ranges: Mapping[str, RangeProtocol[Version]] = {}
         self._root_packages: set[str] = set()
         self._constrained_root_packages: set[str] = set()
         self._partial_preflight_cache: dict[
@@ -471,12 +471,12 @@ class NabProvider:
                 return (cached,)
             records = self.provider.release_candidates(requirement, version)
             if records is not None:
-                return tuple(
-                    self.provider.get_materializer_internal().materialize(
-                        requirement,
-                        records,
-                    )
-                )
+                materializer = self.provider.get_materializer_internal()
+                materialize_one = getattr(materializer, "materialize_one", None)
+                if len(records) == 1 and materialize_one is not None:
+                    candidate = materialize_one(requirement, records[0])
+                    return () if candidate is None else (candidate,)
+                return tuple(materializer.materialize(requirement, records))
         return tuple(
             self.provider.find_candidates(
                 requirement,
@@ -1351,12 +1351,13 @@ class NabProvider:
         positive_ranges: Mapping[str, RangeProtocol[Version]],
         decisions: Mapping[str, Version],
     ) -> None:
-        snapshot = dict(positive_ranges)
-        if snapshot != self._active_positive_ranges:
-            self._active_positive_ranges = snapshot
-            self._partial_preflight_cache.clear()
-            self._active_candidate_conflict_cache.clear()
-        self._active_decisions = dict(decisions)
+        # The resolver supplies pinned, read-only snapshots. Retain those
+        # views directly: materializing them here routed every key through
+        # Python-level Mapping iteration and dominated marker-heavy resolves.
+        self._active_positive_ranges = positive_ranges
+        self._active_decisions = decisions
+        self._partial_preflight_cache.clear()
+        self._active_candidate_conflict_cache.clear()
 
     def consume_dependency_invalidations(self) -> list[str]:
         """Return selected packages whose extras changed after expansion."""

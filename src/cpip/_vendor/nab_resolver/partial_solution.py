@@ -138,6 +138,15 @@ class _Snapshot(Mapping[PackageType, _ValueType]):
     def __len__(self) -> int:
         return sum(1 for _ in self)
 
+    def __bool__(self) -> bool:
+        """Test the common untouched snapshot in constant time."""
+        shadow = self._shadow
+        if not shadow:
+            return bool(self._live)
+        if any(value is not _ABSENT for value in shadow.values()):
+            return True
+        return any(package not in shadow for package in self._live)
+
 
 def _take_snapshot(
     live: dict[PackageType, _ValueType],
@@ -167,6 +176,7 @@ class Assignment(Generic[PackageType, VersionType]):
     """A single entry in the partial solution trail."""
 
     __slots__ = (
+        "_effective",
         "accumulated_range",
         "cause",
         "cum_decision",
@@ -213,6 +223,9 @@ class Assignment(Generic[PackageType, VersionType]):
     cum_decision: VersionType | None
     """The package's decided version as of this entry, if it had one."""
 
+    _effective: RangeProtocol[VersionType] | None
+    """Lazily cached ``cum_positive - cum_negative`` for conflict probes."""
+
     def __init__(
         self,
         package: PackageType,
@@ -238,6 +251,7 @@ class Assignment(Generic[PackageType, VersionType]):
         self.cum_positive = cum_positive
         self.cum_negative = cum_negative
         self.cum_decision = cum_decision
+        self._effective = None
 
     def _values(self) -> tuple[object, ...]:
         return (
@@ -372,7 +386,9 @@ class PartialSolution(Generic[PackageType, VersionType]):
         """
         cached = self._effective_range_cache.get(package, _UNSET)
         if cached is not _UNSET:
-            return cast("RangeProtocol[VersionType] | None", cached)
+            # ``typing.cast`` is a runtime call, and this is the hottest read
+            # in propagation. The sentinel proves the cached union here.
+            return cached  # ty: ignore[invalid-return-type]
 
         positive = self._positive_ranges.get(package)
         negative = self._negative_ranges.get(package)
@@ -445,7 +461,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             if package in self._positive_ranges:
                 new_range = self._positive_ranges[package] & constraint
             else:
-                new_range = self._range_type.full() & constraint
+                new_range = constraint
             self._freeze_ranges(package)
             self._positive_ranges[package] = new_range
             if package not in self._decided_versions:
@@ -455,7 +471,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             if package in self._negative_ranges:
                 new_range = self._negative_ranges[package] | constraint
             else:
-                new_range = self._range_type.empty() | constraint
+                new_range = constraint
             self._negative_ranges[package] = new_range
 
         self._refresh_effective_range(package)
@@ -626,13 +642,16 @@ class PartialSolution(Generic[PackageType, VersionType]):
         if is_positive and cum_positive is None:
             return False
 
-        if cum_positive is None:
-            assert assignment.cum_negative is not None
-            effective = ~assignment.cum_negative
-        elif assignment.cum_negative is None:
-            effective = cum_positive
-        else:
-            effective = cum_positive - assignment.cum_negative
+        effective = assignment._effective
+        if effective is None:
+            if cum_positive is None:
+                assert assignment.cum_negative is not None
+                effective = ~assignment.cum_negative
+            elif assignment.cum_negative is None:
+                effective = cum_positive
+            else:
+                effective = cum_positive - assignment.cum_negative
+            assignment._effective = effective
 
         return term.satisfies(effective)
 

@@ -131,19 +131,36 @@ def supplied_wheel_digest(candidate: WheelInstallCandidate) -> str | None:
 def prefetch_wheel_digests(
     candidates: Iterable[WheelInstallCandidate],
     cache_dir: str,
-) -> None:
-    """One database read for the recorded digests of a whole batch."""
-    from cpip.index.metadata_cache import get_wheel_metadata_cache, metadata_identity
+) -> tuple[str | None, ...]:
+    """Load and return known digests with one database read for the batch."""
+    from cpip.index.metadata_cache import (
+        MetadataIdentity,
+        get_wheel_metadata_cache,
+        metadata_identity,
+    )
 
-    identities = [
-        identity
-        for candidate in candidates
-        if supplied_wheel_digest(candidate) is None
-        and (identity := metadata_identity(candidate.path)) is not None
-    ]
+    candidates = tuple(candidates)
+    cache = get_wheel_metadata_cache(cache_dir)
+    identities: list[MetadataIdentity | None] = []
+    wanted: list[MetadataIdentity] = []
+    supplied: list[str | None] = []
+    for candidate in candidates:
+        digest = supplied_wheel_digest(candidate)
+        supplied.append(digest)
+        identity = None if digest is not None else metadata_identity(candidate.path)
+        identities.append(identity)
+        if identity is not None:
+            wanted.append(identity)
 
-    if identities:
-        get_wheel_metadata_cache(cache_dir).prefetch_digests(identities)
+    if wanted:
+        cache.prefetch_digests(wanted)
+
+    return tuple(
+        digest
+        if digest is not None
+        else (None if identity is None else cache.get_digest(identity))
+        for digest, identity in zip(supplied, identities)
+    )
 
 
 def wheel_digest(candidate: WheelInstallCandidate, cache_dir: str | None = None) -> str:
@@ -474,7 +491,22 @@ def prepare_cached_wheels(
     candidates: tuple[WheelInstallCandidate, ...],
     cache_dir: str,
 ) -> tuple[CachedWheelArchive, ...]:
-    prefetch_wheel_digests(candidates, cache_dir)
+    digests = prefetch_wheel_digests(candidates, cache_dir)
+
+    # Cache hits are metadata reads and marshal decoding under the GIL. A
+    # fresh thread pool adds scheduling and shutdown overhead without making
+    # that work parallel, so take the straight-line path when every digest
+    # and archive are already present. Cold extraction remains threaded.
+    cached_archives: list[CachedWheelArchive] = []
+    for digest in digests:
+        if digest is None:
+            break
+        cached = load_archive(archive_entry_root(cache_dir, digest), digest)
+        if cached is None:
+            break
+        cached_archives.append(cached)
+    if len(cached_archives) == len(candidates):
+        return tuple(cached_archives)
 
     if len(candidates) < INSTALL_WORKERS:
         return tuple(

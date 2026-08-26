@@ -186,13 +186,30 @@ class Link:
     ) -> Link:
         """Build a link for an artifact URL listed on a remote index page.
 
-        Index artifact URLs are not local paths and, on the JSON API, carry
-        no hash or egg fragments, so this skips the general constructor's
-        fragment and filesystem handling; anything unusual falls back to
-        from_url.
+        Index artifact URLs are not local paths. JSON links carry hashes as
+        fields, while HTML links commonly carry one supported hash in the URL
+        fragment. This skips the general constructor's filesystem and egg
+        fragment handling for both shapes; anything unusual falls back to
+        :meth:`from_url`.
         """
         parsed = urllib.parse.urlsplit(url)
-        if parsed.scheme not in ("https", "http") or "#" in url or "&" in url:
+        hashes_from_link: dict[str, str] = {}
+        fragment = parsed.fragment
+        if fragment:
+            name, separator, digest = fragment.partition("=")
+            if not separator or name not in SUPPORTED_HASHES or "#" in fragment:
+                return cls.from_url(
+                    url,
+                    source_url=source_url,
+                    text=text,
+                    hashes=hashes,
+                    requires_python=requires_python,
+                    yanked_reason=yanked_reason,
+                    metadata_file=metadata_file,
+                    upload_time=upload_time,
+                )
+            hashes_from_link[name] = digest
+        if parsed.scheme not in ("https", "http") or "&" in url:
             return cls.from_url(
                 url,
                 source_url=source_url,
@@ -211,11 +228,12 @@ class Link:
         link.path_internal = path
         link.filename_internal = None
         link.file_path_internal = None
-        link.hashes_internal = (
-            {}
-            if hashes is None
-            else {str(name): str(value) for name, value in hashes.items()}
-        )
+        link.hashes_internal = hashes_from_link
+        if hashes is not None:
+            link.hashes_internal = {
+                **{str(name): str(value) for name, value in hashes.items()},
+                **hashes_from_link,
+            }
         link.comes_from = source_url
         link.requires_python = requires_python or None
         link.yanked_reason = yanked_reason

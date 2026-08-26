@@ -292,6 +292,9 @@ class RootRequirement(Generic[PackageType, VersionType]):
             raise AttributeError(f"cannot assign to field {name!r}")
         object.__setattr__(self, name, value)
 
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"cannot delete field {name!r}")
+
     def __eq__(self, other: object) -> bool:
         return type(other) is RootRequirement and (
             self.package,

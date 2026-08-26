@@ -8,6 +8,7 @@ from functools import lru_cache
 
 from .caches import bounded_put, memoized, register_table
 from .errors import InstallationError, InvalidWheelFilename, UnsupportedWheel
+from .light_metadata import LightMetadata, parse_metadata_text
 from .packaging import Requirement, canonicalize_name, marker_applies, parse_requirement
 from .versions import InvalidVersion, Version
 from .utils import CURRENT_PYTHON_VERSION_DIGITS
@@ -66,6 +67,13 @@ if TYPE_CHECKING:
         def namelist(self) -> list[str]: ...
 
         def open(self, name: str) -> IO[bytes]: ...
+
+    class MetadataArchiveSource(Protocol):
+        """The smaller archive surface needed for core metadata."""
+
+        def read(self, name: str) -> bytes: ...
+
+        def namelist(self) -> list[str]: ...
 
     class MetadataCache(Protocol):
         """Minimal cache contract needed by wheel parsing."""
@@ -1067,17 +1075,35 @@ def read_core_metadata_headers(
 def read_metadata_message(path: str):
     import zipfile
 
+    from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
+
+    try:
+        with open(path, "rb", buffering=0) as file:
+            archive = WheelArchive(file, metadata_only=True)
+            return read_metadata_message_internal(archive, path)
+    except WheelhouseUnavailable:
+        pass
+
     with zipfile.ZipFile(path) as archive:
         return read_metadata_message_internal(archive, path)
 
 
+def _metadata_filename_name(path: str) -> str | None:
+    """Return the distribution prefix without validating irrelevant fields."""
+    filename = os.path.basename(os.fspath(path))
+    if not filename.endswith(".whl"):
+        return None
+    distribution, separator, _ = filename.partition("-")
+    return distribution if separator and _is_escaped_name(distribution) else None
+
+
 def read_metadata_message_internal(
-    archive: ZipArchiveSource,
+    archive: MetadataArchiveSource,
     path: str,
     *,
     expected_name: str | None = None,
     dist_info_dir: str | None = None,
-) -> Message:
+) -> LightMetadata:
     metadata_names = (
         [f"{dist_info_dir}/METADATA"]
         if dist_info_dir is not None
@@ -1088,9 +1114,12 @@ def read_metadata_message_internal(
         raise InstallationError(f"Wheel has no METADATA: {path}")
 
     if expected_name is None:
-        parsed = parse_wheel_filename(path)
+        expected_name = _metadata_filename_name(path)
 
-        expected_name = parsed[0] if parsed is not None else None
+        if expected_name is None:
+            parsed = parse_wheel_filename(path)
+
+            expected_name = parsed[0] if parsed is not None else None
 
     if expected_name is not None:
         expected = canonicalize_name(expected_name).replace("-", "_")
@@ -1111,21 +1140,17 @@ def read_metadata_message_internal(
             metadata_names = matching
 
     try:
-        metadata_file = archive.open(metadata_names[0])
+        contents = archive.read(metadata_names[0]).decode("utf-8")
 
     except KeyError as exc:
         raise InstallationError(f"Wheel has no METADATA: {path}") from exc
 
-    with metadata_file as file:
-        try:
-            contents = file.read().decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise InstallationError(
+            f"Error decoding metadata for {path}: {metadata_names[0]}",
+        ) from exc
 
-        except UnicodeDecodeError as exc:
-            raise InstallationError(
-                f"Error decoding metadata for {path}: {metadata_names[0]}",
-            ) from exc
-
-        return Parser().parsestr(contents)
+    return parse_metadata_text(contents)
 
 
 _NAME_SEPARATORS_RE = re.compile(r"[-_.]+")

@@ -8,7 +8,12 @@ import pytest
 from cpip._vendor.nab_resolver import decide, incompat_index, propagate
 from cpip._vendor.nab_resolver.ranges import Range
 from cpip._vendor.nab_resolver.resolver import Resolver, Solution
-from cpip._vendor.nab_resolver.types import Incompatibility, IncompatibilityCause, Term
+from cpip._vendor.nab_resolver.types import (
+    Incompatibility,
+    IncompatibilityCause,
+    RootRequirement,
+    Term,
+)
 
 
 class Provider:
@@ -43,6 +48,16 @@ def test_solution_is_explicitly_unhashable() -> None:
 
     with pytest.raises(TypeError):
         hash(solution)
+
+
+def test_replacement_value_types_reject_attribute_deletion() -> None:
+    solution = Solution(pins={"package": 1}, edges=(), roots=("package",))
+    requirement = RootRequirement("package", Range.singleton(1))
+
+    with pytest.raises(AttributeError, match="cannot delete field 'pins'"):
+        del solution.pins
+    with pytest.raises(AttributeError, match="cannot delete field 'constraint'"):
+        del requirement.constraint
 
 
 def test_range_token_memo_is_bounded() -> None:
@@ -145,6 +160,37 @@ def test_exact_parent_decision_dispatches_only_its_version_clauses() -> None:
         (),
     )
     assert candidate.incompatibilities == [first, second, general]
+
+
+def test_reused_dependency_clause_registers_each_exact_parent_version() -> None:
+    candidate = resolver()
+    dependency_range = Range.singleton(1)
+    first = incompat_index.add_dependency_incompatibility(
+        candidate,
+        "parent",
+        Range.between(1, 4),
+        "dependency",
+        dependency_range,
+        exact_parent_version=1,
+    )
+    repeated = incompat_index.add_dependency_incompatibility(
+        candidate,
+        "parent",
+        Range.singleton(2),
+        "dependency",
+        dependency_range,
+        exact_parent_version=2,
+    )
+
+    candidate.solution.decide("parent", 2)
+
+    assert repeated is first
+    assert candidate.dependency_parent_versions["parent"] == {1: [0], 2: [0]}
+    assert propagate._related_incompatibility_groups(candidate, "parent") == (
+        (),
+        (),
+        [0],
+    )
 
 
 def test_undecided_parent_dispatches_every_dependency_clause() -> None:

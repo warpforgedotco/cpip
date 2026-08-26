@@ -71,18 +71,14 @@ def _read_raw_metadata_text(
 
     ``Distribution.read_text`` goes through ``pathlib.Path.joinpath`` and
     ``Path.read_text`` for every candidate filename, which is real overhead
-    across a whole-environment scan. When ``raw._path`` is a genuine
-    ``pathlib.Path`` -- true for every finder-discovered on-disk
-    distribution, per ``importlib.metadata``'s own ``FastPath.joinpath``
-    (only rebound to ``zipfile.Path.joinpath`` when the root turns out to be
-    a zip) -- reading through plain ``open()`` is equivalent but cheaper.
-    Anything else (a zipped egg, or a custom finder's own path type) falls
-    back to the original, fully general chain unchanged.
+    across a whole-environment scan. Plain filesystem paths read through
+    ``open()`` equivalently and more cheaply. Anything else (a zipped egg,
+    or a custom finder's own path type) keeps the general chain unchanged.
     """
     path = getattr(raw, "_path", None)
 
-    if isinstance(path, pathlib.Path):
-        base = str(path)
+    if isinstance(path, (str, pathlib.Path)):
+        base = os.fspath(path)
 
         for filename in ("METADATA", "PKG-INFO", ""):
             target = base if not filename else os.path.join(base, filename)
@@ -109,33 +105,23 @@ class PathDistribution:
 
     __slots__ = ("_path", "_stdlib")
 
-    def __init__(self, path: pathlib.Path) -> None:
-        self._path = path
+    def __init__(self, path: str | os.PathLike[str]) -> None:
+        self._path = os.fspath(path)
 
         self._stdlib: importlib.metadata.PathDistribution | None = None
 
     def read_text(self, filename: str) -> str | None:
-        try:
-            return self._path.joinpath(filename).read_text(encoding="utf-8")
-
-        except (
-            FileNotFoundError,
-            IsADirectoryError,
-            KeyError,
-            NotADirectoryError,
-            PermissionError,
-        ):
-            return None
+        return _read_text_file(os.path.join(self._path, filename))
 
     def locate_file(self, path: str | os.PathLike[str]) -> pathlib.Path:
-        return self._path.parent / path
+        return pathlib.Path(os.path.dirname(self._path), path)
 
     @property
     def stdlib(self) -> importlib.metadata.PathDistribution:
         if self._stdlib is None:
             import importlib.metadata
 
-            self._stdlib = importlib.metadata.PathDistribution(self._path)
+            self._stdlib = importlib.metadata.PathDistribution(pathlib.Path(self._path))
 
         return self._stdlib
 
@@ -326,7 +312,7 @@ def _iter_raw_distributions(
 
         for child in children:
             if child.lower().endswith(_INFO_SUFFIXES):
-                yield PathDistribution(pathlib.Path(root, child))
+                yield PathDistribution(os.path.normpath(os.path.join(root, child)))
 
 
 _header_cache: HeaderCache | None = None
@@ -372,8 +358,8 @@ def _iter_installed_distributions(
         for dist in found:
             path = getattr(dist, "_path", None)
 
-            if isinstance(path, pathlib.Path):
-                identity = _metadata_file_identity(str(path))
+            if isinstance(path, (str, pathlib.Path)):
+                identity = _metadata_file_identity(os.fspath(path))
 
                 if identity is not None:
                     identities[id(dist)] = identity
@@ -419,7 +405,11 @@ def _iter_installed_distributions(
 
         metadata_location = getattr(dist, "_path", None)
 
-        location = str(dist.locate_file(""))
+        location = (
+            os.path.dirname(dist._path) or os.curdir
+            if isinstance(dist, PathDistribution)
+            else str(dist.locate_file(""))
+        )
 
         if metadata_location is None or str(location) == "<memory>":
             continue

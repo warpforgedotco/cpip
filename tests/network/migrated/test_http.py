@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import gzip
+import io
 import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from cpip.network.http import NetworkSession
+import pytest
+from cpip.network.http import HttpRequest, HttpResponse, NetworkSession
 
 
 def test_session_decodes_gzip_responses() -> None:
@@ -198,6 +200,73 @@ def test_session_revalidates_stale_cache_with_conditional_headers(
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+def test_unchanged_immediately_stale_304_skips_metadata_rewrite(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = NetworkSession(cache=str(tmp_path / "http-cache"))
+    assert session.cache is not None
+    url = "https://example.invalid/simple/demo/"
+    request = HttpRequest("GET", url, {})
+    body = b"cached body"
+    session.cache_response(
+        HttpResponse(
+            status_code=200,
+            reason="OK",
+            url=url,
+            headers={"Cache-Control": "max-age=0", "ETag": '"tag"'},
+            raw=io.BytesIO(body),
+            content_internal=body,
+            request=request,
+        ),
+    )
+    raw_metadata = session.cache.get(url)
+    assert raw_metadata is not None
+    metadata = json.loads(raw_metadata)
+    writes: list[tuple[str, bytes]] = []
+    monkeypatch.setattr(session.cache, "set", lambda *args: writes.append(args))
+
+    response = session.revalidated_response(
+        request,
+        metadata,
+        {"Cache-Control": "max-age=0", "ETag": '"tag"'},
+    )
+
+    assert response.content == body
+    assert writes == []
+
+
+def test_cache_response_supports_legacy_split_cache_writes() -> None:
+    writes: list[tuple[str, str, bytes]] = []
+
+    class SplitWriteCache:
+        def set(self, key: str, value: bytes) -> None:
+            writes.append(("metadata", key, value))
+
+        def set_body(self, key: str, value: bytes) -> None:
+            writes.append(("body", key, value))
+
+    url = "https://example.invalid/simple/demo/"
+    body = b"cached body"
+    session = NetworkSession(cache=SplitWriteCache())
+    session.cache_response(
+        HttpResponse(
+            status_code=200,
+            reason="OK",
+            url=url,
+            headers={"Cache-Control": "max-age=60"},
+            raw=io.BytesIO(body),
+            content_internal=body,
+            request=HttpRequest("GET", url, {}),
+        ),
+    )
+
+    assert [kind for kind, _, _ in writes] == ["metadata", "body"]
+    assert writes[0][1] == url
+    assert json.loads(writes[0][2])["status"] == 200
+    assert writes[1] == ("body", url, body)
 
 
 def test_environ_proxies_cached_per_host_and_port(

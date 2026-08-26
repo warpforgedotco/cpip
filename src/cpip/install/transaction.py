@@ -20,7 +20,13 @@ def _read_staged_source(path: str | None) -> bytes:
         return source_file.read()
 
 
-def _write_contents(path: str, contents: bytes, mode: int) -> None:
+def _write_contents(
+    path: str,
+    contents: bytes,
+    mode: int,
+    *,
+    dir_fd: int | None = None,
+) -> None:
     """Write staged bytes to `path` with raw fd calls.
 
     A wheel is typically thousands of small files, so the per-file cost of
@@ -35,7 +41,12 @@ def _write_contents(path: str, contents: bytes, mode: int) -> None:
     the umask makes a follow-up chmod necessary, so it can usually be
     skipped entirely).
     """
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    fd = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+        mode,
+        dir_fd=dir_fd,
+    )
     try:
         view = memoryview(contents)
         while view:
@@ -230,42 +241,58 @@ class InstallTransaction:
             replace = os.replace
             chmod = os.chmod
             append_created = self.created_internal.append
-            umask = os.umask(0o777)
-            os.umask(umask)
-            for item in self.staged_internal:
-                backup_if_needed(item.destination_text)
-                destination_parent_text = (
-                    os.path.dirname(item.destination_text) or os.curdir
-                )
-                if destination_parent_text not in created_directories:
-                    makedirs(destination_parent_text, exist_ok=True)
-                    created_directories.add(destination_parent_text)
-                if item.contents is None:
-                    assert item.source_text is not None
-                    if item.clone:
-                        clone_path(item.source_text, item.destination_text)
-                    else:
-                        try:
-                            replace(item.source_text, item.destination_text)
-                        except OSError as exc:
-                            if exc.errno != errno.EXDEV:
-                                raise
-                            shutil.move(item.source_text, item.destination_text)
-                    append_created(item.destination_text)
-                    if item.mode is not None:
-                        chmod(item.destination_text, item.mode)
-                else:
-                    append_created(item.destination_text)
-                    _write_contents(
-                        item.destination_text,
-                        item.contents,
-                        0o666 if item.mode is None else item.mode,
+            use_directory_fds = os.open in os.supports_dir_fd
+            directory_fds: dict[str, int] = {}
+            try:
+                for item in self.staged_internal:
+                    backup_if_needed(item.destination_text)
+                    destination_parent_text = (
+                        os.path.dirname(item.destination_text) or os.curdir
                     )
-                    if item.mode is not None and item.mode & umask:
-                        chmod(item.destination_text, item.mode)
-            for path in sorted(self.deletions):
-                self.backup_if_needed(path)
-                self.remove_empty_parents(os.path.dirname(path))
+                    if destination_parent_text not in created_directories:
+                        makedirs(destination_parent_text, exist_ok=True)
+                        created_directories.add(destination_parent_text)
+                    if item.contents is None:
+                        assert item.source_text is not None
+                        if item.clone:
+                            clone_path(item.source_text, item.destination_text)
+                        else:
+                            try:
+                                replace(item.source_text, item.destination_text)
+                            except OSError as exc:
+                                if exc.errno != errno.EXDEV:
+                                    raise
+                                shutil.move(item.source_text, item.destination_text)
+                        append_created(item.destination_text)
+                        if item.mode is not None:
+                            chmod(item.destination_text, item.mode)
+                    else:
+                        append_created(item.destination_text)
+                        write_path = item.destination_text
+                        directory_fd = None
+                        if use_directory_fds:
+                            directory_fd = directory_fds.get(destination_parent_text)
+                            if directory_fd is None:
+                                directory_fd = os.open(
+                                    destination_parent_text,
+                                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+                                )
+                                directory_fds[destination_parent_text] = directory_fd
+                            write_path = os.path.basename(item.destination_text)
+                        _write_contents(
+                            write_path,
+                            item.contents,
+                            0o666 if item.mode is None else item.mode,
+                            dir_fd=directory_fd,
+                        )
+                        if item.mode is not None:
+                            chmod(item.destination_text, item.mode)
+                for path in sorted(self.deletions):
+                    self.backup_if_needed(path)
+                    self.remove_empty_parents(os.path.dirname(path))
+            finally:
+                for directory_fd in directory_fds.values():
+                    os.close(directory_fd)
             if finalize:
                 self.finish_successfully()
         except Exception:

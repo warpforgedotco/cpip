@@ -836,6 +836,8 @@ class NetworkSession:
         if not isinstance(headers, dict):
             headers = {}
 
+        original_headers = headers
+
         if response_headers is not None:
             headers = dict(headers)
 
@@ -863,17 +865,33 @@ class NetworkSession:
         if expires_at is None:
             expires_at = time.time()
 
-        updated = dict(metadata)
+        etag = merged.get("ETag")
 
-        updated["headers"] = headers
+        last_modified = merged.get("Last-Modified")
 
-        updated["expires_at"] = expires_at
+        metadata_changed = (
+            headers != original_headers
+            or metadata.get("etag") != etag
+            or metadata.get("last_modified") != last_modified
+        )
 
-        updated["etag"] = merged.get("ETag")
+        # An unchanged ``max-age=0`` response will be stale on the next read
+        # regardless of whether its newly computed timestamp is persisted.
+        # Avoid an atomic metadata rewrite (including fsync) in that common
+        # revalidation loop. Positive freshness or changed validators/headers
+        # still have to reach disk for the next process.
+        if metadata_changed or expires_at > time.time():
+            updated = dict(metadata)
 
-        updated["last_modified"] = merged.get("Last-Modified")
+            updated["headers"] = headers
 
-        self.cache.set(request.url, json.dumps(updated).encode("utf-8"))
+            updated["expires_at"] = expires_at
+
+            updated["etag"] = etag
+
+            updated["last_modified"] = last_modified
+
+            self.cache.set(request.url, json.dumps(updated).encode("utf-8"))
 
         body = self.cache.get_body(request.url)
 
@@ -940,22 +958,24 @@ class NetworkSession:
 
         expires_at = self.cache_expiry(response.headers)
 
-        self.cache.set(
-            response.url,
-            json.dumps(
-                {
-                    "status": response.status_code,
-                    "reason": response.reason,
-                    "url": response.url,
-                    "headers": dict(response.headers.items()),
-                    "expires_at": expires_at,
-                    "etag": response.headers.get("ETag"),
-                    "last_modified": response.headers.get("Last-Modified"),
-                },
-            ).encode("utf-8"),
-        )
+        metadata = json.dumps(
+            {
+                "status": response.status_code,
+                "reason": response.reason,
+                "url": response.url,
+                "headers": dict(response.headers.items()),
+                "expires_at": expires_at,
+                "etag": response.headers.get("ETag"),
+                "last_modified": response.headers.get("Last-Modified"),
+            },
+        ).encode("utf-8")
 
-        self.cache.set_body(response.url, body)
+        set_with_body = getattr(self.cache, "set_with_body", None)
+        if set_with_body is not None:
+            set_with_body(response.url, metadata, body)
+        else:
+            self.cache.set(response.url, metadata)
+            self.cache.set_body(response.url, body)
 
         response.raw = io.BytesIO(body)
 

@@ -24,9 +24,8 @@ class _RootPackage:
     def __repr__(self) -> str:
         return "<root>"
 
-    @override
-    def __hash__(self) -> int:
-        return hash("__nab_root__")
+    # Keep object's C-level identity hash. A Python override adds a frame to
+    # every package-keyed lookup involving the virtual root.
 
 
 ROOT = _RootPackage()

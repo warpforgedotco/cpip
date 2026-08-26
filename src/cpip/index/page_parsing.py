@@ -110,7 +110,10 @@ class IndexPageParser:
         )
 
     def links_from_html(self, body: str, url: str) -> list[Link]:
-        parser = link_parser_class()(url, self.link_factory)
+        link_factory = self.link_factory
+        if getattr(link_factory, "__func__", None) is _FROM_URL_FUNCTION:
+            link_factory = Link.from_index_page
+        parser = link_parser_class()(url, link_factory)
         parser.feed(body)
         return parser.links
 

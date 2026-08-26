@@ -75,9 +75,12 @@ def adjacent_tmp_file(path: str, **kwargs: Any) -> Generator[BinaryIO, None, Non
 replace = retry(stop_after_delay=1, wait=0.25)(os.replace)
 
 
-def copy_directory_permissions(directory: str, target_file: BinaryIO) -> None:
-    mode = os.stat(directory).st_mode & 0o666 | 0o600
+def set_file_permissions(target_file: BinaryIO, mode: int) -> None:
     if os.chmod in os.supports_fd:
         os.chmod(target_file.fileno(), mode)
     elif os.chmod in os.supports_follow_symlinks:
         os.chmod(target_file.name, mode, follow_symlinks=False)
+
+
+def copy_directory_permissions(directory: str, target_file: BinaryIO) -> None:
+    set_file_permissions(target_file, os.stat(directory).st_mode & 0o666 | 0o600)

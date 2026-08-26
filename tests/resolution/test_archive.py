@@ -102,6 +102,20 @@ class TestWheelArchiveMatchesRealZipfile:
 
         _assert_matches_real_zipfile(path)
 
+    def test_metadata_only_skips_unrelated_members(self, tmp_path: Path) -> None:
+        path = tmp_path / "metadata-only.whl"
+        members = _sample_members()
+        _write_zip(path, members)
+
+        with path.open("rb") as file:
+            archive = WheelArchive(file, metadata_only=True)
+
+            assert archive.namelist() == ["pkg-1.0.dist-info/METADATA"]
+            assert (
+                archive.read("pkg-1.0.dist-info/METADATA")
+                == members["pkg-1.0.dist-info/METADATA"]
+            )
+
     def test_many_small_members(self, tmp_path: Path) -> None:
         path = tmp_path / "many.zip"
 

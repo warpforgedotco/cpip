@@ -178,6 +178,34 @@ def test_catalog_cache_ignores_corrupt_entries(tmp_path: Path) -> None:
     assert load_links(cache, "https://example.test/simple/demo/") is None
 
 
+def test_catalog_cache_reuses_validation_until_blob_changes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cache = SafeFileCache(str(tmp_path))
+    page_url = "https://example.test/simple/demo/"
+    save_links(
+        cache,
+        page_url,
+        [
+            Link.from_url(
+                "https://files.example.test/demo-1.0-py3-none-any.whl",
+                source_url=page_url,
+            ),
+        ],
+    )
+
+    def unexpected_loads(_raw: bytes) -> object:
+        raise AssertionError("an unchanged catalog should not be decoded again")
+
+    monkeypatch.setattr(marshal, "loads", unexpected_loads)
+    assert load_catalog(cache, page_url) is not None
+
+    monkeypatch.undo()
+    cache.set_atomic(cache_key(page_url), b"not marshal")
+    assert load_catalog(cache, page_url) is None
+
+
 def test_catalog_with_an_unparseable_version_is_a_miss(tmp_path: Path) -> None:
     """A semantically corrupt catalog must not raise out of load_summary."""
     cache = SafeFileCache(str(tmp_path))

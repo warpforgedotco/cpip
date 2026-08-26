@@ -13,10 +13,76 @@ from cpip.core.wheel import (
     WheelTag,
     parse_wheel_file,
     parse_wheel_filename,
+    read_metadata_message,
     supported_wheel_tags,
     wheel_candidate,
     wheel_tag_rank,
 )
+
+
+def test_read_metadata_message_preserves_headers_folding_and_payload(
+    tmp_path: Path,
+) -> None:
+    wheel = tmp_path / "demo-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            "demo-1.0.dist-info/METADATA",
+            "Name: demo\r\n"
+            "Version: 1.0\r\n"
+            "Requires-Dist: first>=1\r\n"
+            "Requires-Dist: second>=2;\r\n python_version >= '3.11'\r\n"
+            "Summary: metadata parser oracle\r\n"
+            "\r\n"
+            "Description body\r\n",
+        )
+
+    metadata = read_metadata_message(wheel)
+
+    assert metadata.get("name") == "demo"
+    assert metadata.get("Summary") == "metadata parser oracle"
+    assert metadata.get_all("requires-dist") == [
+        "first>=1",
+        "second>=2;\npython_version >= '3.11'",
+    ]
+    assert metadata.get_payload() == "Description body\r\n"
+
+
+def test_read_metadata_message_uses_fast_archive_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheel = tmp_path / "demo-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            "demo-1.0.dist-info/METADATA",
+            "Name: demo\nVersion: 1.0\n",
+        )
+
+    def unexpected_zipfile(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise AssertionError("ordinary wheels should use WheelArchive")
+
+    monkeypatch.setattr(zipfile, "ZipFile", unexpected_zipfile)
+
+    assert read_metadata_message(wheel).get("Name") == "demo"
+
+
+@pytest.mark.parametrize("version", ["1.0", "1.0rc1"])
+def test_read_metadata_message_prefers_matching_dist_info(
+    tmp_path: Path,
+    version: str,
+) -> None:
+    wheel = tmp_path / f"demo-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            "aaa-1.0.dist-info/METADATA",
+            "Name: aaa\nVersion: 1.0\n",
+        )
+        archive.writestr(
+            f"demo-{version}.dist-info/METADATA",
+            f"Name: demo\nVersion: {version}\n",
+        )
+
+    assert read_metadata_message(wheel).get("Name") == "demo"
 
 
 @pytest.mark.parametrize(

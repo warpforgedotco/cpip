@@ -24,6 +24,7 @@ _HAS_PREAD = hasattr(os, "pread")
 class WheelArchive:
     __slots__ = (
         "_fd",
+        "_metadata_only",
         "_tail",
         "_tail_start",
         "file",
@@ -32,9 +33,10 @@ class WheelArchive:
         "needs_zipfile",
     )
 
-    def __init__(self, file, members=None, modes=None) -> None:
+    def __init__(self, file, members=None, modes=None, *, metadata_only=False) -> None:
         self.file = file
         self._fd = file.fileno() if _HAS_PREAD and isinstance(file, io.FileIO) else -1
+        self._metadata_only = metadata_only
         self.members: dict[str, tuple[int, int, int, int, int]] = (
             {} if members is None else members
         )
@@ -136,6 +138,11 @@ class WheelArchive:
                 raise WheelhouseUnavailable
             name_bytes = directory[offset + 46 : name_end]
             offset = record_end
+            if self._metadata_only and (
+                not name_bytes.endswith(b".dist-info/METADATA")
+                or name_bytes.count(b"/") != 1
+            ):
+                continue
             member = (
                 compression,
                 crc,

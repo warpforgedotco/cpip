@@ -339,28 +339,41 @@ class Range(Generic[VersionType]):
     def __contains__(self, version: object) -> bool:
         """Test membership by point lookup or binary-searching intervals."""
         intervals = self._intervals
-        if len(intervals) >= _POINT_SET_MIN_INTERVALS:
+        interval_count = len(intervals)
+        if interval_count == 0:
+            return False
+        if interval_count >= _POINT_SET_MIN_INTERVALS:
             points = self._as_points()
             if points is not None:
                 return version in points
 
-        low = 0
-        high = len(intervals)
-        while low < high:
-            middle = (low + high) // 2
-            lower = intervals[middle][0]
-            if lower is NEGATIVE_INFINITY or not version < lower:
-                low = middle + 1
-            else:
-                high = middle
-        if low == 0:
-            return False
-        lower, lower_inclusive, upper, upper_inclusive = intervals[low - 1]
-        if lower is not NEGATIVE_INFINITY and _same_bound(version, lower):
-            return lower_inclusive
+        if interval_count == 1:
+            lower, lower_inclusive, upper, upper_inclusive = intervals[0]
+            if lower is not NEGATIVE_INFINITY:
+                if version < lower:
+                    return False
+                if _same_bound(version, lower) and not lower_inclusive:
+                    return False
+        else:
+            low = 0
+            high = interval_count
+            while low < high:
+                middle = (low + high) // 2
+                lower = intervals[middle][0]
+                if lower is NEGATIVE_INFINITY or not version < lower:
+                    low = middle + 1
+                else:
+                    high = middle
+            if low == 0:
+                return False
+            lower, lower_inclusive, upper, upper_inclusive = intervals[low - 1]
+            if lower is not NEGATIVE_INFINITY and _same_bound(version, lower):
+                return lower_inclusive
         if upper is POSITIVE_INFINITY:
             return True
-        return not (version > upper or (_same_bound(version, upper) and not upper_inclusive))
+        return not (
+            version > upper or (_same_bound(version, upper) and not upper_inclusive)
+        )
 
     def __and__(self, other: object) -> Range[VersionType]:
         """Compute the intersection of two ranges (versions in both)."""
@@ -486,75 +499,94 @@ class Range(Generic[VersionType]):
         if not isinstance(other, Range):
             return NotImplemented
 
+        left_intervals = self._intervals
+        right_intervals = other._intervals
         if (
-            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
+            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
         ):
             left_points = self._as_points()
             right_points = other._as_points()
             if left_points is not None and right_points is not None:
                 return self._from_points(left_points - right_points)
 
-        right_intervals = other._intervals
         right_count = len(right_intervals)
         result: list[Interval] = []
         right_index = 0
 
-        for left in self._intervals:
+        # These comparisons stay inline: subtraction runs on every probe of
+        # the conflict trail, where helper-call overhead is measurable.
+        for left in left_intervals:
             lower, lower_inclusive, upper, upper_inclusive = left
 
             # A right interval below this one is below every later one too.
-            while right_index < right_count and _ends_before(
-                right_intervals[right_index], left
-            ):
+            while right_index < right_count:
+                right = right_intervals[right_index]
+                right_upper = right[2]
+                if right_upper is POSITIVE_INFINITY or lower is NEGATIVE_INFINITY:
+                    break
+                if right_upper == lower:
+                    if right[3] and lower_inclusive:
+                        break
+                elif not right_upper < lower:
+                    break
                 right_index += 1
 
-            fully_covered = False
+            exhausted = False
             scan = right_index
 
             while scan < right_count:
                 right = right_intervals[scan]
 
-                # Carving moves the remainder's lower end only, so its upper end
-                # is still left's and this comparison can read left directly.
-                if _ends_before(left, right):
-                    break
-
                 right_lower, right_lower_inc, right_upper, right_upper_inc = right
 
+                if (
+                    upper is not POSITIVE_INFINITY
+                    and right_lower is not NEGATIVE_INFINITY
+                ):
+                    if upper == right_lower:
+                        if not (upper_inclusive and right_lower_inc):
+                            break
+                    elif upper < right_lower:
+                        break
+
                 # Whatever of the remainder sits below this right interval survives.
-                if right_lower is not NEGATIVE_INFINITY and not _interval_is_empty(
-                    lower,
-                    lower_inclusive=lower_inclusive,
-                    upper=right_lower,
-                    upper_inclusive=not right_lower_inc,
+                if right_lower is not NEGATIVE_INFINITY and not (
+                    lower is not NEGATIVE_INFINITY
+                    and (
+                        lower > right_lower
+                        or (
+                            lower == right_lower
+                            and not (lower_inclusive and not right_lower_inc)
+                        )
+                    )
                 ):
                     result.append(
                         (lower, lower_inclusive, right_lower, not right_lower_inc)
                     )
 
                 if right_upper is POSITIVE_INFINITY:
-                    fully_covered = True
+                    exhausted = True
                     break
 
                 # Resume above this right interval.
                 lower, lower_inclusive = right_upper, not right_upper_inc
-                if _interval_is_empty(
-                    lower,
-                    lower_inclusive=lower_inclusive,
-                    upper=upper,
-                    upper_inclusive=upper_inclusive,
+                if upper is not POSITIVE_INFINITY and (
+                    lower > upper
+                    or (lower == upper and not (lower_inclusive and upper_inclusive))
                 ):
-                    fully_covered = True
+                    exhausted = True
                     break
 
                 scan += 1
 
-            if not fully_covered and not _interval_is_empty(
-                lower,
-                lower_inclusive=lower_inclusive,
-                upper=upper,
-                upper_inclusive=upper_inclusive,
+            if not exhausted and not (
+                lower is not NEGATIVE_INFINITY
+                and upper is not POSITIVE_INFINITY
+                and (
+                    lower > upper
+                    or (lower == upper and not (lower_inclusive and upper_inclusive))
+                )
             ):
                 result.append((lower, lower_inclusive, upper, upper_inclusive))
 
@@ -568,23 +600,32 @@ class Range(Generic[VersionType]):
         ``other`` always leave a gap, so an interval of self is covered only
         when a single interval of other holds all of it.
         """
+        left_intervals = self._intervals
+        right_intervals = other._intervals
         if (
-            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
+            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
         ):
             left_points = self._as_points()
             right_points = other._as_points()
             if left_points is not None and right_points is not None:
                 return left_points <= right_points
 
-        right_intervals = other._intervals
         right_count = len(right_intervals)
         right_index = 0
 
-        for left in self._intervals:
-            while right_index < right_count and _ends_before(
-                right_intervals[right_index], left
-            ):
+        for left in left_intervals:
+            left_lower, left_lower_inclusive = left[0], left[1]
+            while right_index < right_count:
+                right = right_intervals[right_index]
+                right_upper = right[2]
+                if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
+                    break
+                if right_upper == left_lower:
+                    if right[3] and left_lower_inclusive:
+                        break
+                elif not right_upper < left_lower:
+                    break
                 right_index += 1
 
             if right_index >= right_count:
@@ -652,16 +693,15 @@ class Range(Generic[VersionType]):
         return True
 
     def relation(self, other: Range[VersionType]) -> RangeRelation:
-        """Return how self's members sit against other's.
-
-        The empty range is both a subset and disjoint, so it is answered ahead
-        of the walks instead of by running both of them.
-        """
+        """Return how self's members sit against other's in one interval walk."""
         if self.is_empty:
             return _EMPTY_REL
+
+        left_intervals = self._intervals
+        right_intervals = other._intervals
         if (
-            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
+            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
         ):
             left_points = self._as_points()
             right_points = other._as_points()
@@ -671,9 +711,53 @@ class Range(Generic[VersionType]):
                 if left_points.isdisjoint(right_points):
                     return _DISJOINT_REL
                 return _OVERLAPPING_REL
-        if self.is_subset(other):
+
+        right_count = len(right_intervals)
+        is_subset = True
+        is_disjoint = True
+        right_index = 0
+
+        for left in left_intervals:
+            left_lower, left_lower_inclusive = left[0], left[1]
+            while right_index < right_count:
+                right = right_intervals[right_index]
+                right_upper = right[2]
+                if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
+                    break
+                if right_upper == left_lower:
+                    if right[3] and left_lower_inclusive:
+                        break
+                elif not right_upper < left_lower:
+                    break
+                right_index += 1
+
+            if right_index >= right_count:
+                is_subset = False
+                if not is_disjoint:
+                    return _OVERLAPPING_REL
+                break
+
+            right = right_intervals[right_index]
+            if _ends_before(left, right):
+                is_subset = False
+                if not is_disjoint:
+                    return _OVERLAPPING_REL
+                continue
+
+            is_disjoint = False
+            lower, lower_inclusive = _max_lower_bound(left, right)
+            upper, upper_inclusive = _min_upper_bound(left, right)
+            if (
+                lower_inclusive is not left[1]
+                or upper_inclusive is not left[3]
+                or not _same_bound(lower, left[0])
+                or not _same_bound(upper, left[2])
+            ):
+                return _OVERLAPPING_REL
+
+        if is_subset:
             return _SUBSET_REL
-        if self.is_disjoint(other):
+        if is_disjoint:
             return _DISJOINT_REL
         return _OVERLAPPING_REL
 

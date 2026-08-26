@@ -12,6 +12,7 @@ from cpip.platform.filesystem import (
     adjacent_tmp_file,
     copy_directory_permissions,
     replace,
+    set_file_permissions,
 )
 
 """Directory under the cache directory holding the HTTP page cache."""
@@ -149,6 +150,29 @@ class SafeFileCache:
     def set_body(self, key: str, body: bytes) -> None:
         path = self.get_cache_path(key) + ".body"
         self.write_internal(path, body)
+
+    def set_with_body(self, key: str, metadata: bytes, body: bytes) -> None:
+        """Atomically replace a companion body and its metadata marker.
+
+        Both temporary files share the path setup and directory-mode lookup.
+        The body is installed first so readers never observe new metadata
+        pointing at an old body.
+        """
+        metadata_path = self.get_cache_path(key)
+        body_path = metadata_path + ".body"
+        with suppressed_cache_errors():
+            ensure_dir(os.path.dirname(metadata_path))
+            mode = os.stat(self.directory).st_mode & 0o666 | 0o600
+            with (
+                adjacent_tmp_file(metadata_path) as metadata_file,
+                adjacent_tmp_file(body_path) as body_file,
+            ):
+                metadata_file.write(metadata)
+                set_file_permissions(metadata_file, mode)
+                body_file.write(body)
+                set_file_permissions(body_file, mode)
+            replace(body_file.name, body_path)
+            replace(metadata_file.name, metadata_path)
 
     def set_body_from_io(self, key: str, body_file: BinaryIO) -> None:
         """Set the body of the cache entry from a file object."""

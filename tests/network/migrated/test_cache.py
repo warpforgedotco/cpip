@@ -45,6 +45,16 @@ class TestSafeFileCache:
         cache.delete("test key")
         assert cache.get_body("test key") is None
 
+    def test_cache_pair_roundtrip(self, cache_tmpdir: Path) -> None:
+        cache = SafeFileCache(os.fspath(cache_tmpdir))
+        cache.set_with_body("test key", b"metadata", b"body")
+
+        assert cache.get("test key") == b"metadata"
+        body = cache.get_body("test key")
+        assert body is not None
+        with body:
+            assert body.read() == b"body"
+
     def test_atomic_cache_roundtrip(self, cache_tmpdir: Path) -> None:
         cache = SafeFileCache(os.fspath(cache_tmpdir))
 
