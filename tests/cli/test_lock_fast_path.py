@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cpip.cli.lock import remote_hashed_wheel
+from cpip.cli.lock import remote_hashed_sdist, remote_hashed_wheel
 from cpip.core.versions import Version
 
 
@@ -11,6 +11,7 @@ class Candidate:
     source_url = "https://packages.invalid/demo-1.2.3-py3-none-any.whl"
     source_filename = "demo-1.2.3-py3-none-any.whl"
     source_hashes = {"sha256": "abc123"}
+    source_is_direct = False
 
     @property
     def path(self) -> str:
@@ -38,3 +39,39 @@ def test_remote_wheel_without_sha256_uses_materialization_fallback() -> None:
     candidate.source_hashes = {"sha512": "def456"}
 
     assert remote_hashed_wheel(candidate) is None
+
+
+def test_remote_hashed_sdist_uses_index_facts() -> None:
+    candidate = Candidate()
+    candidate.source_kind = "sdist"
+    candidate.source_url = "https://packages.invalid/demo-1.2.3.tar.gz"
+    candidate.source_filename = "demo-1.2.3.tar.gz"
+
+    assert remote_hashed_sdist(candidate) == {
+        "name": "demo",
+        "version": "1.2.3",
+        "sdist": {
+            "name": "demo-1.2.3.tar.gz",
+            "url": "https://packages.invalid/demo-1.2.3.tar.gz",
+            "hashes": {"sha256": "abc123"},
+        },
+    }
+
+
+def test_remote_sdist_without_sha256_uses_materialization_fallback() -> None:
+    candidate = Candidate()
+    candidate.source_kind = "sdist"
+    candidate.source_hashes = {"sha512": "def456"}
+
+    assert remote_hashed_sdist(candidate) is None
+
+
+def test_direct_artifacts_do_not_use_index_fast_paths() -> None:
+    candidate = Candidate()
+    candidate.source_is_direct = True
+
+    assert remote_hashed_wheel(candidate) is None
+
+    candidate.source_kind = "sdist"
+
+    assert remote_hashed_sdist(candidate) is None

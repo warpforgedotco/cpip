@@ -423,6 +423,11 @@ class LazyWheelCandidate(WheelCandidate):
         return self.record_internal.link.kind.value
 
     @property
+    def source_is_direct(self) -> bool:
+        """Whether the artifact came from an explicit direct URL requirement."""
+        return self.requirement_internal.url is not None
+
+    @property
     def source_vcs(self) -> str | None:
         if not self.record_internal.link.is_vcs:
             return None
