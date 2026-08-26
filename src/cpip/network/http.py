@@ -836,6 +836,8 @@ class NetworkSession:
         if not isinstance(headers, dict):
             headers = {}
 
+        original_headers = headers
+
         if response_headers is not None:
             headers = dict(headers)
 
@@ -863,17 +865,33 @@ class NetworkSession:
         if expires_at is None:
             expires_at = time.time()
 
-        updated = dict(metadata)
+        etag = merged.get("ETag")
 
-        updated["headers"] = headers
+        last_modified = merged.get("Last-Modified")
 
-        updated["expires_at"] = expires_at
+        metadata_changed = (
+            headers != original_headers
+            or metadata.get("etag") != etag
+            or metadata.get("last_modified") != last_modified
+        )
 
-        updated["etag"] = merged.get("ETag")
+        # An unchanged ``max-age=0`` response will be stale on the next read
+        # regardless of whether its newly computed timestamp is persisted.
+        # Avoid an atomic metadata rewrite (including fsync) in that common
+        # revalidation loop. Positive freshness or changed validators/headers
+        # still have to reach disk for the next process.
+        if metadata_changed or expires_at > time.time():
+            updated = dict(metadata)
 
-        updated["last_modified"] = merged.get("Last-Modified")
+            updated["headers"] = headers
 
-        self.cache.set(request.url, json.dumps(updated).encode("utf-8"))
+            updated["expires_at"] = expires_at
+
+            updated["etag"] = etag
+
+            updated["last_modified"] = last_modified
+
+            self.cache.set(request.url, json.dumps(updated).encode("utf-8"))
 
         body = self.cache.get_body(request.url)
 
