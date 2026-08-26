@@ -970,7 +970,12 @@ class NetworkSession:
             },
         ).encode("utf-8")
 
-        self.cache.set_with_body(response.url, metadata, body)
+        set_with_body = getattr(self.cache, "set_with_body", None)
+        if set_with_body is not None:
+            set_with_body(response.url, metadata, body)
+        else:
+            self.cache.set(response.url, metadata)
+            self.cache.set_body(response.url, body)
 
         response.raw = io.BytesIO(body)
 

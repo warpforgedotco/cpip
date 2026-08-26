@@ -238,6 +238,37 @@ def test_unchanged_immediately_stale_304_skips_metadata_rewrite(
     assert writes == []
 
 
+def test_cache_response_supports_legacy_split_cache_writes() -> None:
+    writes: list[tuple[str, str, bytes]] = []
+
+    class SplitWriteCache:
+        def set(self, key: str, value: bytes) -> None:
+            writes.append(("metadata", key, value))
+
+        def set_body(self, key: str, value: bytes) -> None:
+            writes.append(("body", key, value))
+
+    url = "https://example.invalid/simple/demo/"
+    body = b"cached body"
+    session = NetworkSession(cache=SplitWriteCache())
+    session.cache_response(
+        HttpResponse(
+            status_code=200,
+            reason="OK",
+            url=url,
+            headers={"Cache-Control": "max-age=60"},
+            raw=io.BytesIO(body),
+            content_internal=body,
+            request=HttpRequest("GET", url, {}),
+        ),
+    )
+
+    assert [kind for kind, _, _ in writes] == ["metadata", "body"]
+    assert writes[0][1] == url
+    assert json.loads(writes[0][2])["status"] == 200
+    assert writes[1] == ("body", url, body)
+
+
 def test_environ_proxies_cached_per_host_and_port(
     monkeypatch,
 ) -> None:
