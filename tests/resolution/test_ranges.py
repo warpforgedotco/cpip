@@ -178,6 +178,18 @@ def test_large_discrete_binary_operation_converts_both_operands() -> None:
     assert isinstance(large._points, frozenset)
 
 
+def test_large_discrete_range_rebuilds_point_cache_after_pickle() -> None:
+    import pickle
+
+    original = Range.from_versions(range(32))
+    restored = pickle.loads(pickle.dumps(original))
+
+    assert restored == original
+    assert not isinstance(restored._points, frozenset)
+    assert 17 in restored
+    assert restored._points == frozenset(range(32))
+
+
 def test_empty_range_is_subset_and_disjoint() -> None:
     empty: Range = Range.empty()
     other = Range.between(1, 5)

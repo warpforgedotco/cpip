@@ -7,16 +7,17 @@ import pytest
 
 
 VENDOR_ROOT = Path(__file__).parents[2] / "src" / "cpip" / "_vendor"
+LAUNCHER_ROOT = Path(__file__).parents[2] / "src" / "cpip" / "_launchers"
 
 LICENSE_PATHS = (
-    "licenses/certifi-2026.7.22/LICENSE",
-    "licenses/charset-normalizer-3.4.9/LICENSE",
-    "licenses/idna-3.18/LICENSE.md",
-    "licenses/nab-resolver-0.0.13.dev0/LICENSE",
-    "licenses/requests-2.32.4/LICENSE",
-    "licenses/urllib3-2.6.3/LICENSE.txt",
+    "certifi/LICENSE",
+    "charset_normalizer/LICENSE",
+    "idna/LICENSE.md",
+    "nab-resolver.LICENSE",
+    "requests/LICENSE",
+    "urllib3/LICENSE.txt",
     "tomli/LICENSE",
-    "launchers/DISTLIB-LICENSE.txt",
+    "typing_extensions.LICENSE",
 )
 
 LAUNCHER_HASHES = {
@@ -37,12 +38,19 @@ def test_vendored_license_is_present(relative_path: str) -> None:
     assert license_path.stat().st_size > 0
 
 
+def test_launcher_license_is_present() -> None:
+    license_path = LAUNCHER_ROOT / "DISTLIB-LICENSE.txt"
+
+    assert license_path.is_file()
+    assert license_path.stat().st_size > 0
+
+
 @pytest.mark.parametrize("filename, expected_hash", LAUNCHER_HASHES.items())
 def test_vendored_launcher_matches_documented_hash(
     filename: str,
     expected_hash: str,
 ) -> None:
-    launcher = VENDOR_ROOT / "launchers" / filename
+    launcher = LAUNCHER_ROOT / filename
 
     digest = hashlib.sha256()
     with launcher.open("rb") as launcher_file:

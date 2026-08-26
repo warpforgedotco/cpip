@@ -178,6 +178,37 @@ def test_widened_merge_promotes_exact_clause_to_fallback() -> None:
     )
 
 
+def test_unhashable_parent_version_uses_exhaustive_fallback() -> None:
+    class Version:
+        __hash__ = None
+
+        def __init__(self, value: int) -> None:
+            self.value = value
+
+        def __eq__(self, other: object) -> bool:
+            return isinstance(other, Version) and self.value == other.value
+
+        def __lt__(self, other: Version) -> bool:
+            return self.value < other.value
+
+    candidate = resolver()
+    version = Version(1)
+    incompat_index.add_dependency_incompatibility(
+        candidate,
+        "parent",
+        Range.singleton(version),
+        "dependency",
+        Range.singleton(1),
+        exact_parent_version=version,
+    )
+    candidate.solution.decide("parent", version)
+
+    assert propagate._related_incompatibility_groups(candidate, "parent") == (
+        (),
+        [0],
+    )
+
+
 def test_replayed_clause_still_replays_requirement_refinement(monkeypatch: Any) -> None:
     """Interning must not skip refinements that a backtrack removed."""
     candidate = resolver()
