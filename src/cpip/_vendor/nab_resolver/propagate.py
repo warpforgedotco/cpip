@@ -179,6 +179,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
     tokens = resolver.range_tokens
     token = tokens.get(range_)
     if token is None:
+        if len(tokens) >= RANGE_ID_MEMO_MAX:
+            tokens.clear()
         token = resolver.next_range_token
         resolver.next_range_token = token + 1
         tokens[range_] = token

@@ -475,6 +475,16 @@ index c6cf101..1be8932 100644
              if contradicted_at[incompatibility_index] == epoch:
                  continue
  
+@@ -158,6 +185,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
+     tokens = resolver.range_tokens
+     token = tokens.get(range_)
+     if token is None:
++        if len(tokens) >= RANGE_ID_MEMO_MAX:
++            tokens.clear()
+         token = resolver.next_range_token
+         resolver.next_range_token = token + 1
+         tokens[range_] = token
+
 diff --git a/src/cpip/_vendor/nab_resolver/ranges.py b/src/cpip/_vendor/nab_resolver/ranges.py
 index 568bd5a..ca3ba89 100644
 --- a/src/cpip/_vendor/nab_resolver/ranges.py
@@ -776,7 +786,7 @@ index f9a0d37..8455c2f 100644
  class Solution(Generic[PackageType, VersionType]):
      """Pins and dependency relationships from a finished resolution.
  
-@@ -82,6 +80,38 @@ class Solution(Generic[PackageType, VersionType]):
+@@ -82,6 +80,37 @@ class Solution(Generic[PackageType, VersionType]):
      edges: tuple[tuple[PackageType, PackageType], ...]
      roots: tuple[PackageType, ...]
  
@@ -803,8 +813,7 @@ index f9a0d37..8455c2f 100644
 +            self.roots,
 +        ) == (other.pins, other.edges, other.roots)
 +
-+    def __hash__(self) -> int:
-+        return hash((self.pins, self.edges, self.roots))
++    __hash__ = None  # type: ignore[assignment]
 +
 +    def __repr__(self) -> str:
 +        return (

@@ -467,6 +467,7 @@ test = [
 typing = [
     { name = "ruff" },
     { name = "ty" },
+    { name = "typing-extensions" },
 ]
 vendoring = [
     { name = "vendoring", marker = "python_full_version >= '3.11'" },
@@ -506,6 +507,7 @@ test = [
 typing = [
     { name = "ruff" },
     { name = "ty" },
+    { name = "typing-extensions", specifier = "==4.16.0" },
 ]
 vendoring = [{ name = "vendoring", marker = "python_full_version >= '3.11'", specifier = "==1.4.0" }]
 

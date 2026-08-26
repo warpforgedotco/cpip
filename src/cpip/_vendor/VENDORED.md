@@ -2,8 +2,8 @@
 
 The Python dependencies in this directory are generated with
 [`vendoring`](https://github.com/pradyunsg/vendoring), pinned in `vendor.txt`,
-and imported through the `cpip._vendor` namespace. Refresh them from the
-repository root with:
+and imported through the `cpip._vendor` namespace. The vendoring workflow
+requires Python 3.11 or newer. Refresh them from the repository root with:
 
 ```console
 uv run --group vendoring vendoring sync -v

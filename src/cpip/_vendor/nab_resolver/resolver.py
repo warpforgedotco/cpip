@@ -103,8 +103,7 @@ class Solution(Generic[PackageType, VersionType]):
             self.roots,
         ) == (other.pins, other.edges, other.roots)
 
-    def __hash__(self) -> int:
-        return hash((self.pins, self.edges, self.roots))
+    __hash__ = None  # type: ignore[assignment]
 
     def __repr__(self) -> str:
         return (
@@ -276,11 +275,12 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
 
 
 class BaseProvider(Generic[PackageType, VersionType]):
-    """Defaults for the six provider methods a synchronous provider does not need.
+    """Defaults for the seven provider methods a synchronous provider does not need.
 
     Supplies ``begin_decision_scan``, ``is_ready``,
-    ``receive_partial_solution_hint``, ``consume_pending_clauses``,
-    ``consume_force_backtrack_targets`` and ``narrow_for_display``, the six
+    ``consume_priority_invalidations``, ``receive_partial_solution_hint``,
+    ``consume_pending_clauses``,
+    ``consume_force_backtrack_targets`` and ``narrow_for_display``, the
     :class:`ResolverProvider` methods with nothing to do when there is no async
     layer, no queued clauses and no widening.  A subclass still owes
     ``choose_version``, ``has_satisfying_version``, ``get_dependencies``,
