@@ -393,6 +393,20 @@ class Resolver(Generic[PackageType, VersionType]):
             list
         )
 
+        # Dependency clauses are indexed separately by the role of each term.
+        # An exact parent decision only needs clauses registered for that
+        # version; undecided parent ranges retain the exhaustive parent list.
+        self.dependency_parent_incompatibilities: defaultdict[Any, list[int]] = (
+            defaultdict(list)
+        )
+        self.dependency_parent_fallbacks: defaultdict[Any, list[int]] = defaultdict(
+            list
+        )
+        self.dependency_parent_versions: defaultdict[
+            Any, defaultdict[Any, list[int]]
+        ] = defaultdict(lambda: defaultdict(list))
+        self.dependency_parent_fallback_indices: set[int] = set()
+
         # Keyed by (package, dep_package, dep_constraint, dep_positive); used
         # to merge mergeable dependency clauses (pubgrub-rs's merge_dependents).
         self.dependency_index: dict[Any, int] = {}
@@ -542,13 +556,23 @@ class Resolver(Generic[PackageType, VersionType]):
                 )
                 incompat_index.add_incompatibility(self, incompatibility)
             else:
-                incompatibility = incompat_index.add_dependency_incompatibility(
-                    self,
-                    next_package,
-                    parent_range,
-                    dependency_package,
-                    dependency_range,
-                )
+                if widened is None:
+                    incompatibility = incompat_index.add_dependency_incompatibility(
+                        self,
+                        next_package,
+                        parent_range,
+                        dependency_package,
+                        dependency_range,
+                        exact_parent_version=chosen_version,
+                    )
+                else:
+                    incompatibility = incompat_index.add_dependency_incompatibility(
+                        self,
+                        next_package,
+                        parent_range,
+                        dependency_package,
+                        dependency_range,
+                    )
                 decide.absorb_redundant_requirement(
                     self, dependency_package, dependency_range, incompatibility
                 )
@@ -610,6 +634,10 @@ class Resolver(Generic[PackageType, VersionType]):
         """Reset solver state for a new resolution."""
         self.incompatibilities.clear()
         self.package_to_incompatibilities.clear()
+        self.dependency_parent_incompatibilities.clear()
+        self.dependency_parent_fallbacks.clear()
+        self.dependency_parent_versions.clear()
+        self.dependency_parent_fallback_indices.clear()
         self.dependency_index.clear()
         self.solution = PartialSolution(range_type=self.range_type)
         self.stats = ResolverStats()

@@ -386,6 +386,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
         """Return the current decision map: ``{package: version}``."""
         return dict(self._decided_versions)
 
+    def decided_version(self, package: PackageType) -> VersionType | None:
+        """Return the package's exact decision without copying the decision map."""
+        return self._decided_versions.get(package)
+
     def undecided_packages(self) -> set[PackageType]:
         """Return packages with positive constraints but no decision yet.
 

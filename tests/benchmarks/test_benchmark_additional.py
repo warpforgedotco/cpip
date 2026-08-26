@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import itertools
 from pathlib import Path
+from typing import Any, cast
 
 from benchmark_support import make_wheel, reset_caches
+from cpip._vendor.nab_resolver import incompat_index, propagate
 from cpip.build.build_backend import ProjectBuilder, prepare_project_metadata
 from cpip.build.metadata import InstalledDistributionStore
 from cpip._vendor.nab_resolver.ranges import Range
+from cpip._vendor.nab_resolver.resolver import Resolver
 from cpip.core.errors import BuildError
 from cpip.core.packaging import SpecifierSet, parse_requirement
 from cpip.core.wheel import read_metadata_message
@@ -72,6 +75,24 @@ def test_discrete_release_range_algebra(benchmark: BenchmarkFixture) -> None:
         )
 
     assert benchmark(combine_ranges) == 597
+
+
+def test_exact_dependency_clause_dispatch(benchmark: BenchmarkFixture) -> None:
+    """Dispatch one selected release without scanning its historical clauses."""
+    resolver = Resolver(cast(Any, None))
+    for version in range(4_096):
+        incompat_index.add_dependency_incompatibility(
+            resolver,
+            "parent",
+            Range.singleton(version),
+            "dependency",
+            Range.singleton(version),
+            exact_parent_version=version,
+        )
+    resolver.solution.decide("parent", 4_095)
+    resolver.solution.decide("dependency", 4_095)
+
+    assert benchmark(propagate.unit_propagation, resolver, "parent") is None
 
 
 def test_requirement_primitive_parsing(benchmark: BenchmarkFixture) -> None:

@@ -21,9 +21,11 @@ import random
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 import cpip.resolution.nab_provider as nab_provider
+from cpip._vendor.nab_resolver import propagate
 from cpip.core.errors import ResolutionError
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
@@ -63,6 +65,28 @@ def resolve(wheelhouse: Path, roots: list[str]) -> dict[str, str] | None:
     except ResolutionError:
         return None
     return {candidate.name: str(candidate.version) for candidate in result.candidates}
+
+
+def resolve_with_metrics(
+    wheelhouse: Path, roots: list[str]
+) -> tuple[dict[str, str] | None, dict[str, int | float] | None]:
+    """Resolve and retain the algorithm counters for differential checks."""
+    reset_caches()
+    engine = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    try:
+        result = engine.resolve(roots)
+    except ResolutionError:
+        return None, None
+    selected = {
+        candidate.name: str(candidate.version) for candidate in result.candidates
+    }
+    return selected, dict(result.metrics)
 
 
 def build_random_graph(wheelhouse: Path, seed: int) -> list[str]:
@@ -128,6 +152,33 @@ def test_forward_check_never_changes_the_answer(
     assert with_check == without_check, (
         f"seed {seed}: the forward check changed the selected versions"
     )
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_exact_clause_dispatch_matches_exhaustive_propagation(
+    seed: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    roots = build_random_graph(wheelhouse, seed)
+    indexed = resolve_with_metrics(wheelhouse, roots)
+
+    def exhaustive_groups(resolver: Any, package: Any):
+        return (
+            resolver.package_to_incompatibilities.get(package, ()),
+            resolver.dependency_parent_incompatibilities.get(package, ()),
+        )
+
+    monkeypatch.setattr(
+        propagate,
+        "_related_incompatibility_groups",
+        exhaustive_groups,
+    )
+    exhaustive = resolve_with_metrics(wheelhouse, roots)
+
+    assert indexed == exhaustive, f"seed {seed}: indexed propagation diverged"
 
 
 def test_impossible_pins_are_skipped_without_conflicts(tmp_path: Path) -> None:

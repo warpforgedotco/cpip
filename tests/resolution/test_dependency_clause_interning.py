@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from cpip._vendor.nab_resolver import decide, incompat_index
+from cpip._vendor.nab_resolver import decide, incompat_index, propagate
 from cpip._vendor.nab_resolver.ranges import Range
 from cpip._vendor.nab_resolver.resolver import Resolver
-from cpip._vendor.nab_resolver.types import Incompatibility, IncompatibilityCause
+from cpip._vendor.nab_resolver.types import Incompatibility, IncompatibilityCause, Term
 
 
 class Provider:
@@ -51,10 +51,9 @@ def test_dependency_clause_is_reused_when_parent_range_is_covered() -> None:
 
     assert repeated is first
     assert candidate.incompatibilities == [first]
-    assert candidate.package_to_incompatibilities == {
-        "parent": [0],
-        "dependency": [0],
-    }
+    assert candidate.package_to_incompatibilities == {"dependency": [0]}
+    assert candidate.dependency_parent_incompatibilities == {"parent": [0]}
+    assert candidate.dependency_parent_fallbacks == {"parent": [0]}
     assert (
         candidate.dependency_index[("parent", "dependency", dependency_range, False)]
         == 0
@@ -74,8 +73,9 @@ def test_dependency_clause_widens_in_place() -> None:
     assert widened is not first
     assert candidate.incompatibilities == [widened]
     assert widened.terms[0].constraint == Range.singleton(1) | Range.singleton(3)
-    assert candidate.package_to_incompatibilities["parent"] == [0]
     assert candidate.package_to_incompatibilities["dependency"] == [0]
+    assert candidate.dependency_parent_incompatibilities["parent"] == [0]
+    assert candidate.dependency_parent_fallbacks["parent"] == [0]
 
 
 def test_distinct_dependency_keys_get_distinct_clauses() -> None:
@@ -92,6 +92,90 @@ def test_distinct_dependency_keys_get_distinct_clauses() -> None:
 
     assert len(candidate.incompatibilities) == 3
     assert len(candidate.dependency_index) == 3
+
+
+def test_exact_parent_decision_dispatches_only_its_version_clauses() -> None:
+    candidate = resolver()
+    first = incompat_index.add_dependency_incompatibility(
+        candidate,
+        "parent",
+        Range.singleton(1),
+        "dependency",
+        Range.singleton(1),
+        exact_parent_version=1,
+    )
+    second = incompat_index.add_dependency_incompatibility(
+        candidate,
+        "parent",
+        Range.singleton(2),
+        "dependency",
+        Range.singleton(2),
+        exact_parent_version=2,
+    )
+    general = Incompatibility(
+        [Term("parent", Range.singleton(3), positive=True)],
+        IncompatibilityCause.NO_VERSIONS,
+    )
+    incompat_index.add_incompatibility(candidate, general)
+    candidate.solution.decide("parent", 2)
+
+    groups = propagate._related_incompatibility_groups(candidate, "parent")
+
+    assert groups == ([2], (), [1])
+    assert propagate._related_incompatibility_groups(candidate, "dependency") == (
+        [0, 1],
+        (),
+    )
+    assert candidate.incompatibilities == [first, second, general]
+
+
+def test_undecided_parent_dispatches_every_dependency_clause() -> None:
+    candidate = resolver()
+    cause: Incompatibility[Any, Any] = Incompatibility(
+        [], IncompatibilityCause.DEPENDENCY
+    )
+    for version in (1, 2):
+        incompat_index.add_dependency_incompatibility(
+            candidate,
+            "parent",
+            Range.singleton(version),
+            "dependency",
+            Range.singleton(version),
+            exact_parent_version=version,
+        )
+    candidate.solution.derive("parent", Range.singleton(2), positive=True, cause=cause)
+
+    assert propagate._related_incompatibility_groups(candidate, "parent") == (
+        (),
+        [0, 1],
+    )
+
+
+def test_widened_merge_promotes_exact_clause_to_fallback() -> None:
+    candidate = resolver()
+    dependency_range = Range.at_least(1)
+    incompat_index.add_dependency_incompatibility(
+        candidate,
+        "parent",
+        Range.singleton(1),
+        "dependency",
+        dependency_range,
+        exact_parent_version=1,
+    )
+    incompat_index.add_dependency_incompatibility(
+        candidate,
+        "parent",
+        Range.between(1, 4),
+        "dependency",
+        dependency_range,
+    )
+    candidate.solution.decide("parent", 3)
+
+    assert propagate._related_incompatibility_groups(candidate, "parent") == (
+        (),
+        [0],
+        (),
+    )
 
 
 def test_replayed_clause_still_replays_requirement_refinement(monkeypatch: Any) -> None:
