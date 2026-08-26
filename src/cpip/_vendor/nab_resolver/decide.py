@@ -32,22 +32,9 @@ def choose_package_to_decide(resolver: Resolver[Any, Any]) -> Any | None:
     Prefers ``is_ready`` packages so resolution keeps making progress while
     other listings/metadata are still in flight.  ``begin_decision_scan`` marks
     the start of the scan so a provider fed by another thread can hold the
-    state behind its sort key still: ``min`` only picks correctly over a key
-    that does not move while it runs.
-
-    Keys are reused between scans rather than rebuilt.  Rebuilding is
-    quadratic over a resolution -- every undecided package, once per decision
-    -- and dominates once a requirements file gets wide, but almost no key
-    actually moves between two decisions.  A key survives until one of its
-    inputs is reported to have moved: the package's range (from the partial
-    solution), its conflict or culprit count (from the stats counters), or
-    the provider's own state.  A provider that cannot report the last of
-    those returns ``None`` and every key is rebuilt, which is what this did
-    unconditionally before.
-
-    Reusing a key whose input moved does not merely slow resolution down --
-    it picks a different package, and decision order decides how much
-    backtracking the resolution does at all.
+    state behind its sort key still. The queue keeps that key across scans, so
+    one that moves without the solution or ``priority_epoch`` moving is never
+    read again.
     """
     undecided = resolver.solution.undecided_packages()
     undecided.discard(ROOT)
@@ -81,27 +68,20 @@ def choose_package_to_decide(resolver: Resolver[Any, Any]) -> Any | None:
             tiebreak_cache[package] = tiebreak
         return (ready_penalty, priority, tiebreak)
 
-    # Drain unconditionally: a provider that cannot report invalidations
-    # still has to leave the resolver-side records empty, or they would
-    # accumulate and be applied to keys built long after they were recorded.
-    moved = resolver.solution.drain_touched()
-    moved |= resolver.stats.drain_priority_touched()
-
+    changed = resolver.solution.take_changed_packages()
     reporter = getattr(resolver.provider, "consume_priority_invalidations", None)
     reported = reporter() if reporter is not None else None
-    keys = resolver.priority_keys
-
     if reported is None:
-        keys.clear()
+        changed.update(undecided)
     else:
-        moved.update(reported)
-        for package in moved:
-            keys.pop(package, None)
+        changed.update(reported)
 
-    for package in undecided - keys.keys():
-        keys[package] = sort_key(package)
-
-    return min(undecided, key=keys.__getitem__)
+    return resolver.decision_queue.pick(
+        undecided,
+        sort_key,
+        changed,
+        resolver.priority_epoch,
+    )
 
 
 def choose_version(resolver: Resolver[Any, Any], package: Any) -> Any | None:
@@ -122,6 +102,22 @@ def choose_version(resolver: Resolver[Any, Any], package: Any) -> Any | None:
     return resolver.provider.choose_version(package, current_range)
 
 
+def _normalize_terms(
+    resolver: Resolver[Any, Any], incompatibility: Incompatibility[Any, Any]
+) -> None:
+    """Replace, in place, any term whose constraint is not a legal term range.
+
+    A provider builds a pending clause's terms itself, so they reach the
+    formula without the substitution a supplied range gets on the way in.
+    """
+    for index, term in enumerate(incompatibility.terms):
+        constraint = resolver.as_term_range(term.constraint)
+        if constraint is not term.constraint:
+            incompatibility.terms[index] = Term(
+                term.package, constraint, positive=term.is_positive()
+            )
+
+
 def absorb_pending_clauses(resolver: Resolver[Any, Any]) -> bool:
     """Drain provider-queued incompatibilities into the formula.
 
@@ -132,6 +128,7 @@ def absorb_pending_clauses(resolver: Resolver[Any, Any]) -> bool:
     """
     clauses = list(resolver.provider.consume_pending_clauses())
     for incompatibility in clauses:
+        _normalize_terms(resolver, incompatibility)
         add_incompatibility(resolver, incompatibility)
     return bool(clauses)
 
@@ -190,7 +187,7 @@ def record_no_versions(
     if had_pending:
         return
 
-    current_range = resolver.solution.get(package) or resolver.range_type.full()
+    current_range = resolver.solution.get(package) or resolver.term_top
     resolver.observer.on_no_versions(package, current_range)
 
     constraint = resolver.constraints.get(package)

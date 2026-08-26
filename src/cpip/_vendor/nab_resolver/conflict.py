@@ -89,6 +89,7 @@ def conflict_resolution(
                 format_error(
                     current_incompatibility,
                     narrow=resolver.provider.narrow_for_display,
+                    format_range=resolver.format_range,
                 ),
                 incompatibility=current_incompatibility,
             )
@@ -150,6 +151,7 @@ def conflict_resolution(
                     format_error(
                         current_incompatibility,
                         narrow=resolver.provider.narrow_for_display,
+                        format_range=resolver.format_range,
                     ),
                     incompatibility=current_incompatibility,
                 )
@@ -165,6 +167,7 @@ def conflict_resolution(
             resolver.stats.package_conflict_counts[
                 conflict_credit_target(most_recent_satisfier)
             ] += 1
+            resolver.priority_epoch += 1
 
             update_culprit_counts(
                 resolver,
@@ -235,6 +238,7 @@ def update_culprit_counts(
     threshold = resolver.CULPRIT_THRESHOLD
     for package in culprit_packages:
         resolver.stats.package_culprit_counts[package] += 1
+        resolver.priority_epoch += 1
         count = resolver.stats.package_culprit_counts[package]
         if (
             count >= threshold
@@ -474,12 +478,13 @@ def maybe_restart(
         return restart_threshold, restarts_remaining, False
 
     resolver.stats.restarts += 1
-    resolver.solution = PartialSolution(range_type=resolver.range_type)
+    resolver.solution = PartialSolution(
+        range_type=resolver.range_type,
+        contradiction_epoch=resolver.solution.contradiction_epoch + 1,
+    )
     resolver.solution.decide(ROOT, resolver.root_version)
+    resolver.decision_queue.clear()
     resolver.pending_targeted_backtrack.clear()
-    # Every range the cached sort keys were built from is gone with the old
-    # partial solution, and the new one has nothing to report as touched.
-    resolver.priority_keys.clear()
     resolver.stats.targeted_backtracks = 0
 
     return restart_threshold * 2, restarts_remaining - 1, True
@@ -505,6 +510,7 @@ def force_targeted_backtrack(
         current = resolver.stats.package_culprit_counts[package]
         if current < threshold:
             resolver.stats.package_culprit_counts[package] = threshold
+            resolver.priority_epoch += 1
         if package not in resolver.pending_targeted_backtrack:
             resolver.pending_targeted_backtrack.append(package)
 

@@ -15,13 +15,16 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#partial-so
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Generic
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast, overload
+from weakref import ref
 
+from ._compat import override
 from .ranges import Range
 from .types import PackageType, RangeProtocol, VersionType
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     from .types import Incompatibility, Term
 
@@ -32,17 +35,138 @@ __all__ = [
 ]
 
 
-# Distinguishes "cached miss" from a legitimate cached None.
+# Marks a missing map entry, where None can itself be the stored value.
 _UNSET = object()
+
+# Marks a package that the live map did not hold when a snapshot was taken.
+_ABSENT = object()
+
+_ValueType = TypeVar("_ValueType")
+_DefaultType = TypeVar("_DefaultType")
+
+
+class _Snapshot(Mapping[PackageType, _ValueType]):
+    """A read-only view of one of the solution's maps, pinned to one moment.
+
+    Reads fall through to the live map, so nothing is copied up front.
+    Before the solution changes a package's entry it calls :meth:`freeze`,
+    which records the value this view has to keep.
+    """
+
+    __slots__ = ("__weakref__", "_live", "_shadow")
+
+    def __init__(self, live: dict[PackageType, _ValueType]) -> None:
+        self._live = live
+        # A value or _ABSENT. Any rather than that union, which no checker
+        # narrows the sentinel back out of.
+        self._shadow: dict[PackageType, Any] = {}
+
+    def freeze(self, package: PackageType) -> None:
+        """Keep the package's current value before the live map moves on."""
+        if package not in self._shadow:
+            self._shadow[package] = self._live.get(package, _ABSENT)
+
+    def detach(self) -> None:
+        """Take a copy of the live map, so later changes need no freezing.
+
+        Backtracking rewrites most of the map at once, where one copy beats
+        recording each package on its way out.
+        """
+        frozen = dict(self._live)
+        for package, value in self._shadow.items():
+            if value is _ABSENT:
+                frozen.pop(package, None)
+            else:
+                frozen[package] = value
+        self._live = frozen
+        self._shadow = {}
+
+    @override
+    def __getitem__(self, package: PackageType) -> _ValueType:
+        frozen = self._shadow.get(package, _UNSET)
+        if frozen is _UNSET:
+            return self._live[package]
+        if frozen is _ABSENT:
+            raise KeyError(package)
+        return cast("_ValueType", frozen)
+
+    # ``object`` rather than ``PackageType``: narrowing the key would not
+    # substitute for ``Mapping.get``.
+    @overload
+    def get(self, package: object, /) -> _ValueType | None: ...
+    @overload
+    def get(
+        self, package: object, /, default: _ValueType | _DefaultType
+    ) -> _ValueType | _DefaultType: ...
+    @override
+    def get(
+        self, package: Any, /, default: _ValueType | _DefaultType | None = None
+    ) -> _ValueType | _DefaultType | None:
+        """Return the package's value as of the snapshot, else ``default``.
+
+        Defined rather than inherited: ``Mapping.get`` routes every read
+        through ``__getitem__``, and every miss through a raised ``KeyError``.
+        """
+        frozen = self._shadow.get(package, _UNSET)
+        if frozen is _UNSET:
+            return self._live.get(package, default)
+        if frozen is _ABSENT:
+            return default
+        return cast("_ValueType", frozen)
+
+    @override
+    def __contains__(self, package: object) -> bool:
+        frozen = self._shadow.get(cast("PackageType", package), _UNSET)
+        if frozen is _UNSET:
+            return package in self._live
+        return frozen is not _ABSENT
+
+    @override
+    def __iter__(self) -> Iterator[PackageType]:
+        """Yield the snapshot's packages, in the order the live map holds them.
+
+        Freezing leaves a package where it is, and the only path that removes
+        one is ``backtrack``, which detaches first, so the live map still holds
+        every key of the snapshot in the order it arrived.
+        """
+        shadow = self._shadow
+        for package in self._live:
+            if shadow.get(package, _UNSET) is not _ABSENT:
+                yield package
+
+    @override
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+
+def _take_snapshot(
+    live: dict[PackageType, _ValueType],
+    holders: list[ref[_Snapshot[PackageType, _ValueType]]],
+) -> _Snapshot[PackageType, _ValueType]:
+    """Snapshot ``live`` and hold a weak reference to it in ``holders``.
+
+    Entries whose snapshot the caller has since released are dropped on the way.
+    """
+    snapshot = _Snapshot(live)
+    holders[:] = [holder for holder in holders if holder() is not None]
+    holders.append(ref(snapshot))
+    return snapshot
+
+
+def _detach_snapshots(
+    holders: list[ref[_Snapshot[PackageType, _ValueType]]],
+) -> None:
+    """Detach every outstanding snapshot from the map it reads through."""
+    for holder in holders:
+        snapshot = holder()
+        if snapshot is not None:
+            snapshot.detach()
 
 
 class Assignment(Generic[PackageType, VersionType]):
     """A single entry in the partial solution trail."""
 
-    # Written out rather than generated by ``dataclasses`` so the resolver
-    # does not import that module (cpip patch, see VENDORED.md).
     __slots__ = (
-        "_effective",
         "accumulated_range",
         "cause",
         "cum_decision",
@@ -89,14 +213,6 @@ class Assignment(Generic[PackageType, VersionType]):
     cum_decision: VersionType | None
     """The package's decided version as of this entry, if it had one."""
 
-    _effective: RangeProtocol[VersionType] | None
-    """Cached ``cum_positive - cum_negative``, lazily computed by
-    ``PartialSolution._satisfied_at``. ``cum_positive``/``cum_negative`` are
-    fixed once an assignment is on the trail, so the combined range never
-    changes -- but ``satisfier``'s binary search can probe the same trail
-    entry many times across conflict analysis, and the subtraction it
-    otherwise repeats is one of the more expensive Range operations."""
-
     def __init__(
         self,
         package: PackageType,
@@ -122,7 +238,6 @@ class Assignment(Generic[PackageType, VersionType]):
         self.cum_positive = cum_positive
         self.cum_negative = cum_negative
         self.cum_decision = cum_decision
-        self._effective = None
 
     def _values(self) -> tuple[object, ...]:
         return (
@@ -145,15 +260,26 @@ class Assignment(Generic[PackageType, VersionType]):
     __hash__ = None  # type: ignore[assignment]
 
     def __repr__(self) -> str:
-        return (
-            f"Assignment(package={self.package!r}, "
-            f"accumulated_range={self.accumulated_range!r}, "
-            f"decision_level={self.decision_level!r}, "
-            f"is_decision={self.is_decision!r}, trail_index={self.trail_index!r}, "
-            f"version={self.version!r}, cause={self.cause!r}, "
-            f"positive={self.positive!r}, cum_positive={self.cum_positive!r}, "
-            f"cum_negative={self.cum_negative!r}, cum_decision={self.cum_decision!r})"
+        values = ", ".join(
+            f"{name}={value!r}"
+            for name, value in zip(
+                (
+                    "package",
+                    "accumulated_range",
+                    "decision_level",
+                    "is_decision",
+                    "trail_index",
+                    "version",
+                    "cause",
+                    "positive",
+                    "cum_positive",
+                    "cum_negative",
+                    "cum_decision",
+                ),
+                self._values(),
+            )
         )
+        return f"Assignment({values})"
 
 
 class PartialSolution(Generic[PackageType, VersionType]):
@@ -163,8 +289,19 @@ class PartialSolution(Generic[PackageType, VersionType]):
     See: https://en.wikipedia.org/wiki/Conflict-driven_clause_learning#Organization
     """
 
-    def __init__(self, range_type: type[RangeProtocol[Any]] = Range) -> None:
-        """Initialize an empty partial solution."""
+    def __init__(
+        self,
+        range_type: type[RangeProtocol[Any]] = Range,
+        *,
+        contradiction_epoch: int = 0,
+    ) -> None:
+        """Initialize an empty partial solution.
+
+        ``contradiction_epoch`` carries on from a solution this one replaces,
+        so a stamp taken against the old trail cannot look current against the
+        new one.
+        """
+        self._contradiction_epoch = contradiction_epoch
         self._range_type = range_type
         self._assignments: list[Assignment[PackageType, VersionType]] = []
         self._decision_level = 0
@@ -175,25 +312,41 @@ class PartialSolution(Generic[PackageType, VersionType]):
         # Incrementally maintained as set(positive) - set(decided).
         self._undecided: set[PackageType] = set()
 
+        # Packages whose effective range or decided state moved since the last
+        # drain.
+        self._changed: set[PackageType] = set()
+
         # Memoises positive - negative per package.
         self._effective_range_cache: dict[
             PackageType, RangeProtocol[VersionType] | None
         ] = {}
-
-        # Packages whose range moved since the last drain. ``prioritize`` is
-        # handed a package's range, so a decision scan that reuses a cached
-        # sort key has to know which ones it may no longer trust.
-        self._touched: set[PackageType] = set()
 
         # Per-package index of trail entries; lets satisfier() avoid the full scan.
         self._assignments_by_package: defaultdict[
             PackageType, list[Assignment[PackageType, VersionType]]
         ] = defaultdict(list)
 
+        # Weak references to the snapshots still outstanding.
+        self._range_snapshots: list[
+            ref[_Snapshot[PackageType, RangeProtocol[VersionType]]]
+        ] = []
+        self._decision_snapshots: list[ref[_Snapshot[PackageType, VersionType]]] = []
+
     @property
     def decision_level(self) -> int:
         """Return the current decision depth."""
         return self._decision_level
+
+    @property
+    def contradiction_epoch(self) -> int:
+        """Return the epoch a contradicted term stays contradicted for.
+
+        It advances on a rollback, and on any assignment that empties a
+        package's range: an empty range is both a subset of and disjoint from
+        every constraint, so terms on that package stop reading as
+        contradicted.
+        """
+        return self._contradiction_epoch
 
     @property
     def trail_length(self) -> int:
@@ -219,7 +372,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
         """
         cached = self._effective_range_cache.get(package, _UNSET)
         if cached is not _UNSET:
-            return cached  # type: ignore[return-value]  # typing.cast is a call on the hottest read
+            return cast("RangeProtocol[VersionType] | None", cached)
 
         positive = self._positive_ranges.get(package)
         negative = self._negative_ranges.get(package)
@@ -239,18 +392,27 @@ class PartialSolution(Generic[PackageType, VersionType]):
         self._effective_range_cache[package] = result
         return result
 
+    def _refresh_effective_range(self, package: PackageType) -> None:
+        """Recompute the package's range, advancing the epoch if it emptied."""
+        self._effective_range_cache.pop(package, None)
+        self._changed.add(package)
+        effective = self.get(package)
+        assert effective is not None
+        if effective.is_empty:
+            self._contradiction_epoch += 1
+
     def decide(self, package: PackageType, version: VersionType) -> None:
         """Record a decision: pick a specific version for a package."""
         self._decision_level += 1
         exact_range = self._range_type.singleton(version)
 
+        self._freeze_ranges(package)
+        self._freeze_decisions(package)
         self._positive_ranges[package] = exact_range
         self._decided_versions[package] = version
-        self._effective_range_cache.pop(package, None)
+        self._refresh_effective_range(package)
         self._undecided.discard(package)
-        self._touched.add(package)
 
-        package_entries = self._assignments_by_package[package]
         assignment = Assignment(
             package=package,
             accumulated_range=exact_range,
@@ -264,7 +426,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             cum_decision=version,
         )
         self._assignments.append(assignment)
-        package_entries.append(assignment)
+        self._assignments_by_package[package].append(assignment)
 
     def derive(
         self,
@@ -284,6 +446,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
                 new_range = self._positive_ranges[package] & constraint
             else:
                 new_range = self._range_type.full() & constraint
+            self._freeze_ranges(package)
             self._positive_ranges[package] = new_range
             if package not in self._decided_versions:
                 self._undecided.add(package)
@@ -295,10 +458,8 @@ class PartialSolution(Generic[PackageType, VersionType]):
                 new_range = self._range_type.empty() | constraint
             self._negative_ranges[package] = new_range
 
-        self._effective_range_cache.pop(package, None)
-        self._touched.add(package)
+        self._refresh_effective_range(package)
 
-        package_entries = self._assignments_by_package[package]
         assignment = Assignment(
             package=package,
             accumulated_range=new_range,
@@ -312,83 +473,118 @@ class PartialSolution(Generic[PackageType, VersionType]):
             cum_decision=self._decided_versions.get(package),
         )
         self._assignments.append(assignment)
-        package_entries.append(assignment)
+        self._assignments_by_package[package].append(assignment)
 
     def backtrack(self, target_level: int) -> None:
         """Remove all assignments above target_level.
 
         Non-chronological backjumping: skips past irrelevant decision levels
-        directly to the cause of the conflict.  Every ``cum_*`` field records
-        the package's state as of that entry, so the surviving top entry
-        restores it outright -- no re-intersecting, and no rescan of the
-        package's trail.
+        directly to the cause of the conflict.  Relies on
+        ``Assignment.accumulated_range`` already being cumulative, so each
+        package's surviving state can be rebuilt without re-intersecting.
         See: https://github.com/dart-lang/pub/blob/master/doc/solver.md#conflict-resolution
         """
-        affected_packages: set[PackageType] = set()
-        while self._assignments and self._assignments[-1].decision_level > target_level:
-            assignment = self._assignments.pop()
-            package = assignment.package
-            affected_packages.add(package)
+        self._contradiction_epoch += 1
+        _detach_snapshots(self._range_snapshots)
+        _detach_snapshots(self._decision_snapshots)
 
-            entries = self._assignments_by_package.get(package)
-            if entries:
-                entries.pop()
+        # Trail levels never decrease, so this pops exactly the assignments above
+        # target_level; every other package keeps the positive and negative ranges
+        # its cached effective range was derived from.
+        changed_packages: set[PackageType] = set()
+        while self._assignments and self._assignments[-1].decision_level > target_level:
+            package = self._assignments.pop().package
+            changed_packages.add(package)
+            self._effective_range_cache.pop(package, None)
+            self._changed.add(package)
 
         self._decision_level = target_level
-        self._touched |= affected_packages
 
-        for package in affected_packages:
-            entries = self._assignments_by_package.get(package)
+        for package in changed_packages:
+            entries = self._assignments_by_package[package]
+            while entries and entries[-1].decision_level > target_level:
+                entries.pop()
+
             if not entries:
-                self._assignments_by_package.pop(package, None)
+                del self._assignments_by_package[package]
                 self._positive_ranges.pop(package, None)
                 self._negative_ranges.pop(package, None)
                 self._decided_versions.pop(package, None)
                 self._undecided.discard(package)
             else:
-                last_entry = entries[-1]
+                self._update_package_state_after_backtrack(package, entries)
 
-                if last_entry.cum_positive is None:
-                    self._positive_ranges.pop(package, None)
-                else:
-                    self._positive_ranges[package] = last_entry.cum_positive
+    def _update_package_state_after_backtrack(
+        self,
+        package: PackageType,
+        entries: list[Assignment[PackageType, VersionType]],
+    ) -> None:
+        """Recompute positive/negative/decided state for a package.
 
-                if last_entry.cum_negative is None:
-                    self._negative_ranges.pop(package, None)
-                else:
-                    self._negative_ranges[package] = last_entry.cum_negative
-
-                decided_version = last_entry.cum_decision
-                if decided_version is None:
-                    self._decided_versions.pop(package, None)
-                else:
-                    self._decided_versions[package] = decided_version
-
-                if last_entry.cum_positive is not None and decided_version is None:
-                    self._undecided.add(package)
-                else:
-                    self._undecided.discard(package)
-
-        self._effective_range_cache.clear()
-
-    def drain_touched(self) -> set[PackageType]:
-        """Return packages whose range moved since the last call, and reset.
-
-        ``decide``, ``derive`` and ``backtrack`` are the only writers of a
-        package's range, so recording here is what keeps a cached sort key
-        from outliving the range it was built from.
+        Each ``Assignment.accumulated_range`` is already cumulative, so the
+        latest entry of each kind is enough to rebuild state.  Trail levels
+        never decrease, so popping a decision pops every later entry for the
+        same package; a surviving decision is always the current one.
         """
-        touched = self._touched
-        self._touched = set()
-        return touched
+        last_entry = entries[-1]
+        last_pos = last_entry.cum_positive
+        last_neg = last_entry.cum_negative
+        last_decision_version = last_entry.cum_decision
 
-    def decisions(self) -> dict[PackageType, VersionType]:
-        """Return the current decision map: ``{package: version}``."""
-        return dict(self._decided_versions)
+        if last_pos is None:
+            self._positive_ranges.pop(package, None)
+        else:
+            self._positive_ranges[package] = last_pos
+
+        if last_neg is None:
+            self._negative_ranges.pop(package, None)
+        else:
+            self._negative_ranges[package] = last_neg
+
+        if last_decision_version is None:
+            self._decided_versions.pop(package, None)
+        else:
+            self._decided_versions[package] = last_decision_version
+
+        if last_pos is not None and last_decision_version is None:
+            self._undecided.add(package)
+        else:
+            self._undecided.discard(package)
+
+    def decisions(self) -> Mapping[PackageType, VersionType]:
+        """Return the decision map ``{package: version}``.
+
+        Read-only, and pinned: later decisions and backtracking do not reach it.
+        """
+        return _take_snapshot(self._decided_versions, self._decision_snapshots)
 
     def decided_version(self, package: PackageType) -> VersionType | None:
-        """Return the package's exact decision without copying the decision map."""
+        """Return one exact decision without allocating a mapping snapshot."""
         return self._decided_versions.get(package)
+
+    def _freeze_decisions(self, package: PackageType) -> None:
+        """Preserve the package's decided version in outstanding snapshots."""
+        for holder in self._decision_snapshots:
+            snapshot = holder()
+            if snapshot is not None:
+                snapshot.freeze(package)
+
+    def _freeze_ranges(self, package: PackageType) -> None:
+        """Preserve the package's positive range in outstanding snapshots."""
+        for holder in self._range_snapshots:
+            snapshot = holder()
+            if snapshot is not None:
+                snapshot.freeze(package)
+
+    def take_changed_packages(self) -> set[PackageType]:
+        """Return the packages whose state moved since the last call, and reset.
+
+        Every path that moves a package's effective range or its decided state
+        records it here, backtracking included.
+        """
+        changed = self._changed
+        self._changed = set()
+        return changed
 
     def undecided_packages(self) -> set[PackageType]:
         """Return packages with positive constraints but no decision yet.
@@ -403,9 +599,12 @@ class PartialSolution(Generic[PackageType, VersionType]):
         """Return True if the package has a positive constraint or decision."""
         return package in self._positive_ranges or package in self._decided_versions
 
-    def positive_ranges(self) -> dict[PackageType, RangeProtocol[VersionType]]:
-        """Return a copy of the positive-range map for each package."""
-        return dict(self._positive_ranges)
+    def positive_ranges(self) -> Mapping[PackageType, RangeProtocol[VersionType]]:
+        """Return each package's positive range.
+
+        Read-only, and pinned: later derivations and backtracking do not reach it.
+        """
+        return _take_snapshot(self._positive_ranges, self._range_snapshots)
 
     def positive_range(self, package: PackageType) -> RangeProtocol[VersionType] | None:
         """Return the package's accumulated positive range, or None if unset."""
@@ -427,16 +626,13 @@ class PartialSolution(Generic[PackageType, VersionType]):
         if is_positive and cum_positive is None:
             return False
 
-        effective = assignment._effective
-        if effective is None:
-            if cum_positive is None:
-                assert assignment.cum_negative is not None
-                effective = ~assignment.cum_negative
-            elif assignment.cum_negative is None:
-                effective = cum_positive
-            else:
-                effective = cum_positive - assignment.cum_negative
-            assignment._effective = effective
+        if cum_positive is None:
+            assert assignment.cum_negative is not None
+            effective = ~assignment.cum_negative
+        elif assignment.cum_negative is None:
+            effective = cum_positive
+        else:
+            effective = cum_positive - assignment.cum_negative
 
         return term.satisfies(effective)
 

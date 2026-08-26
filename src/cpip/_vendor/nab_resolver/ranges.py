@@ -1,7 +1,8 @@
 """Generic version range with interval operations.
 
-A Range represents a set of versions as a sorted list of non-overlapping
-intervals. Supports intersection, union, complement, and containment.
+A Range represents a set of versions as a canonical list of intervals; see
+``Range.__init__`` for what makes a list canonical. Supports intersection,
+union, complement, and containment.
 
 This is equivalent to pubgrub-rs's ``version_ranges::Ranges<V>``:
 https://github.com/pubgrub-rs/pubgrub/tree/release/version-ranges
@@ -12,14 +13,13 @@ provider uses int; the Python provider uses packaging.version.Version.
 
 from __future__ import annotations
 
-from typing import Any, Generic, TypeAlias
+from typing import TYPE_CHECKING, Any, Generic, TypeAlias, cast
 
-try:
-    from typing import override
-except ImportError:  # pragma: no cover - Python < 3.12
-    from cpip._vendor.typing_extensions import override
-
+from ._compat import override
 from .types import RangeRelation, VersionType
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 # Bound once so the hot return paths load a module global instead of a class
 # attribute.
@@ -117,8 +117,7 @@ Interval: TypeAlias = tuple[Bound, bool, Bound, bool]
 
 
 def _same_bound(left: Bound, right: Bound) -> bool:
-    """Whether two bounds are the same point, without comparing a version
-    against an infinity sentinel."""
+    """Compare bounds without asking a version to compare with infinity."""
     if left is right:
         return True
     if (
@@ -157,23 +156,23 @@ def _min_upper_bound(left: Interval, right: Interval) -> tuple[Bound, bool]:
     return left_upper, left_upper_inc
 
 
-def _ends_before(right: Interval, left: Interval) -> bool:
-    """Return True if ``right`` finishes below everything in ``left``."""
-    right_upper, right_upper_inclusive = right[2], right[3]
-    left_lower, left_lower_inclusive = left[0], left[1]
-    if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
+def _ends_before(interval: Interval, other: Interval) -> bool:
+    """Return whether ``interval`` finishes below everything in ``other``."""
+    upper, upper_inclusive = interval[2], interval[3]
+    lower, lower_inclusive = other[0], other[1]
+    if upper is POSITIVE_INFINITY or lower is NEGATIVE_INFINITY:
         return False
-    if right_upper == left_lower:
-        # They meet at a single point, shared only if both ends include it.
-        return not (right_upper_inclusive and left_lower_inclusive)
-    return bool(right_upper < left_lower)
+    if upper == lower:
+        # They meet at a point, which they share only if both ends include it.
+        return not (upper_inclusive and lower_inclusive)
+    return bool(upper < lower)
 
 
 def _advance_left(left: Interval, right: Interval) -> bool:
-    """Return True if the merge walk should step ``left`` rather than ``right``.
+    """Return whether a walk over two interval lists should step ``left``.
 
-    Whichever interval ends first cannot overlap anything further along the
-    other side, so it is the one to retire.
+    Whichever interval ends first cannot meet anything further along the other
+    list, so it is the one to retire.
     """
     left_upper = left[2]
     right_upper = right[2]
@@ -200,25 +199,38 @@ def _interval_is_empty(
 
 
 class Range(Generic[VersionType]):
-    """A set of versions represented as sorted, non-overlapping intervals.
+    """A set of versions represented as a canonical list of intervals.
 
     Modeled after pubgrub-rs ``version_ranges::Ranges<V>``:
     https://docs.rs/version-ranges/latest/version_ranges/struct.Ranges.html
 
     Each interval is ``(lower, lower_inclusive, upper, upper_inclusive)``.
-    The list is sorted by lower bound and intervals do not overlap or touch.
+    See :meth:`__init__` for the invariant the interval list must satisfy.
     """
 
     __slots__ = ("_hash", "_intervals", "_points")
 
     def __init__(self, intervals: tuple[Interval, ...] = ()) -> None:
-        """Create a range from pre-sorted, non-overlapping intervals."""
+        """Create a range from intervals that already satisfy the invariant.
+
+        The intervals must be sorted by lower bound, must not overlap or
+        touch, must each hold at least one version, and must be exclusive at
+        ``NEGATIVE_INFINITY`` and ``POSITIVE_INFINITY``.  Every operator
+        returns through here, so this neither checks nor normalizes: the
+        classmethods and the operators maintain the invariant, and a caller
+        that assembles its own tuple owns it.
+
+        Equality and hashing compare interval tuples, so two lists denoting
+        the same set must be the same list, and
+        ``((1, True, 2, False), (2, True, 3, True))`` is not a legal way to
+        write ``[1, 3]``.
+        """
         self._intervals = intervals
         self._hash = 0
         self._points: frozenset[VersionType] | None | object = _POINTS_UNSET
 
     def _as_points(self) -> frozenset[VersionType] | None:
-        """Return the members of a discrete singleton range, else ``None``."""
+        """Return members for a discrete singleton range, otherwise ``None``."""
         cached = self._points
         if cached is None or isinstance(cached, frozenset):
             return cached
@@ -242,7 +254,6 @@ class Range(Generic[VersionType]):
 
     @classmethod
     def _from_points(cls, points: frozenset[VersionType]) -> Range[VersionType]:
-        """Build a normalized singleton range while retaining ``points``."""
         result = cls(
             tuple((version, True, version, True) for version in sorted(points))
         )
@@ -267,8 +278,29 @@ class Range(Generic[VersionType]):
         """Create a range containing exactly one version.
 
         Mirrors :meth:`packaging.ranges.VersionRange.singleton`.
+        For a set of versions use :meth:`from_versions`.
         """
         return cls(((version, True, version, True),))
+
+    @classmethod
+    def from_versions(cls, versions: Iterable[VersionType]) -> Range[VersionType]:
+        """Create a range holding exactly the given versions.
+
+        The iterable is consumed once and equal versions collapse.
+        Distinct versions never merge: a range has no notion of one
+        version following another, so the result still excludes
+        everything strictly between them.
+
+        Cheaper than folding :meth:`singleton` with ``|``.
+        """
+        # sorted() needs an ordering bound, which VersionType does not declare.
+        points = frozenset(cast("Iterable[Any]", versions))
+        result = cls(
+            tuple((version, True, version, True) for version in sorted(points))
+        )
+        if len(points) >= _POINT_SET_MIN_INTERVALS:
+            result._points = points
+        return result
 
     @classmethod
     def at_least(cls, version: VersionType) -> Range[VersionType]:
@@ -305,21 +337,15 @@ class Range(Generic[VersionType]):
         return len(self._intervals) == 0
 
     def __contains__(self, version: object) -> bool:
-        """Test whether version falls within this range.
-
-        Intervals are sorted and non-overlapping, so at most one can hold the
-        version: the last one starting at or below it.  Binary search finds
-        that one, which matters because callers test every release of a
-        package against the same range.
-        """
+        """Test membership by point lookup or binary-searching intervals."""
         intervals = self._intervals
         if len(intervals) >= _POINT_SET_MIN_INTERVALS:
             points = self._as_points()
             if points is not None:
                 return version in points
+
         low = 0
         high = len(intervals)
-
         while low < high:
             middle = (low + high) // 2
             lower = intervals[middle][0]
@@ -327,41 +353,32 @@ class Range(Generic[VersionType]):
                 low = middle + 1
             else:
                 high = middle
-
         if low == 0:
             return False
-
         lower, lower_inclusive, upper, upper_inclusive = intervals[low - 1]
-
-        if lower is not NEGATIVE_INFINITY and version == lower and not lower_inclusive:
-            return False
-
+        if lower is not NEGATIVE_INFINITY and _same_bound(version, lower):
+            return lower_inclusive
         if upper is POSITIVE_INFINITY:
             return True
-
-        return not (version > upper or (version == upper and not upper_inclusive))
+        return not (version > upper or (_same_bound(version, upper) and not upper_inclusive))
 
     def __and__(self, other: object) -> Range[VersionType]:
         """Compute the intersection of two ranges (versions in both)."""
         if not isinstance(other, Range):
             return NotImplemented
-        left_intervals = self._intervals
-        right_intervals = other._intervals
         if (
-            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
+            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
         ):
             left_points = self._as_points()
             right_points = other._as_points()
             if left_points is not None and right_points is not None:
                 return self._from_points(left_points & right_points)
-        left_count = len(left_intervals)
-        right_count = len(right_intervals)
         result: list[Interval] = []
         left_index = right_index = 0
-        while left_index < left_count and right_index < right_count:
-            left_interval = left_intervals[left_index]
-            right_interval = right_intervals[right_index]
+        while left_index < len(self._intervals) and right_index < len(other._intervals):
+            left_interval = self._intervals[left_index]
+            right_interval = other._intervals[right_index]
 
             inter_lower, inter_lower_inc = _max_lower_bound(
                 left_interval, right_interval
@@ -399,17 +416,15 @@ class Range(Generic[VersionType]):
         """Union of two ranges (versions in either)."""
         if not isinstance(other, Range):
             return NotImplemented
-        left_intervals = self._intervals
-        right_intervals = other._intervals
         if (
-            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
+            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
         ):
             left_points = self._as_points()
             right_points = other._as_points()
             if left_points is not None and right_points is not None:
                 return self._from_points(left_points | right_points)
-        all_intervals = list(left_intervals) + list(right_intervals)
+        all_intervals = list(self._intervals) + list(other._intervals)
         return Range(_normalize_intervals(all_intervals))
 
     def __invert__(self) -> Range[VersionType]:
@@ -465,111 +480,81 @@ class Range(Generic[VersionType]):
     def __sub__(self, other: object) -> Range[VersionType]:
         """Set difference: versions in self but not in other.
 
-        Carves each of this range's intervals directly, rather than building
-        the complement of ``other`` and intersecting with it.  Conflict
-        analysis subtracts on every probe of the assignment trail, so the
-        intermediate complement was pure allocation.
+        Carves each of this range's intervals against ``other``'s in a single
+        walk of both lists, so the complement of ``other`` is never built.
         """
         if not isinstance(other, Range):
             return NotImplemented
 
-        left_intervals = self._intervals
-        right_intervals = other._intervals
         if (
-            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
+            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
         ):
             left_points = self._as_points()
             right_points = other._as_points()
             if left_points is not None and right_points is not None:
                 return self._from_points(left_points - right_points)
+
+        right_intervals = other._intervals
         right_count = len(right_intervals)
         result: list[Interval] = []
         right_index = 0
 
-        # _ends_before and _interval_is_empty are inlined throughout this
-        # method: conflict analysis subtracts on every probe of the
-        # assignment trail, and those two helpers were the largest self-time
-        # of a deep backtrack.
-        for left in left_intervals:
+        for left in self._intervals:
             lower, lower_inclusive, upper, upper_inclusive = left
 
-            # Retire right intervals that finish below this one; they cannot
-            # touch it or anything after it.
-            while right_index < right_count:
-                right = right_intervals[right_index]
-                right_upper = right[2]
-                if right_upper is POSITIVE_INFINITY or lower is NEGATIVE_INFINITY:
-                    break
-                if right_upper == lower:
-                    if right[3] and lower_inclusive:
-                        break
-                elif not right_upper < lower:
-                    break
+            # A right interval below this one is below every later one too.
+            while right_index < right_count and _ends_before(
+                right_intervals[right_index], left
+            ):
                 right_index += 1
 
-            exhausted = False
+            fully_covered = False
             scan = right_index
 
             while scan < right_count:
                 right = right_intervals[scan]
-                right_lower, right_lower_inclusive, right_upper, right_upper_inc = right
 
-                # The remainder ends before this right interval: nothing
-                # further right can touch it either.
-                if (
-                    upper is not POSITIVE_INFINITY
-                    and right_lower is not NEGATIVE_INFINITY
-                ):
-                    if upper == right_lower:
-                        if not (upper_inclusive and right_lower_inclusive):
-                            break
-                    elif upper < right_lower:
-                        break
+                # Carving moves the remainder's lower end only, so its upper end
+                # is still left's and this comparison can read left directly.
+                if _ends_before(left, right):
+                    break
 
-                # Keep the part of the remainder below this right interval,
-                # i.e. (lower .. right_lower) unless that interval is empty.
-                if right_lower is not NEGATIVE_INFINITY and not (
-                    lower is not NEGATIVE_INFINITY
-                    and (
-                        lower > right_lower
-                        or (
-                            lower == right_lower
-                            and not (lower_inclusive and not right_lower_inclusive)
-                        )
-                    )
+                right_lower, right_lower_inc, right_upper, right_upper_inc = right
+
+                # Whatever of the remainder sits below this right interval survives.
+                if right_lower is not NEGATIVE_INFINITY and not _interval_is_empty(
+                    lower,
+                    lower_inclusive=lower_inclusive,
+                    upper=right_lower,
+                    upper_inclusive=not right_lower_inc,
                 ):
                     result.append(
-                        (
-                            lower,
-                            lower_inclusive,
-                            right_lower,
-                            not right_lower_inclusive,
-                        ),
+                        (lower, lower_inclusive, right_lower, not right_lower_inc)
                     )
 
                 if right_upper is POSITIVE_INFINITY:
-                    exhausted = True
+                    fully_covered = True
                     break
 
                 # Resume above this right interval.
                 lower, lower_inclusive = right_upper, not right_upper_inc
-                if upper is not POSITIVE_INFINITY and (
-                    lower > upper
-                    or (lower == upper and not (lower_inclusive and upper_inclusive))
+                if _interval_is_empty(
+                    lower,
+                    lower_inclusive=lower_inclusive,
+                    upper=upper,
+                    upper_inclusive=upper_inclusive,
                 ):
-                    exhausted = True
+                    fully_covered = True
                     break
 
                 scan += 1
 
-            if not exhausted and not (
-                lower is not NEGATIVE_INFINITY
-                and upper is not POSITIVE_INFINITY
-                and (
-                    lower > upper
-                    or (lower == upper and not (lower_inclusive and upper_inclusive))
-                )
+            if not fully_covered and not _interval_is_empty(
+                lower,
+                lower_inclusive=lower_inclusive,
+                upper=upper,
+                upper_inclusive=upper_inclusive,
             ):
                 result.append((lower, lower_inclusive, upper, upper_inclusive))
 
@@ -579,46 +564,32 @@ class Range(Generic[VersionType]):
         """Return whether every version in self is also in other.
 
         Walks both interval lists once and stops at the first uncovered
-        interval.  The set-difference formulation this replaces built a whole
-        complement and a whole intersection only to ask whether the result was
-        empty, which dominates resolution on packages with many releases.
+        interval.  This leans on the invariant: consecutive intervals in
+        ``other`` always leave a gap, so an interval of self is covered only
+        when a single interval of other holds all of it.
         """
-        left_intervals = self._intervals
-        right_intervals = other._intervals
         if (
-            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
+            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
         ):
             left_points = self._as_points()
             right_points = other._as_points()
             if left_points is not None and right_points is not None:
                 return left_points <= right_points
+
+        right_intervals = other._intervals
         right_count = len(right_intervals)
         right_index = 0
 
-        for left in left_intervals:
-            # Skip right intervals that end before this one starts; they can
-            # never cover it, and neither can they cover anything later.
-            left_lower, left_lower_inclusive = left[0], left[1]
-            while right_index < right_count:  # _ends_before(right, left), inlined
-                right = right_intervals[right_index]
-                right_upper = right[2]
-                if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
-                    break
-                if right_upper == left_lower:
-                    if right[3] and left_lower_inclusive:
-                        break
-                elif not right_upper < left_lower:
-                    break
+        for left in self._intervals:
+            while right_index < right_count and _ends_before(
+                right_intervals[right_index], left
+            ):
                 right_index += 1
 
             if right_index >= right_count:
                 return False
 
-            # Intervals are normalized -- sorted, non-overlapping and
-            # non-touching -- so consecutive right intervals always have a gap
-            # between them.  A left interval is therefore covered only if a
-            # single right interval contains all of it.
             right = right_intervals[right_index]
             lower, lower_inclusive = _max_lower_bound(left, right)
             upper, upper_inclusive = _min_upper_bound(left, right)
@@ -633,22 +604,27 @@ class Range(Generic[VersionType]):
 
         return True
 
+    def is_superset(self, other: Range[VersionType]) -> bool:
+        """Return whether every version in other is also in self."""
+        return other.is_subset(self)
+
     def is_disjoint(self, other: Range[VersionType]) -> bool:
         """Return whether self and other share no version.
 
-        Stops at the first shared version rather than materializing the whole
+        Stops at the first shared version rather than building the whole
         intersection.
         """
-        left_intervals = self._intervals
-        right_intervals = other._intervals
         if (
-            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
+            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
         ):
             left_points = self._as_points()
             right_points = other._as_points()
             if left_points is not None and right_points is not None:
                 return left_points.isdisjoint(right_points)
+
+        left_intervals = self._intervals
+        right_intervals = other._intervals
         left_count = len(left_intervals)
         right_count = len(right_intervals)
         left_index = right_index = 0
@@ -676,83 +652,28 @@ class Range(Generic[VersionType]):
         return True
 
     def relation(self, other: Range[VersionType]) -> RangeRelation:
-        """Return how self's members sit against other's."""
+        """Return how self's members sit against other's.
+
+        The empty range is both a subset and disjoint, so it is answered ahead
+        of the walks instead of by running both of them.
+        """
         if self.is_empty:
             return _EMPTY_REL
-
-        left_intervals = self._intervals
-        right_intervals = other._intervals
         if (
-            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
+            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
         ):
             left_points = self._as_points()
             right_points = other._as_points()
             if left_points is not None and right_points is not None:
-                is_subset = left_points <= right_points
-                is_disjoint = left_points.isdisjoint(right_points)
-                if is_subset:
+                if left_points <= right_points:
                     return _SUBSET_REL
-                if is_disjoint:
+                if left_points.isdisjoint(right_points):
                     return _DISJOINT_REL
                 return _OVERLAPPING_REL
-        right_count = len(right_intervals)
-
-        is_subset = True
-        is_disjoint = True
-        right_index = 0
-
-        for left in left_intervals:
-            left_lower, left_lower_inclusive = left[0], left[1]
-            # Skip right intervals that end before this left starts
-            # (_ends_before, inlined: this is the hottest loop in the
-            # relation check that unit propagation runs per term).
-            while right_index < right_count:
-                right = right_intervals[right_index]
-                right_upper = right[2]
-                if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
-                    break
-                if right_upper == left_lower:
-                    if right[3] and left_lower_inclusive:
-                        break
-                elif not right_upper < left_lower:
-                    break
-                right_index += 1
-
-            if right_index >= right_count:
-                is_subset = False
-                if not is_disjoint:
-                    return _OVERLAPPING_REL
-                break
-
-            right = right_intervals[right_index]
-
-            if _ends_before(left, right):
-                is_subset = False
-                if not is_disjoint:
-                    return _OVERLAPPING_REL
-                continue
-
-            # If we are here, left and right overlap.
-            is_disjoint = False
-
-            # Check if left is a subset of right
-            lower, lower_inclusive = _max_lower_bound(left, right)
-            upper, upper_inclusive = _min_upper_bound(left, right)
-
-            if (
-                lower_inclusive is not left[1]
-                or upper_inclusive is not left[3]
-                or not _same_bound(lower, left[0])
-                or not _same_bound(upper, left[2])
-            ):
-                is_subset = False
-                if not is_disjoint:  # always True here
-                    return _OVERLAPPING_REL
-
-        if is_subset:
+        if self.is_subset(other):
             return _SUBSET_REL
-        if is_disjoint:
+        if self.is_disjoint(other):
             return _DISJOINT_REL
         return _OVERLAPPING_REL
 
@@ -765,17 +686,34 @@ class Range(Generic[VersionType]):
 
     @override
     def __hash__(self) -> int:
-        """Hash the interval tuple once; ranges are immutable.
+        """Hash the interval tuple once and keep the answer.
 
-        Ranges are used as cache keys during propagation, where a range over
-        a package with many releases would otherwise be re-hashed -- walking
-        every interval and every version in it -- on each lookup.
+        A range is immutable and is hashed over and over as a cache key, and
+        each hash walks every interval and every bound in it.  Zero marks "not
+        computed yet", so a tuple that really hashes to zero is stored as one.
         """
         cached = self._hash
         if cached == 0:
             cached = hash(self._intervals) or 1
             self._hash = cached
         return cached
+
+    def __getstate__(self) -> tuple[tuple[Interval, ...]]:
+        """Return the intervals alone, keeping the memo out of the pickle.
+
+        The infinity sentinels hash as plain strings, so a memo computed in
+        one process is wrong in a process running a different
+        ``PYTHONHASHSEED``.  The wrapping tuple is what makes the empty range
+        survive: protocols 0 and 1 discard a pickle state that is falsy, and
+        an empty range's intervals are ``()``.
+        """
+        return (self._intervals,)
+
+    def __setstate__(self, state: tuple[tuple[Interval, ...]]) -> None:
+        """Restore from :meth:`__getstate__`, leaving the hash to be recomputed."""
+        (self._intervals,) = state
+        self._hash = 0
+        self._points = _POINTS_UNSET
 
     @override
     def __repr__(self) -> str:
@@ -804,19 +742,24 @@ class Range(Generic[VersionType]):
         return not self.is_empty
 
 
-def _interval_sort_key(interval: Interval) -> tuple[Any, ...]:
-    lower = interval[0]
-    if lower is NEGATIVE_INFINITY:
-        return (0,)
-    return (1, lower, 0 if interval[1] else 1)
-
-
 def _normalize_intervals(intervals: list[Interval]) -> tuple[Interval, ...]:
-    """Sort intervals by lower bound and merge overlapping or adjacent ones."""
+    """Sort intervals by lower bound and merge overlapping or adjacent ones.
+
+    Order, overlap and touching are all it repairs.  An empty interval, a
+    reversed one or an inclusive infinity bound comes through untouched unless
+    a merge happens to absorb or rebuild it, so this is not a way to normalize
+    a list that breaks the ``Range`` invariant.
+    """
     if not intervals:
         return ()
 
-    intervals.sort(key=_interval_sort_key)
+    def sort_key(interval: Interval) -> tuple[Any, ...]:
+        lower, lower_inclusive, _upper, _upper_inclusive = interval
+        if lower is NEGATIVE_INFINITY:
+            return (0,)
+        return (1, lower, 0 if lower_inclusive else 1)
+
+    intervals.sort(key=sort_key)
 
     merged: list[Interval] = [intervals[0]]
     for lower, lower_inclusive, upper, upper_inclusive in intervals[1:]:

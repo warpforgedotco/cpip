@@ -11,14 +11,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypeAlias
 
+from .root import ROOT
 from .types import IncompatibilityCause, PackageType, Term, VersionType
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from .types import Incompatibility
 
     _NarrowFn: TypeAlias = Callable[[Any, Any], Any]  # (package, constraint) -> shown
+    _FormatFn: TypeAlias = Callable[[Any], str]  # constraint -> display string
 
 __all__ = [
     "explain_incompatibility",
@@ -32,6 +34,7 @@ __all__ = [
 def format_error(
     root_incompatibility: Incompatibility[Any, Any],
     narrow: _NarrowFn | None = None,
+    format_range: _FormatFn = str,
 ) -> str:
     """Format a human-readable error from an incompatibility derivation tree.
 
@@ -45,14 +48,19 @@ def format_error(
     ``NO_VERSIONS`` line a narrowing to the full range is ignored, since the
     range is what keeps the sentence true.  Narrowing happens at render time
     only, never mutating the derivation tree.
+
+    ``format_range`` renders a constraint for display and defaults to ``str``,
+    which reads well for the resolver's own ``Range``.  A range type whose
+    ``str`` is a debug repr passes its own.  Rendering a constraint as the
+    empty string drops it from the line along with its separating space.
     """
     lines: list[str] = []
-    explain_incompatibility(root_incompatibility, lines, set(), narrow)
+    explain_incompatibility(root_incompatibility, lines, set(), narrow, format_range)
     return "\n".join(lines) if lines else "Resolution impossible"
 
 
-# DEPENDENCY/ROOT clauses always have two terms (parent + dependency);
-# synthetic single-term test clauses fall through to the prefix renderer.
+# DEPENDENCY/ROOT clauses have two terms (parent + dependency); a
+# self-dependency merges them into one.
 _ATTRIBUTION_CLAUSE_TERMS = 2
 
 # Prefixes that name the package themselves ("no versions of a"), so their
@@ -67,6 +75,7 @@ def explain_incompatibility(
     lines: list[str],
     visited_ids: set[int],
     narrow: _NarrowFn | None = None,
+    format_range: _FormatFn = str,
 ) -> None:
     """Walk the cause tree appending one explanatory line per node.
 
@@ -86,10 +95,9 @@ def explain_incompatibility(
             for package in needed.get(id(node), ()):
                 gap = unstated.pop(package, None)
                 if gap is not None:
-                    lines.append(
-                        f"because no versions of {package} {gap} are available"
-                    )
-            lines.append(_render_line(node, narrow))
+                    subject = _with_range(str(package), format_range(gap))
+                    lines.append(f"because no versions of {subject} are available")
+            lines.append(_render_line(node, narrow, format_range))
             continue
 
         if id(node) in visited_ids:
@@ -233,9 +241,35 @@ def _narrowed_away(
     return found
 
 
+def _dependency_pair(
+    incompatibility: Incompatibility[Any, Any], terms: Sequence[Term[Any, Any]]
+) -> tuple[Term[Any, Any], Term[Any, Any]] | None:
+    """Return the parent and dependency terms of a DEPENDENCY clause, else None.
+
+    ``terms`` are the clause's terms as the line renders them, which is not
+    ``incompatibility.terms`` once narrowing has been applied.  A package
+    depending on itself merges the two terms into one, so the dependency side
+    is rebuilt from the range the clause carries.
+    """
+    if incompatibility.cause is not IncompatibilityCause.DEPENDENCY:
+        return None
+
+    if len(terms) == _ATTRIBUTION_CLAUSE_TERMS:
+        parent, dependency = terms
+        return parent, dependency
+
+    dependency_range = incompatibility.dependency_range
+    if len(terms) != 1 or dependency_range is None:
+        return None
+
+    (parent,) = terms
+    return parent, Term(parent.package, dependency_range, positive=False)
+
+
 def _render_line(
     incompatibility: Incompatibility[Any, Any],
     narrow: _NarrowFn | None,
+    format_range: _FormatFn = str,
 ) -> str:
     """Render a single incompatibility as one explanation line."""
     cause = incompatibility.cause
@@ -245,36 +279,48 @@ def _render_line(
     if narrow is not None and cause is not IncompatibilityCause.NO_VERSIONS:
         terms = [_narrow_positive(term, narrow) for term in terms]
 
-    # Attribution form for the two standard two-term clauses.
-    if (
-        cause is IncompatibilityCause.DEPENDENCY
-        and len(terms) == _ATTRIBUTION_CLAUSE_TERMS
-    ):
-        parent, dep = terms
+    attributed = _dependency_pair(incompatibility, terms)
+    if attributed is not None:
+        parent, dep = attributed
         plural = _is_full(parent)
         # A negative dep term holds the parent's required range (negate to
         # show it); a positive dep term holds a version the parent forbids.
         if dep.is_positive():
             verb = "are" if plural else "is"
             return (
-                f"because {format_term(parent)} {verb} incompatible with "
-                f"{format_term(dep)}"
+                f"because {format_term(parent, format_range)} {verb} "
+                f"incompatible with {format_term(dep, format_range)}"
             )
         verb = "depend on" if plural else "depends on"
-        requirement = _format_requirement(dep.negate())
-        return f"because {format_term(parent)} {verb} {requirement}"
+        requirement = _format_requirement(dep.negate(), format_range)
+        return f"because {format_term(parent, format_range)} {verb} {requirement}"
 
     if cause is IncompatibilityCause.ROOT and len(terms) == _ATTRIBUTION_CLAUSE_TERMS:
         _, dep = terms
         positive_dep = dep if dep.is_positive() else dep.negate()
-        return f"because your project depends on {_format_requirement(positive_dep)}"
+        requirement = _format_requirement(positive_dep, format_range)
+        return f"because your project depends on {requirement}"
 
     if cause is IncompatibilityCause.CONSTRAINT:
         (term,) = terms
-        return (
-            f"because the user constrained "
-            f"{term.package} {incompatibility.constraint_range}"
-        )
+        shown = format_range(incompatibility.constraint_range)
+        subject = _with_range(str(term.package), shown)
+        return f"because the user constrained {subject}"
+
+    return _render_prefix_line(cause, terms, format_range)
+
+
+def _render_prefix_line(
+    cause: IncompatibilityCause,
+    terms: Sequence[Term[Any, Any]],
+    format_range: _FormatFn = str,
+) -> str:
+    """Render a clause that has no attribution form as a prefix and a body."""
+    # The virtual root is always selected, so naming it says nothing; a line
+    # holding nothing else is the conclusion.
+    stated = [term for term in terms if term.package is not ROOT]
+    if not stated:
+        return "so your project's requirements cannot be satisfied"
 
     prefix = {
         IncompatibilityCause.ROOT: "because root requires",
@@ -283,7 +329,7 @@ def _render_line(
         IncompatibilityCause.DERIVED: "so",
     }.get(cause, "")
     render = _format_requirement if cause in _REQUIREMENT_PREFIX_CAUSES else format_term
-    body = " and ".join(render(term) for term in terms)
+    body = " and ".join(render(term, format_range) for term in stated)
 
     if cause is IncompatibilityCause.NO_VERSIONS:
         return f"{prefix} {body} are available"
@@ -295,17 +341,26 @@ def _is_full(term: Term[Any, Any]) -> bool:
     return term.is_positive() and (~term.constraint).is_empty
 
 
-def _format_requirement(term: Term[Any, Any]) -> str:
+def _with_range(subject: str, shown: str) -> str:
+    """Join a subject to its rendered range, omitting an empty one.
+
+    An unconstrained range renders as the empty string, and a bare space
+    before nothing would trail the line.
+    """
+    return f"{subject} {shown}" if shown else subject
+
+
+def _format_requirement(term: Term[Any, Any], format_range: _FormatFn = str) -> str:
     """Render a term in object position ("depends on b").
 
     A full term there is the package name alone.
     """
     if _is_full(term):
         return str(term.package)
-    return format_term(term)
+    return format_term(term, format_range)
 
 
-def format_term(term: Term[Any, Any]) -> str:
+def format_term(term: Term[Any, Any], format_range: _FormatFn = str) -> str:
     """Render a single term as ``[not ]package range``.
 
     A full term reads as "all versions of package"; :func:`_format_requirement`
@@ -314,7 +369,7 @@ def format_term(term: Term[Any, Any]) -> str:
     if _is_full(term):
         return f"all versions of {term.package}"
     sign = "" if term.is_positive() else "not "
-    return f"{sign}{term.package} {term.constraint}"
+    return _with_range(f"{sign}{term.package}", format_range(term.constraint))
 
 
 def prior_cause(
