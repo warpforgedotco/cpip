@@ -99,7 +99,12 @@ def test_uv_wrong_package_backtracking_families(
     def resolve_cases() -> int:
         total = 0
         for name, wheelhouse in wrong_package_wheelhouses.items():
-            total += resolve(wheelhouse, [f"{name}-root"])
+            requirements = [f"{name}-root"]
+            if name == "boto3-urllib3":
+                requirements.extend(
+                    [f"{name}-shared==1.1.0", f"{name}-left"],
+                )
+            total += resolve(wheelhouse, requirements)
         return total
 
     assert benchmark(resolve_cases) == 20

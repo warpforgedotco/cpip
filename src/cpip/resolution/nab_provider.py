@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from bisect import bisect_left, bisect_right
 from collections.abc import Mapping
 from urllib.parse import urlsplit
 
@@ -19,6 +20,7 @@ from cpip.core.versions import Version, ZERO_VERSION
 from cpip.core.wheel import WheelCandidate
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.provider import CandidateProvider
+from cpip.index.source_models import CandidateRecord
 from cpip.resolution.models import ResolutionConfig, canonical_url, url_name
 from cpip.resolution.nab_types import (
     _MIN_PINS_TO_DISAGREE,
@@ -30,6 +32,9 @@ from cpip.resolution.nab_types import (
 )
 
 _MISSING = object()
+_FORWARD_CHECK_BATCH = 32
+# Two-hop metadata scans only repay their cost on genuinely large root domains.
+_TRANSITIVE_FORWARD_CHECK_MIN_VERSIONS = 256
 
 
 class NabProvider:
@@ -71,6 +76,16 @@ class NabProvider:
             tuple[str, Version, tuple[str, ...]], Mapping[str, Range[Version]]
         ] = {}
         self._active_decisions: dict[str, Version] = {}
+        self._active_positive_ranges: dict[str, RangeProtocol[Version]] = {}
+        self._root_packages: set[str] = set()
+        self._constrained_root_packages: set[str] = set()
+        self._partial_preflight_cache: dict[
+            tuple[str, Version, tuple[str, ...]], bool
+        ] = {}
+        self._active_candidate_conflict_cache: dict[
+            tuple[str, Version, tuple[str, ...]], bool
+        ] = {}
+        self._forward_catalog_versions: dict[str, tuple[Version, ...]] = {}
         self._dependency_invalidations: dict[str, None] = {}
         constraints_by_name: dict[str, list[Requirement]] = {}
         for value in self.constraints:
@@ -458,10 +473,197 @@ class NabProvider:
             return matching[0]
 
         newest_first = sorted(matching, reverse=True)
-        for version in newest_first:
-            if not self._pins_are_impossible(package, version):
+        check_partial_solution = (
+            len(newest_first) >= _TRANSITIVE_FORWARD_CHECK_MIN_VERSIONS
+        )
+        rejected_any = False
+        for index, version in enumerate(newest_first):
+            if rejected_any and index % _FORWARD_CHECK_BATCH == 1:
+                self._prefetch_catalog_candidates(
+                    package,
+                    newest_first[index : index + _FORWARD_CHECK_BATCH],
+                )
+            pins_are_impossible = self._pins_are_impossible(package, version)
+            partial_solution_rejects = (
+                not pins_are_impossible
+                and check_partial_solution
+                and (self._partial_solution_rejects(package, version))
+            )
+            if not pins_are_impossible and not partial_solution_rejects:
                 return version
+            rejected_any = True
         return newest_first[0]
+
+    def _partial_solution_rejects(self, package: str, version: Version) -> bool:
+        """Whether active constraints make a candidate transitively impossible.
+
+        This is deliberately a proof of impossibility, not a heuristic.  A
+        parent is skipped only when one of its dependency domains contains no
+        child release that could coexist with the current positive solution.
+        Missing metadata, ambiguous artifacts, URLs, and source candidates all
+        remain possible so PubGrub retains authority over uncertain cases.
+        """
+        if (
+            package not in self._root_packages
+            or not self._constrained_root_packages
+            or not self._active_positive_ranges
+            or not isinstance(
+                self.provider,
+                CandidateProvider,
+            )
+        ):
+            return False
+
+        extras = tuple(sorted(self.requirements[package].extras))
+        cache_key = (package, version, extras)
+        cached = self._partial_preflight_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        candidate = self._catalog_candidate(package, version)
+        dependencies = None if candidate is None else _dependencies_or_none(candidate)
+        if dependencies is None or getattr(candidate, "source_kind", None) != "wheel":
+            self._partial_preflight_cache[cache_key] = False
+            return False
+
+        verdict = False
+        for dependency in dependencies:
+            if not marker_applies(dependency.marker, extras=extras):
+                continue
+            if dependency.url is not None:
+                continue
+
+            dependency_name = _key(dependency)
+            active = self._active_constraint_for(dependency_name)
+            if (
+                active is not None
+                and (active & _implied_range(dependency.specifier)).is_empty
+            ):
+                verdict = True
+                break
+
+            if self._dependency_domain_is_blocked(dependency, active):
+                verdict = True
+                break
+
+        self._partial_preflight_cache[cache_key] = verdict
+        return verdict
+
+    def _active_constraint_for(
+        self,
+        package: str,
+    ) -> RangeProtocol[Version] | None:
+        """Return an active range only when it came from a constrained root."""
+        if package not in self._constrained_root_packages:
+            return None
+        return self._active_positive_ranges.get(package)
+
+    def _dependency_domain_is_blocked(
+        self,
+        dependency: Requirement,
+        active: RangeProtocol[Version] | None,
+    ) -> bool:
+        """Whether every selectable child release conflicts with active ranges."""
+        child_name = _key(dependency)
+        constraints = self._constraint_for(child_name)
+        matching = [
+            version
+            for version in self._matching_catalog_versions(dependency)
+            if (active is None or version in active)
+            and self._allows(child_name, version)
+            and all(
+                constraint.url is None
+                and constraint.specifier.contains(
+                    version,
+                    allow_prereleases=True,
+                )
+                for constraint in constraints
+            )
+        ]
+        if not matching:
+            return False
+
+        child_extras = tuple(sorted(dependency.extras))
+        for start in range(0, len(matching), _FORWARD_CHECK_BATCH):
+            batch = matching[start : start + _FORWARD_CHECK_BATCH]
+            self._prefetch_catalog_candidates(child_name, batch)
+            for child_version in batch:
+                key = (child_name, child_version, child_extras)
+                conflicts = self._active_candidate_conflict_cache.get(key)
+                if conflicts is None:
+                    child = self._catalog_candidate(child_name, child_version)
+                    conflicts = self._candidate_conflicts_with_active(
+                        child,
+                        extras=child_extras,
+                    )
+                    self._active_candidate_conflict_cache[key] = conflicts
+                if not conflicts:
+                    return False
+        return True
+
+    def _matching_catalog_versions(
+        self,
+        requirement: Requirement,
+    ) -> tuple[Version, ...]:
+        """Catalog versions within a specifier, narrowing by bounds first."""
+        package = _key(requirement)
+        versions = self._forward_catalog_versions.get(package)
+        if versions is None:
+            try:
+                summaries = self.provider.available_versions(requirement)
+            except (CpipError, OSError, ValueError):
+                return ()
+            versions = tuple(sorted({summary.version for summary in summaries}))
+            self._forward_catalog_versions[package] = versions
+
+        lower, upper = requirement.specifier.bounds
+        start = 0
+        stop = len(versions)
+        if lower is not None:
+            version, inclusive = lower
+            start = (
+                bisect_left(versions, version)
+                if inclusive
+                else bisect_right(versions, version)
+            )
+        if upper is not None:
+            version, inclusive = upper
+            stop = (
+                bisect_right(versions, version)
+                if inclusive
+                else bisect_left(versions, version)
+            )
+        return tuple(
+            version
+            for version in versions[start:stop]
+            if requirement.specifier.contains(version, allow_prereleases=True)
+        )
+
+    def _candidate_conflicts_with_active(
+        self,
+        candidate: object | None,
+        *,
+        extras: tuple[str, ...],
+    ) -> bool:
+        """Prove that one child candidate contradicts the positive solution."""
+        if candidate is None or getattr(candidate, "source_kind", None) != "wheel":
+            return False
+        dependencies = _dependencies_or_none(candidate)
+        if dependencies is None:
+            return False
+
+        for dependency in dependencies:
+            if not marker_applies(dependency.marker, extras=extras):
+                continue
+            if dependency.url is not None:
+                continue
+            active = self._active_constraint_for(_key(dependency))
+            if (
+                active is not None
+                and (active & _implied_range(dependency.specifier)).is_empty
+            ):
+                return True
+        return False
 
     def _pins_are_impossible(self, package: str, version: Version) -> bool:
         """Whether this version's ``==`` pins force an empty version domain.
@@ -556,27 +758,54 @@ class NabProvider:
         if cached is not _MISSING:
             return cached
 
-        requirement = parse_requirement(package)
-        try:
-            records = self.provider.release_candidates(requirement, version)
-        except (CpipError, OSError, ValueError):
-            records = ()
+        self._prefetch_catalog_candidates(package, (version,))
+        cached = self._catalog_candidate_cache.get(key, _MISSING)
+        if cached is not _MISSING:
+            return cached
 
-        if records is None:
-            candidate = self._catalog_by_version(package).get(version)
-        elif len(records) != 1:
-            candidate = None
-        else:
-            try:
-                candidate = self.provider.get_materializer_internal().materialize_one(
-                    requirement,
-                    records[0],
-                )
-            except (CpipError, OSError, ValueError):
-                candidate = None
-
+        candidate = self._catalog_by_version(package).get(version)
         self._catalog_candidate_cache[key] = candidate
         return candidate
+
+    def _prefetch_catalog_candidates(
+        self,
+        package: str,
+        versions: list[Version] | tuple[Version, ...],
+    ) -> None:
+        """Prepare exact wheel releases and start their metadata concurrently."""
+        if not isinstance(self.provider, CandidateProvider):
+            return
+
+        requirement = parse_requirement(package)
+        pending: list[tuple[Version, CandidateRecord]] = []
+        for version in versions:
+            key = (package, version)
+            if key in self._catalog_candidate_cache:
+                continue
+            try:
+                records = self.provider.release_candidates(requirement, version)
+            except (CpipError, OSError, ValueError):
+                self._catalog_candidate_cache[key] = None
+                continue
+            if records is None:
+                continue
+            if len(records) != 1:
+                self._catalog_candidate_cache[key] = None
+                continue
+            pending.append((version, records[0]))
+
+        if not pending:
+            return
+
+        materializer = self.provider.get_materializer_internal()
+        records = tuple(record for _, record in pending)
+        materializer.prefetch_metadata(records, requirement=requirement)
+        for version, record in pending:
+            try:
+                candidate = materializer.materialize_one(requirement, record)
+            except (CpipError, OSError, ValueError):
+                candidate = None
+            self._catalog_candidate_cache[(package, version)] = candidate
 
     def _catalog_by_version(self, package: str) -> dict[Version, object | None]:
         """Index every release of a package the provider has no catalog for.
@@ -1021,7 +1250,11 @@ class NabProvider:
         positive_ranges: Mapping[str, RangeProtocol[Version]],
         decisions: Mapping[str, Version],
     ) -> None:
-        del positive_ranges
+        snapshot = dict(positive_ranges)
+        if snapshot != self._active_positive_ranges:
+            self._active_positive_ranges = snapshot
+            self._partial_preflight_cache.clear()
+            self._active_candidate_conflict_cache.clear()
         self._active_decisions = dict(decisions)
 
     def consume_dependency_invalidations(self) -> list[str]:
@@ -1119,4 +1352,12 @@ class NabProvider:
         for requirement in merged:
             package, requirement_range = self.add_root(requirement)
             roots[package] = roots.get(package, requirement_range) & requirement_range
+        self._root_packages = set(roots)
+        self._constrained_root_packages = {
+            _key(requirement)
+            for requirement in merged
+            if requirement.url is not None
+            or bool(requirement.specifier.text)
+            or bool(self._constraint_for(_key(requirement)))
+        }
         return roots

@@ -257,6 +257,48 @@ def make_wrong_package_graph(
         )
 
 
+def make_transitive_backtracking_graph(
+    wheelhouse: Path,
+    prefix: str,
+    *,
+    versions: int = 64,
+) -> None:
+    """Build the dependency shape behind uv's Boto3/urllib3 workload.
+
+    The root fixes an old ``shared`` release while every ``left`` release
+    selects a narrow range of ``right`` releases.  All but the oldest right
+    release require a newer, incompatible shared release.  The conflict is
+    therefore one level beyond the package being backtracked, unlike
+    :func:`make_wrong_package_graph`'s pair of exact sibling pins.
+    """
+    make_wheel(wheelhouse, f"{prefix}-shared", "1.1.0")
+    make_wheel(wheelhouse, f"{prefix}-shared", "2.0.0")
+
+    for index in range(1, versions + 1):
+        shared = "1.1.0" if index == 1 else "2.0.0"
+        make_wheel(
+            wheelhouse,
+            f"{prefix}-right",
+            f"1.{index}.0",
+            requires=[f"{prefix}-shared=={shared}"],
+        )
+        make_wheel(
+            wheelhouse,
+            f"{prefix}-left",
+            f"1.{index}.0",
+            requires=[
+                f"{prefix}-right>=1.{index}.0,<1.{index + 1}.0",
+            ],
+        )
+
+    make_wheel(
+        wheelhouse,
+        f"{prefix}-root",
+        "1.0.0",
+        requires=[f"{prefix}-shared==1.1.0", f"{prefix}-left"],
+    )
+
+
 def make_nab_smoke_fixture(wheelhouse: Path) -> None:
     """Build the explicit packages from nab's offline deterministic smoke suite.
 

@@ -36,6 +36,7 @@ if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect
 
 from benchmark_support import (  # noqa: E402
     make_dependency_graph,
+    make_transitive_backtracking_graph,
     make_wheel,
     make_wrong_package_graph,
     reset_caches,
@@ -106,6 +107,11 @@ def test_forward_check_never_changes_the_answer(
         "_pins_are_impossible",
         lambda self, package, version: False,
     )
+    monkeypatch.setattr(
+        NabProvider,
+        "_partial_solution_rejects",
+        lambda self, package, version: False,
+    )
     without_check = resolve(wheelhouse, roots)
 
     assert (with_check is None) == (without_check is None), (
@@ -142,6 +148,104 @@ def test_impossible_pins_are_skipped_without_conflicts(tmp_path: Path) -> None:
         "fam-shared": "1.1.0",
     }
     assert result.metrics["nab_conflicts"] <= 2, result.metrics
+
+
+def test_transitive_conflicts_are_skipped_without_backtracking(tmp_path: Path) -> None:
+    """A known root range can disqualify every child of a newer candidate."""
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    make_transitive_backtracking_graph(wheelhouse, "fam", versions=256)
+
+    reset_caches()
+    engine = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    result = engine.resolve(["fam-root", "fam-shared==1.1.0", "fam-left"])
+
+    selected = {
+        candidate.name: str(candidate.version) for candidate in result.candidates
+    }
+    assert selected == {
+        "fam-root": "1.0.0",
+        "fam-left": "1.1.0",
+        "fam-right": "1.1.0",
+        "fam-shared": "1.1.0",
+    }
+    assert result.metrics["nab_conflicts"] <= 2, result.metrics
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_transitive_forward_check_never_changes_the_answer(
+    seed: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Random compatible releases must select identically without lookahead."""
+    rng = random.Random(seed)
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    make_wheel(wheelhouse, "shared", "1.0.0")
+    make_wheel(wheelhouse, "shared", "2.0.0")
+
+    compatible = {index for index in range(1, 13) if rng.random() < 0.3}
+    compatible.add(rng.randint(1, 12))
+    for index in range(1, 13):
+        shared = "1.0.0" if index in compatible else "2.0.0"
+        make_wheel(
+            wheelhouse,
+            "child",
+            f"1.{index}.0",
+            requires=[f"shared=={shared}"],
+        )
+        make_wheel(
+            wheelhouse,
+            "parent",
+            f"1.{index}.0",
+            requires=[f"child>=1.{index}.0,<1.{index + 1}.0"],
+        )
+    make_wheel(
+        wheelhouse,
+        "app",
+        "1.0.0",
+        requires=["shared==1.0.0", "parent"],
+    )
+
+    roots = ["app", "shared==1.0.0", "parent"]
+    with_check = resolve(wheelhouse, roots)
+    monkeypatch.setattr(
+        NabProvider,
+        "_partial_solution_rejects",
+        lambda self, package, version: False,
+    )
+    without_check = resolve(wheelhouse, roots)
+
+    assert with_check == without_check, seed
+
+
+def test_transitive_check_stays_off_small_candidate_domains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ordinary packages must not pay speculative two-hop metadata reads."""
+    provider = CandidateProvider.from_options(no_index=True)
+    adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
+    versions = [Version(f"1.{index}.0") for index in range(255)]
+
+    monkeypatch.setattr(
+        adapter,
+        "_pins_are_impossible",
+        lambda package, version: False,
+    )
+
+    def explode(package: str, version: Version) -> bool:
+        raise AssertionError((package, version))
+
+    monkeypatch.setattr(adapter, "_partial_solution_rejects", explode)
+
+    assert adapter._newest_viable("demo", versions) == versions[-1]
 
 
 def test_unsolvable_graphs_still_fail(tmp_path: Path) -> None:
@@ -219,7 +323,7 @@ def test_unreadable_metadata_is_undecidable_not_fatal(tmp_path: Path) -> None:
     )
     adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
     adapter.requirements["app"] = parse_requirement("app")
-    adapter._catalog_candidate_cache["app"] = {Version("1.0.0"): Exploding()}
+    adapter._catalog_candidate_cache[("app", Version("1.0.0"))] = Exploding()
 
     assert adapter._pins_are_impossible("app", Version("1.0.0")) is False
 

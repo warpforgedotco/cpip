@@ -20,6 +20,7 @@ from benchmark_support import (
     make_sdist,
     make_source_tree,
     make_stress_graph,
+    make_transitive_backtracking_graph,
     make_wheel,
     make_wrong_package_graph,
     requirement_lines,
@@ -79,7 +80,12 @@ def wrong_package_wheelhouses(
         "apache-beam-dill",
     ):
         wheelhouse = tmp_path_factory.mktemp(f"{name}-wheelhouse")
-        make_wrong_package_graph(wheelhouse, name, versions=64)
+        builder = (
+            make_transitive_backtracking_graph
+            if name == "boto3-urllib3"
+            else make_wrong_package_graph
+        )
+        builder(wheelhouse, name, versions=256 if name == "boto3-urllib3" else 64)
         cases[name] = wheelhouse
     return cases
 
@@ -90,8 +96,9 @@ def catastrophic_wheelhouses(
 ) -> dict[str, Path]:
     """The same wrong-package families, sized to their real PyPI release counts.
 
-    ``wrong_package_wheelhouses`` models these at a fixed 64 versions for a
-    fast regression signal. This models the same reported incidents
+    ``wrong_package_wheelhouses`` models these at a fast regression scale
+    (256 versions for transitive Boto3, 64 for the exact-pin cases). This
+    models the same reported incidents
     (https://github.com/astral-sh/uv/issues/8157) at the scale that actually
     made them notable, from live PyPI release counts recorded 2026-08-12:
     boto3 2093 / botocore 2491, numpy 150 / numba 136 / llvmlite 73,
@@ -109,7 +116,12 @@ def catastrophic_wheelhouses(
         ("apache-beam-dill", 108),
     ):
         wheelhouse = tmp_path_factory.mktemp(f"catastrophic-{name}-wheelhouse")
-        make_wrong_package_graph(wheelhouse, name, versions=versions)
+        builder = (
+            make_transitive_backtracking_graph
+            if name == "boto3-urllib3"
+            else make_wrong_package_graph
+        )
+        builder(wheelhouse, name, versions=versions)
         cases[name] = wheelhouse
     return cases
 
