@@ -476,19 +476,20 @@ index 5e2e9aa..c66d312 100644
          return term.satisfies(effective)
  
 diff --git a/src/cpip/_vendor/nab_resolver/propagate.py b/src/cpip/_vendor/nab_resolver/propagate.py
-index c6cf101..71b755e 100644
+index c6cf101..95b728e 100644
 --- a/src/cpip/_vendor/nab_resolver/propagate.py
 +++ b/src/cpip/_vendor/nab_resolver/propagate.py
-@@ -11,6 +11,8 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propa
+@@ -11,6 +11,9 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propa
  from __future__ import annotations
  
  from collections import deque
 +from collections.abc import Sequence
 +from heapq import merge
++from itertools import chain
  from typing import TYPE_CHECKING, Any
  
  from .types import IncompatibilityState, SetRelation, Term
-@@ -43,6 +45,23 @@ RELATION_GATE_RECHECK = 65_536
+@@ -43,6 +46,23 @@ RELATION_GATE_RECHECK = 65_536
  RANGE_ID_MEMO_MAX = 8_192
  
  
@@ -512,7 +513,7 @@ index c6cf101..71b755e 100644
  def unit_propagation(
      resolver: Resolver[Any, Any], changed_package: Any
  ) -> Incompatibility[Any, Any] | None:
-@@ -57,58 +76,174 @@ def unit_propagation(
+@@ -57,58 +77,185 @@ def unit_propagation(
      contradiction epoch.  Each clause records the epoch it was last settled in,
      and is skipped while that stamp is current.
  
@@ -559,6 +560,7 @@ index c6cf101..71b755e 100644
          package = propagation_queue.popleft()
          in_queue.discard(package)
 -        related_indices = resolver.package_to_incompatibilities.get(package, [])
+-
 +        if initial_groups:
 +            groups = initial_groups
 +            initial_groups = ()
@@ -567,8 +569,19 @@ index c6cf101..71b755e 100644
 +        nonempty = tuple(group for group in groups if group)
 +        if not nonempty:
 +            continue
-+        related_indices = nonempty[0] if len(nonempty) == 1 else merge(*nonempty)
- 
++        if len(nonempty) == 1:
++            related_indices = nonempty[0]
++        elif len(nonempty) == 2:
++            left, right = nonempty
++            if left[-1] < right[0]:
++                related_indices = chain(left, right)
++            elif right[-1] < left[0]:
++                related_indices = chain(right, left)
++            else:
++                related_indices = merge(left, right)
++        else:
++            related_indices = merge(*nonempty)
++
 +        previous_index = -1
          for incompatibility_index in related_indices:
 +            if incompatibility_index == previous_index:
@@ -720,7 +733,7 @@ index c6cf101..71b755e 100644
  
      return None
  
-@@ -152,6 +287,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
+@@ -152,6 +299,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
      tokens = resolver.range_tokens
      token = tokens.get(range_)
      if token is None:

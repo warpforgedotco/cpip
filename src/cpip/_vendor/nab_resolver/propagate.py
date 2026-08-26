@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Sequence
 from heapq import merge
+from itertools import chain
 from typing import TYPE_CHECKING, Any
 
 from .types import IncompatibilityState, SetRelation, Term
@@ -125,7 +126,18 @@ def _unit_propagation_core(
         nonempty = tuple(group for group in groups if group)
         if not nonempty:
             continue
-        related_indices = nonempty[0] if len(nonempty) == 1 else merge(*nonempty)
+        if len(nonempty) == 1:
+            related_indices = nonempty[0]
+        elif len(nonempty) == 2:
+            left, right = nonempty
+            if left[-1] < right[0]:
+                related_indices = chain(left, right)
+            elif right[-1] < left[0]:
+                related_indices = chain(right, left)
+            else:
+                related_indices = merge(left, right)
+        else:
+            related_indices = merge(*nonempty)
 
         previous_index = -1
         for incompatibility_index in related_indices:
