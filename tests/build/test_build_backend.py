@@ -264,7 +264,9 @@ def test_static_source_metadata_precedes_backend_execution(tmp_path: Path) -> No
         encoding="utf-8",
     )
     project.joinpath("PKG-INFO").write_text(
-        "Metadata-Version: 2.1\nName: static-metadata-pkg\nVersion: 1.2.3\n"
+        # 2.2 is where PEP 643 makes these fields binding on the built wheel;
+        # anything older is a guess the backend is free to contradict.
+        "Metadata-Version: 2.2\nName: static-metadata-pkg\nVersion: 1.2.3\n"
         "Requires-Dist: dependency>=2\n",
         encoding="utf-8",
     )
@@ -334,3 +336,110 @@ def write_project(tmp_path: Path, name: str, package: str, version: str) -> Path
         encoding="utf-8",
     )
     return project
+
+
+def _unbuildable_project(tmp_path: Path, name: str) -> Path:
+    """A project whose backend raises if anything tries to run it."""
+    project = tmp_path / name
+    project.mkdir()
+    project.joinpath("setup.py").write_text(
+        "raise RuntimeError('the backend should not have run')\n",
+        encoding="utf-8",
+    )
+    return project
+
+
+def test_pre_pep_643_metadata_does_not_stand_in_for_a_build(tmp_path: Path) -> None:
+    """A source distribution's PKG-INFO records what the author's machine
+    produced. Only from metadata 2.2 does PEP 643 bind it to what a wheel
+    built from that sdist will say, so anything older has to be built."""
+    project = _unbuildable_project(tmp_path, "old-metadata-pkg")
+    project.joinpath("pyproject.toml").write_text(
+        "[build-system]\nrequires = ['setuptools']\nbuild-backend = 'missing_backend'\n",
+        encoding="utf-8",
+    )
+    project.joinpath("PKG-INFO").write_text(
+        "Metadata-Version: 2.1\nName: old-metadata-pkg\nVersion: 1.0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BuildError):
+        prepare_project_metadata(project)
+
+
+def test_metadata_declaring_a_field_dynamic_does_not_stand_in_for_a_build(
+    tmp_path: Path,
+) -> None:
+    project = _unbuildable_project(tmp_path, "dynamic-metadata-pkg")
+    project.joinpath("pyproject.toml").write_text(
+        "[build-system]\nrequires = ['setuptools']\nbuild-backend = 'missing_backend'\n",
+        encoding="utf-8",
+    )
+    project.joinpath("PKG-INFO").write_text(
+        "Metadata-Version: 2.2\nName: dynamic-metadata-pkg\nVersion: 1.0\n"
+        "Dynamic: Requires-Dist\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BuildError):
+        prepare_project_metadata(project)
+
+
+def test_pkg_info_provides_extra_is_reported(tmp_path: Path) -> None:
+    project = _unbuildable_project(tmp_path, "extras-pkg")
+    project.joinpath("PKG-INFO").write_text(
+        "Metadata-Version: 2.3\nName: extras-pkg\nVersion: 1.0\n"
+        "Provides-Extra: cli\nProvides-Extra: docs\n"
+        'Requires-Dist: rich; extra == "cli"\n',
+        encoding="utf-8",
+    )
+
+    metadata = prepare_project_metadata(project)
+
+    assert metadata.provided_extras == frozenset({"cli", "docs"})
+
+
+def test_a_static_project_table_precedes_backend_execution(tmp_path: Path) -> None:
+    """A [project] table with nothing dynamic already says what the backend
+    would say, so standing up a build environment to be told the same thing
+    is pure cost -- paid once per candidate, per backtrack."""
+    project = _unbuildable_project(tmp_path, "static-table-pkg")
+    project.joinpath("pyproject.toml").write_text(
+        "[build-system]\nrequires = ['setuptools']\n"
+        "build-backend = 'missing_backend'\n"
+        "[project]\nname = 'static-table-pkg'\nversion = '2.0'\n"
+        "requires-python = '>=3.10'\n"
+        "dependencies = ['downstream>=1']\n"
+        "[project.optional-dependencies]\ncli = ['rich']\n",
+        encoding="utf-8",
+    )
+
+    metadata = prepare_project_metadata(project)
+
+    assert metadata.name == "static-table-pkg"
+    assert metadata.version == "2.0"
+    assert metadata.dependencies == ("downstream>=1",)
+    assert metadata.requires_python == ">=3.10"
+    assert metadata.provided_extras == frozenset({"cli"})
+
+
+@pytest.mark.parametrize(
+    "dynamic",
+    ["dependencies", "optional-dependencies", "requires-python", "version"],
+)
+def test_a_dynamic_project_field_falls_through_to_the_backend(
+    tmp_path: Path,
+    dynamic: str,
+) -> None:
+    """Declaring a field dynamic hands it to the backend, so the table's
+    answer for it -- including saying nothing at all -- is not the wheel's."""
+    project = _unbuildable_project(tmp_path, f"dyn-{dynamic}-pkg")
+    project.joinpath("pyproject.toml").write_text(
+        "[build-system]\nrequires = ['setuptools']\n"
+        "build-backend = 'missing_backend'\n"
+        f"[project]\nname = 'dyn-pkg'\nversion = '1.0'\ndynamic = ['{dynamic}']\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BuildError):
+        prepare_project_metadata(project)
