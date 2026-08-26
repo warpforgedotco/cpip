@@ -958,22 +958,19 @@ class NetworkSession:
 
         expires_at = self.cache_expiry(response.headers)
 
-        self.cache.set(
-            response.url,
-            json.dumps(
-                {
-                    "status": response.status_code,
-                    "reason": response.reason,
-                    "url": response.url,
-                    "headers": dict(response.headers.items()),
-                    "expires_at": expires_at,
-                    "etag": response.headers.get("ETag"),
-                    "last_modified": response.headers.get("Last-Modified"),
-                },
-            ).encode("utf-8"),
-        )
+        metadata = json.dumps(
+            {
+                "status": response.status_code,
+                "reason": response.reason,
+                "url": response.url,
+                "headers": dict(response.headers.items()),
+                "expires_at": expires_at,
+                "etag": response.headers.get("ETag"),
+                "last_modified": response.headers.get("Last-Modified"),
+            },
+        ).encode("utf-8")
 
-        self.cache.set_body(response.url, body)
+        self.cache.set_with_body(response.url, metadata, body)
 
         response.raw = io.BytesIO(body)
 
