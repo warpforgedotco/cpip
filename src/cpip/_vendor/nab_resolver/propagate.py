@@ -82,6 +82,19 @@ def unit_propagation(
 
     Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation
     """
+    groups = _related_incompatibility_groups(resolver, changed_package)
+    nonempty = tuple(group for group in groups if group)
+    if not nonempty:
+        return None
+    return _unit_propagation_core(resolver, changed_package, nonempty)
+
+
+def _unit_propagation_core(
+    resolver: Resolver[Any, Any],
+    changed_package: Any,
+    initial_groups: tuple[Sequence[int], ...],
+) -> Incompatibility[Any, Any] | None:
+    """Run propagation after the entry package has relevant clauses."""
     propagation_queue: deque[Any] = deque([changed_package])
     in_queue: set[Any] = {changed_package}
 
@@ -101,8 +114,12 @@ def unit_propagation(
     while propagation_queue:
         package = propagation_queue.popleft()
         in_queue.discard(package)
-        groups = _related_incompatibility_groups(resolver, package)
-        nonempty = tuple(group for group in groups if group)
+        if initial_groups:
+            nonempty = initial_groups
+            initial_groups = ()
+        else:
+            groups = _related_incompatibility_groups(resolver, package)
+            nonempty = tuple(group for group in groups if group)
         if not nonempty:
             continue
         related_indices = nonempty[0] if len(nonempty) == 1 else merge(*nonempty)

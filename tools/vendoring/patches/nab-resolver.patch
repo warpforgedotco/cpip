@@ -420,7 +420,7 @@ index 5e2e9aa..1eeb6ce 100644
          """Preserve the package's decided version in outstanding snapshots."""
          for holder in self._decision_snapshots:
 diff --git a/src/cpip/_vendor/nab_resolver/propagate.py b/src/cpip/_vendor/nab_resolver/propagate.py
-index c6cf101..674aa50 100644
+index c6cf101..f01a592 100644
 --- a/src/cpip/_vendor/nab_resolver/propagate.py
 +++ b/src/cpip/_vendor/nab_resolver/propagate.py
 @@ -11,6 +11,8 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propa
@@ -456,7 +456,7 @@ index c6cf101..674aa50 100644
  def unit_propagation(
      resolver: Resolver[Any, Any], changed_package: Any
  ) -> Incompatibility[Any, Any] | None:
-@@ -57,58 +76,154 @@ def unit_propagation(
+@@ -57,58 +76,171 @@ def unit_propagation(
      contradiction epoch.  Each clause records the epoch it was last settled in,
      and is skipped while that stamp is current.
  
@@ -466,6 +466,19 @@ index c6cf101..674aa50 100644
 +
      Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation
      """
++    groups = _related_incompatibility_groups(resolver, changed_package)
++    nonempty = tuple(group for group in groups if group)
++    if not nonempty:
++        return None
++    return _unit_propagation_core(resolver, changed_package, nonempty)
++
++
++def _unit_propagation_core(
++    resolver: Resolver[Any, Any],
++    changed_package: Any,
++    initial_groups: tuple[Sequence[int], ...],
++) -> Incompatibility[Any, Any] | None:
++    """Run propagation after the entry package has relevant clauses."""
      propagation_queue: deque[Any] = deque([changed_package])
      in_queue: set[Any] = {changed_package}
  
@@ -487,8 +500,12 @@ index c6cf101..674aa50 100644
          package = propagation_queue.popleft()
          in_queue.discard(package)
 -        related_indices = resolver.package_to_incompatibilities.get(package, [])
-+        groups = _related_incompatibility_groups(resolver, package)
-+        nonempty = tuple(group for group in groups if group)
++        if initial_groups:
++            nonempty = initial_groups
++            initial_groups = ()
++        else:
++            groups = _related_incompatibility_groups(resolver, package)
++            nonempty = tuple(group for group in groups if group)
 +        if not nonempty:
 +            continue
 +        related_indices = nonempty[0] if len(nonempty) == 1 else merge(*nonempty)
@@ -644,7 +661,7 @@ index c6cf101..674aa50 100644
  
      return None
  
-@@ -152,6 +267,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
+@@ -152,6 +284,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
      tokens = resolver.range_tokens
      token = tokens.get(range_)
      if token is None:
