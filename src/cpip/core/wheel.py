@@ -8,6 +8,7 @@ from functools import lru_cache
 
 from .caches import bounded_put, memoized, register_table
 from .errors import InstallationError, InvalidWheelFilename, UnsupportedWheel
+from .light_metadata import LightMetadata, parse_metadata_text
 from .packaging import Requirement, canonicalize_name, marker_applies, parse_requirement
 from .versions import InvalidVersion, Version
 from .utils import CURRENT_PYTHON_VERSION_DIGITS
@@ -1077,7 +1078,7 @@ def read_metadata_message_internal(
     *,
     expected_name: str | None = None,
     dist_info_dir: str | None = None,
-) -> Message:
+) -> LightMetadata:
     metadata_names = (
         [f"{dist_info_dir}/METADATA"]
         if dist_info_dir is not None
@@ -1125,7 +1126,7 @@ def read_metadata_message_internal(
                 f"Error decoding metadata for {path}: {metadata_names[0]}",
             ) from exc
 
-        return Parser().parsestr(contents)
+        return parse_metadata_text(contents)
 
 
 _NAME_SEPARATORS_RE = re.compile(r"[-_.]+")

@@ -71,6 +71,8 @@ def parse_metadata_text(text: str) -> LightMetadata:
         newline = text.find("\n", position)
         line_end = newline if newline != -1 else text_length
         line = text[position:line_end]
+        if line.endswith("\r"):
+            line = line[:-1]
         if not line:
             position = line_end + 1
             break

@@ -13,10 +13,38 @@ from cpip.core.wheel import (
     WheelTag,
     parse_wheel_file,
     parse_wheel_filename,
+    read_metadata_message,
     supported_wheel_tags,
     wheel_candidate,
     wheel_tag_rank,
 )
+
+
+def test_read_metadata_message_preserves_headers_folding_and_payload(
+    tmp_path: Path,
+) -> None:
+    wheel = tmp_path / "demo-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            "demo-1.0.dist-info/METADATA",
+            "Name: demo\r\n"
+            "Version: 1.0\r\n"
+            "Requires-Dist: first>=1\r\n"
+            "Requires-Dist: second>=2;\r\n python_version >= '3.11'\r\n"
+            "Summary: metadata parser oracle\r\n"
+            "\r\n"
+            "Description body\r\n",
+        )
+
+    metadata = read_metadata_message(wheel)
+
+    assert metadata.get("name") == "demo"
+    assert metadata.get("Summary") == "metadata parser oracle"
+    assert metadata.get_all("requires-dist") == [
+        "first>=1",
+        "second>=2;\npython_version >= '3.11'",
+    ]
+    assert metadata.get_payload() == "Description body\r\n"
 
 
 @pytest.mark.parametrize(
