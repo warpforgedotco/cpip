@@ -535,17 +535,18 @@ class Resolver(Generic[PackageType, VersionType]):
                 if chosen_version in dependency_range:
                     continue
                 terms = [Term(next_package, exact_range, positive=True)]
+                incompatibility = Incompatibility(
+                    terms, cause=IncompatibilityCause.DEPENDENCY
+                )
+                incompat_index.add_incompatibility(self, incompatibility)
             else:
-                terms = [
-                    Term(next_package, parent_range, positive=True),
-                    Term(dependency_package, dependency_range, positive=False),
-                ]
-            incompatibility = Incompatibility(
-                terms, cause=IncompatibilityCause.DEPENDENCY
-            )
-            incompat_index.add_incompatibility(self, incompatibility)
-
-            if cross_package:
+                incompatibility = incompat_index.add_dependency_incompatibility(
+                    self,
+                    next_package,
+                    parent_range,
+                    dependency_package,
+                    dependency_range,
+                )
                 decide.absorb_redundant_requirement(
                     self, dependency_package, dependency_range, incompatibility
                 )

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "add_incompatibility",
+    "add_dependency_incompatibility",
     "dependency_merge_key",
     "index_dependency",
     "maybe_merge_dependency",
@@ -29,6 +30,17 @@ __all__ = [
 _DEPENDENCY_CLAUSE_TERMS = 2
 
 
+def _append_incompatibility(
+    resolver: Resolver[Any, Any], incompatibility: Incompatibility[Any, Any]
+) -> int:
+    """Append an incompatibility and update the package lookup index."""
+    index = len(resolver.incompatibilities)
+    resolver.incompatibilities.append(incompatibility)
+    for term in incompatibility.terms:
+        resolver.package_to_incompatibilities[term.package].append(index)
+    return index
+
+
 def add_incompatibility(
     resolver: Resolver[Any, Any], incompatibility: Incompatibility[Any, Any]
 ) -> None:
@@ -36,11 +48,58 @@ def add_incompatibility(
     if maybe_merge_dependency(resolver, incompatibility):
         return
 
-    index = len(resolver.incompatibilities)
-    resolver.incompatibilities.append(incompatibility)
-    for term in incompatibility.terms:
-        resolver.package_to_incompatibilities[term.package].append(index)
+    index = _append_incompatibility(resolver, incompatibility)
     index_dependency(resolver, incompatibility, index)
+
+
+def add_dependency_incompatibility(
+    resolver: Resolver[Any, Any],
+    package: Any,
+    package_range: Any,
+    dependency_package: Any,
+    dependency_range: Any,
+) -> Incompatibility[Any, Any]:
+    """Intern a cross-package dependency clause and return its canonical form.
+
+    Dependency clauses are frequently replayed after a backjump. Looking up the
+    formula entry before constructing terms avoids both that allocation and a
+    needless range union when the canonical parent range already covers this
+    decision.
+    """
+    key = (package, dependency_package, dependency_range, False)
+    existing_index = resolver.dependency_index.get(key)
+    if existing_index is not None:
+        existing = resolver.incompatibilities[existing_index]
+        existing_package, existing_dependency = existing.terms
+        if package_range.is_subset(existing_package.constraint):
+            return existing
+
+        merged = Incompatibility(
+            [
+                Term(
+                    package,
+                    existing_package.constraint | package_range,
+                    positive=True,
+                ),
+                existing_dependency,
+            ],
+            cause=IncompatibilityCause.DEPENDENCY,
+        )
+        # Package indexes store formula positions, so replacement in place does
+        # not require any index updates.
+        resolver.incompatibilities[existing_index] = merged
+        return merged
+
+    incompatibility = Incompatibility(
+        [
+            Term(package, package_range, positive=True),
+            Term(dependency_package, dependency_range, positive=False),
+        ],
+        cause=IncompatibilityCause.DEPENDENCY,
+    )
+    index = _append_incompatibility(resolver, incompatibility)
+    resolver.dependency_index[key] = index
+    return incompatibility
 
 
 def dependency_merge_key(
