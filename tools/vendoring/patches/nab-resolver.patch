@@ -420,7 +420,7 @@ index 5e2e9aa..1eeb6ce 100644
          """Preserve the package's decided version in outstanding snapshots."""
          for holder in self._decision_snapshots:
 diff --git a/src/cpip/_vendor/nab_resolver/propagate.py b/src/cpip/_vendor/nab_resolver/propagate.py
-index c6cf101..1be8932 100644
+index c6cf101..674aa50 100644
 --- a/src/cpip/_vendor/nab_resolver/propagate.py
 +++ b/src/cpip/_vendor/nab_resolver/propagate.py
 @@ -11,6 +11,8 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propa
@@ -456,7 +456,33 @@ index c6cf101..1be8932 100644
  def unit_propagation(
      resolver: Resolver[Any, Any], changed_package: Any
  ) -> Incompatibility[Any, Any] | None:
-@@ -68,9 +87,17 @@ def unit_propagation(
+@@ -57,58 +76,154 @@ def unit_propagation(
+     contradiction epoch.  Each clause records the epoch it was last settled in,
+     and is skipped while that stamp is current.
+ 
++    The per-term relation check stays inline: this loop evaluates tens of
++    thousands of terms during deep backtracking, so routing each one through
++    ``evaluate_incompatibility`` and ``term_relation`` dominates the solve.
++
+     Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation
+     """
+     propagation_queue: deque[Any] = deque([changed_package])
+     in_queue: set[Any] = {changed_package}
+ 
+     contradicted_at = resolver.clause_contradicted_at
+-    epoch = resolver.solution.contradiction_epoch
++    solution = resolver.solution
++    solution_get = solution.get
++    has_positive_constraint = solution.has_positive_constraint
++    derive = solution.derive
++    incompatibilities = resolver.incompatibilities
++    stats = resolver.stats
++    observer = resolver.observer
++    cache = resolver.relation_cache
++    satisfied = SetRelation.SATISFIED
++    contradicted = SetRelation.CONTRADICTED
++    epoch = solution.contradiction_epoch
+ 
      while propagation_queue:
          package = propagation_queue.popleft()
          in_queue.discard(package)
@@ -475,7 +501,150 @@ index c6cf101..1be8932 100644
              if contradicted_at[incompatibility_index] == epoch:
                  continue
  
-@@ -158,6 +185,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
+-            incompatibility = resolver.incompatibilities[incompatibility_index]
+-            evaluation = evaluate_incompatibility(resolver, incompatibility)
+-
+-            if evaluation is IncompatibilityState.CONTRADICTED:
+-                contradicted_at[incompatibility_index] = epoch
++            incompatibility = incompatibilities[incompatibility_index]
++
++            undetermined_term = None
++            conflict = True
++            for term in incompatibility.terms:
++                assignment = solution_get(term.package)
++                if assignment is None:
++                    relation = None
++                else:
++                    positive = term._positive  # noqa: SLF001
++                    constraint = term.constraint
++
++                    countdown = resolver.relation_gate_countdown - 1
++                    if countdown:
++                        resolver.relation_gate_countdown = countdown
++                    else:
++                        _resample_relation_gate(resolver)
++
++                    key = None
++                    relation = None
++                    if resolver.relation_cache_on:
++                        id_tokens = resolver.range_token_by_id
++                        assignment_token = id_tokens.get(id(assignment))
++                        if assignment_token is None:
++                            assignment_token = _intern_range(resolver, assignment)
++                        constraint_token = id_tokens.get(id(constraint))
++                        if constraint_token is None:
++                            constraint_token = _intern_range(resolver, constraint)
++                        key = (positive, assignment_token, constraint_token)
++                        relation = cache.get(key)
++
++                    if relation is None:
++                        range_relation = assignment.relation(constraint)
++                        subset = range_relation.is_subset
++                        disjoint = range_relation.is_disjoint
++                        if positive:
++                            relation = (
++                                satisfied
++                                if subset
++                                else (
++                                    contradicted
++                                    if disjoint
++                                    else SetRelation.UNDETERMINED
++                                )
++                            )
++                        else:
++                            relation = (
++                                satisfied
++                                if disjoint
++                                else (
++                                    contradicted if subset else SetRelation.UNDETERMINED
++                                )
++                            )
++                        if key is not None:
++                            if len(cache) >= RELATION_CACHE_MAX:
++                                cache.clear()
++                            cache[key] = relation
++                    else:
++                        resolver.relation_gate_hits += 1
++
++                    if (
++                        (positive and relation is satisfied)
++                        or (not positive and relation is contradicted)
++                    ) and not has_positive_constraint(term.package):
++                        relation = None
++
++                if relation is satisfied:
++                    continue
++                if relation is contradicted:
++                    contradicted_at[incompatibility_index] = epoch
++                    conflict = False
++                    undetermined_term = None
++                    break
++                if undetermined_term is not None:
++                    conflict = False
++                    undetermined_term = None
++                    break
++                undetermined_term = term
++
++            if undetermined_term is None:
++                if conflict:
++                    return incompatibility
+                 continue
+ 
+-            if evaluation is IncompatibilityState.CONFLICT:
+-                return incompatibility
+-
+-            if isinstance(evaluation, Term):
+-                negated_term = evaluation.negate()
+-                range_before = resolver.solution.get(negated_term.package)
+-                resolver.solution.derive(
+-                    negated_term.package,
+-                    negated_term.constraint,
+-                    positive=negated_term.is_positive(),
++            negated_package = undetermined_term.package
++            negated_positive = not undetermined_term._positive  # noqa: SLF001
++            range_before = solution_get(negated_package)
++            derive(
++                negated_package,
++                undetermined_term.constraint,
++                positive=negated_positive,
++                cause=incompatibility,
++            )
++            range_after = solution_get(negated_package)
++
++            # A derive that empties a range advances the epoch, which retires
++            # stamps taken before it.
++            epoch = solution.contradiction_epoch
++
++            if range_before != range_after:
++                stats.derivations += 1
++                observer.on_derivation(
++                    negated_package,
++                    positive=negated_positive,
+                     cause=incompatibility,
+                 )
+-                range_after = resolver.solution.get(negated_term.package)
+-
+-                # A derive that empties a range advances the epoch, which
+-                # retires the stamps taken before it.
+-                epoch = resolver.solution.contradiction_epoch
+-
+-                if range_before != range_after:
+-                    resolver.stats.derivations += 1
+-                    resolver.observer.on_derivation(
+-                        negated_term.package,
+-                        positive=negated_term.is_positive(),
+-                        cause=incompatibility,
+-                    )
+-                    if negated_term.package not in in_queue:
+-                        propagation_queue.append(negated_term.package)
+-                        in_queue.add(negated_term.package)
++                if negated_package not in in_queue:
++                    propagation_queue.append(negated_package)
++                    in_queue.add(negated_package)
+ 
+     return None
+ 
+@@ -152,6 +267,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
      tokens = resolver.range_tokens
      token = tokens.get(range_)
      if token is None:
@@ -484,7 +653,6 @@ index c6cf101..1be8932 100644
          token = resolver.next_range_token
          resolver.next_range_token = token + 1
          tokens[range_] = token
-
 diff --git a/src/cpip/_vendor/nab_resolver/ranges.py b/src/cpip/_vendor/nab_resolver/ranges.py
 index 568bd5a..ca3ba89 100644
 --- a/src/cpip/_vendor/nab_resolver/ranges.py
@@ -767,7 +935,7 @@ index 568bd5a..ca3ba89 100644
      @override
      def __repr__(self) -> str:
 diff --git a/src/cpip/_vendor/nab_resolver/resolver.py b/src/cpip/_vendor/nab_resolver/resolver.py
-index f9a0d37..8455c2f 100644
+index 2035d02..9728321 100644
 --- a/src/cpip/_vendor/nab_resolver/resolver.py
 +++ b/src/cpip/_vendor/nab_resolver/resolver.py
 @@ -22,7 +22,6 @@ from __future__ import annotations
@@ -824,7 +992,7 @@ index f9a0d37..8455c2f 100644
  
  class ResolverProvider(Protocol[PackageType, VersionType]):
      """Interface for supplying version and dependency information.
-@@ -159,6 +189,14 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
+@@ -159,6 +188,14 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
          """
          ...
  
@@ -839,7 +1007,7 @@ index f9a0d37..8455c2f 100644
      def receive_partial_solution_hint(
          self,
          positive_ranges: Mapping[PackageType, RangeProtocol[VersionType]],
-@@ -261,6 +299,10 @@ class BaseProvider(Generic[PackageType, VersionType]):
+@@ -262,6 +299,10 @@ class BaseProvider(Generic[PackageType, VersionType]):
          del package
          return True
  
@@ -850,7 +1018,7 @@ index f9a0d37..8455c2f 100644
      def receive_partial_solution_hint(
          self,
          positive_ranges: Mapping[PackageType, RangeProtocol[VersionType]],
-@@ -291,7 +333,6 @@ class BaseProvider(Generic[PackageType, VersionType]):
+@@ -292,7 +333,6 @@ class BaseProvider(Generic[PackageType, VersionType]):
          return constraint
  
  
@@ -858,7 +1026,7 @@ index f9a0d37..8455c2f 100644
  class ResolverStats(Generic[PackageType]):
      """Running statistics for resolution observability.
  
-@@ -300,20 +341,37 @@ class ResolverStats(Generic[PackageType]):
+@@ -301,20 +341,37 @@ class ResolverStats(Generic[PackageType]):
      See: https://minisat.se/MiniSat.html
      """
  
@@ -910,7 +1078,7 @@ index f9a0d37..8455c2f 100644
  
  
  class ResolverObserver(Generic[PackageType, VersionType]):
-@@ -461,6 +519,16 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -462,6 +519,16 @@ class Resolver(Generic[PackageType, VersionType]):
          self.package_to_incompatibilities: defaultdict[Any, list[int]] = defaultdict(
              list
          )
@@ -927,7 +1095,7 @@ index f9a0d37..8455c2f 100644
  
          # Per clause, the contradiction epoch in which one of its terms was
          # last seen contradicted; unit propagation skips a clause whose stamp
-@@ -649,10 +717,12 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -650,10 +717,12 @@ class Resolver(Generic[PackageType, VersionType]):
          )
  
          dependencies = self.provider.get_dependencies(next_package, chosen_version)
@@ -943,7 +1111,7 @@ index f9a0d37..8455c2f 100644
          parent_range = exact_range if widened is None else self.as_term_range(widened)
          for dependency_package, supplied_range in dependencies.items():
              dependency_range = self.as_term_range(supplied_range)
-@@ -674,19 +744,67 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -675,19 +744,67 @@ class Resolver(Generic[PackageType, VersionType]):
  
              # The merged term drops the required range, so the clause carries
              # it for the report.
@@ -1018,7 +1186,7 @@ index f9a0d37..8455c2f 100644
      def _build_result(self) -> Solution[PackageType, VersionType]:
          """Build the final result, including only reachable packages.
  
-@@ -708,6 +826,10 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -709,6 +826,10 @@ class Resolver(Generic[PackageType, VersionType]):
          """Reset solver state for a new resolution."""
          self.incompatibilities.clear()
          self.package_to_incompatibilities.clear()
@@ -1030,7 +1198,7 @@ index f9a0d37..8455c2f 100644
          self.dependency_index.clear()
          self.solution = PartialSolution(range_type=self.range_type)
 diff --git a/src/cpip/_vendor/nab_resolver/types.py b/src/cpip/_vendor/nab_resolver/types.py
-index 8d59c28..05c1ac5 100644
+index e91a66b..cbcc3c1 100644
 --- a/src/cpip/_vendor/nab_resolver/types.py
 +++ b/src/cpip/_vendor/nab_resolver/types.py
 @@ -12,7 +12,6 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#definition
