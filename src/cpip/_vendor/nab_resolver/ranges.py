@@ -339,25 +339,36 @@ class Range(Generic[VersionType]):
     def __contains__(self, version: object) -> bool:
         """Test membership by point lookup or binary-searching intervals."""
         intervals = self._intervals
-        if len(intervals) >= _POINT_SET_MIN_INTERVALS:
+        interval_count = len(intervals)
+        if interval_count == 0:
+            return False
+        if interval_count >= _POINT_SET_MIN_INTERVALS:
             points = self._as_points()
             if points is not None:
                 return version in points
 
-        low = 0
-        high = len(intervals)
-        while low < high:
-            middle = (low + high) // 2
-            lower = intervals[middle][0]
-            if lower is NEGATIVE_INFINITY or not version < lower:
-                low = middle + 1
-            else:
-                high = middle
-        if low == 0:
-            return False
-        lower, lower_inclusive, upper, upper_inclusive = intervals[low - 1]
-        if lower is not NEGATIVE_INFINITY and _same_bound(version, lower):
-            return lower_inclusive
+        if interval_count == 1:
+            lower, lower_inclusive, upper, upper_inclusive = intervals[0]
+            if lower is not NEGATIVE_INFINITY:
+                if version < lower:
+                    return False
+                if _same_bound(version, lower) and not lower_inclusive:
+                    return False
+        else:
+            low = 0
+            high = interval_count
+            while low < high:
+                middle = (low + high) // 2
+                lower = intervals[middle][0]
+                if lower is NEGATIVE_INFINITY or not version < lower:
+                    low = middle + 1
+                else:
+                    high = middle
+            if low == 0:
+                return False
+            lower, lower_inclusive, upper, upper_inclusive = intervals[low - 1]
+            if lower is not NEGATIVE_INFINITY and _same_bound(version, lower):
+                return lower_inclusive
         if upper is POSITIVE_INFINITY:
             return True
         return not (
