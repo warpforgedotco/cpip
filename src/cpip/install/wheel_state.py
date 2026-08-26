@@ -10,6 +10,10 @@ import stat
 from collections.abc import Iterable, Mapping
 
 from cpip.build.metadata import InstalledDistributionStore
+from cpip.core.names import (
+    canonicalize_installed_name,
+    installed_name_might_match,
+)
 from cpip.core.versions import version_of
 from cpip.core.errors import InstallationError
 
@@ -18,27 +22,6 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from cpip.build.metadata import InstalledMetadataDistribution
     from cpip.install.target import InstallTarget
-
-
-def _canonicalize_installed_name(value: str) -> str:
-    result: list[str] = []
-
-    separator = False
-
-    for character in value:
-        if character in "-_.":
-            separator = bool(result)
-
-            continue
-
-        if separator:
-            result.append("-")
-
-            separator = False
-
-        result.append(character.lower())
-
-    return "".join(result)
 
 
 class InstalledWheelDistribution:
@@ -71,7 +54,7 @@ class InstalledWheelDistribution:
 
         self.version = version_of(version)
 
-        self.canonical_name = _canonicalize_installed_name(name)
+        self.canonical_name = canonicalize_installed_name(name)
 
     def read_text(self, path: str) -> str:
         with open(os.path.join(self.info_location, path), encoding="utf-8") as file:
@@ -109,18 +92,6 @@ def _wheel_metadata_identity(path: str) -> tuple[str, str] | None:
         return None
 
     return None
-
-
-def _metadata_entry_might_match(
-    filename: str,
-    suffix: str,
-    requested: set[str],
-) -> bool:
-    """Conservatively match an installed metadata filename to requested names."""
-
-    stem = _canonicalize_installed_name(filename[: -len(suffix)])
-
-    return any(stem == name or stem.startswith(f"{name}-") for name in requested)
 
 
 def discover_installed_wheels(
@@ -169,7 +140,7 @@ def discover_installed_wheels(
                     else:
                         continue
 
-                    if requested is not None and not _metadata_entry_might_match(
+                    if requested is not None and not installed_name_might_match(
                         entry.name,
                         suffix,
                         requested,
@@ -191,7 +162,7 @@ def discover_installed_wheels(
 
                     name, version = identity
 
-                    canonical_name = _canonicalize_installed_name(name)
+                    canonical_name = canonicalize_installed_name(name)
 
                     if requested is not None and canonical_name not in requested:
                         return None

@@ -24,6 +24,7 @@ import sys
 
 from cpip.core.direct_url import DirectUrl
 from cpip.core.egg_link import egg_link_path_from_sys_path
+from cpip.core.names import installed_name_might_match
 from cpip.core.packaging import canonicalize_name, marker_applies, parse_requirement
 from cpip.core.versions import Version
 from cpip.core.urls import url_to_path
@@ -350,7 +351,15 @@ class LightDistribution:
 def _iter_root_distributions(
     root: str,
     user_site: str | None,
+    canonical_names: set[str] | None = None,
 ) -> Iterator[LightDistribution]:
+    """Every installed distribution under ``root``.
+
+    ``canonical_names`` drops directories that cannot hold metadata for one
+    of them before anything is opened. The caller filters again on the parsed
+    ``Name``; this only saves it from reading the ones that were never
+    candidates.
+    """
     try:
         with os.scandir(root or os.curdir) as entries:
             names = sorted(
@@ -364,6 +373,17 @@ def _iter_root_distributions(
             )
     except OSError:
         return
+
+    if canonical_names is not None:
+        names = [
+            name
+            for name in names
+            if installed_name_might_match(
+                name,
+                ".dist-info" if name.endswith(".dist-info") else ".egg-info",
+                canonical_names,
+            )
+        ]
 
     for name in names:
         info_location = os.path.join(root or os.curdir, name)
@@ -414,7 +434,11 @@ class LightDistributionStore:
         result: list[LightDistribution] = []
         seen: set[str] = set()
         for root in roots:
-            for dist in _iter_root_distributions(root, self.user_site):
+            for dist in _iter_root_distributions(
+                root,
+                self.user_site,
+                canonical_names,
+            ):
                 if dist.canonical_name in seen:
                     continue
                 if (

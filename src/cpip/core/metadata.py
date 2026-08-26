@@ -12,6 +12,7 @@ from .packaging import (
     marker_applies,
     parse_requirement,
 )
+from .names import installed_name_might_match
 from .versions import Version, version_of
 from .wheel_metadata import parse_metadata_headers
 
@@ -259,6 +260,7 @@ _INFO_SUFFIXES = (".dist-info", ".egg-info")
 
 def _iter_raw_distributions(
     paths: Iterable[str] | None,
+    canonical_names: set[str] | None = None,
 ) -> Iterable[RawDistribution]:
     """Every metadata entry ``importlib.metadata.distributions`` would find.
 
@@ -271,6 +273,15 @@ def _iter_raw_distributions(
     egg on ``sys.path``), a ``*.egg`` directory (whose ``EGG-INFO`` child
     counts too), and a default scan while any other finder on
     ``sys.meta_path`` offers ``find_distributions``.
+
+    ``canonical_names`` skips directories that cannot be metadata for one of
+    them, judged from the child name alone. That is the whole point: the
+    caller filters again on the parsed ``Name``, but only after reading and
+    parsing a ``METADATA`` file, and in an environment of any size almost all
+    of those reads are for distributions nobody asked about. Shapes that do
+    not go through a plain directory listing -- a zip on ``sys.path``, an
+    ``.egg`` directory, another ``sys.meta_path`` finder -- are yielded
+    unfiltered, since there is no name to judge before opening them.
     """
 
     if paths is None:
@@ -311,8 +322,22 @@ def _iter_raw_distributions(
             continue
 
         for child in children:
-            if child.lower().endswith(_INFO_SUFFIXES):
+            lowered = child.lower()
+
+            for suffix in _INFO_SUFFIXES:
+                if not lowered.endswith(suffix):
+                    continue
+
+                if canonical_names is not None and not installed_name_might_match(
+                    child,
+                    suffix,
+                    canonical_names,
+                ):
+                    break
+
                 yield PathDistribution(os.path.normpath(os.path.join(root, child)))
+
+                break
 
 
 _header_cache: HeaderCache | None = None
@@ -348,7 +373,10 @@ def _iter_installed_distributions(
 
     cache = _header_cache
 
-    found: Iterable[RawDistribution] = _iter_raw_distributions(paths)
+    found: Iterable[RawDistribution] = _iter_raw_distributions(
+        paths,
+        canonical_names,
+    )
 
     identities: dict[int, HeaderIdentity] = {}
 
