@@ -1,0 +1,8 @@
+requests==2.32.4
+urllib3==2.6.3
+certifi==2026.7.22
+charset-normalizer==3.4.9
+idna==3.18
+nab-resolver @ git+https://github.com/notatallshaw/nab.git@fff87ab94138b10c9192bc675f665e3b863ec32a#subdirectory=nab-resolver
+typing_extensions==4.16.0
+tomli==2.4.1

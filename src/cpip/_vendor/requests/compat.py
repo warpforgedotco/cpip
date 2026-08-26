@@ -37,8 +37,7 @@ is_py2 = _ver[0] == 2
 #: Python 3.x?
 is_py3 = _ver[0] == 3
 
-# The vendored transport must not change behavior when an unrelated host
-# environment happens to provide simplejson.
+# The vendored transport must not depend on unrelated host packages.
 has_simplejson = False
 from json import JSONDecodeError
 

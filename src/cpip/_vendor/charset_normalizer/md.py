@@ -8,7 +8,7 @@ if sys.version_info >= (3, 8):
     from typing import final
 else:
     try:
-        from typing_extensions import final
+        from cpip._vendor.typing_extensions import final
     except ImportError:
 
         def final(cls):  # type: ignore[misc,no-untyped-def]

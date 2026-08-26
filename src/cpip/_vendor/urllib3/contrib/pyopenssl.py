@@ -28,7 +28,7 @@ like this:
 .. code-block:: python
 
     try:
-        from cpip._vendor import urllib3.contrib.pyopenssl
+        from cpip._vendor.urllib3.contrib import pyopenssl
         urllib3.contrib.pyopenssl.inject_into_urllib3()
     except ImportError:
         pass

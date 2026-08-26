@@ -27,7 +27,7 @@ from .util.url import Url, parse_url
 if typing.TYPE_CHECKING:
     import ssl
 
-    from typing_extensions import Self
+    from cpip._vendor.typing_extensions import Self
 
 __all__ = ["PoolManager", "ProxyManager", "proxy_from_url"]
 
@@ -612,10 +612,7 @@ class ProxyManager(PoolManager):
             )
 
         return super().connection_from_host(
-            self.proxy.host,
-            self.proxy.port,
-            self.proxy.scheme,
-            pool_kwargs=pool_kwargs,  # type: ignore[union-attr]
+            self.proxy.host, self.proxy.port, self.proxy.scheme, pool_kwargs=pool_kwargs  # type: ignore[union-attr]
         )
 
     def _set_proxy_headers(
