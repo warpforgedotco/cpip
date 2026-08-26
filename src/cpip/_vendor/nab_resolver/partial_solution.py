@@ -167,6 +167,7 @@ class Assignment(Generic[PackageType, VersionType]):
     """A single entry in the partial solution trail."""
 
     __slots__ = (
+        "_effective",
         "accumulated_range",
         "cause",
         "cum_decision",
@@ -213,6 +214,9 @@ class Assignment(Generic[PackageType, VersionType]):
     cum_decision: VersionType | None
     """The package's decided version as of this entry, if it had one."""
 
+    _effective: RangeProtocol[VersionType] | None
+    """Lazily cached ``cum_positive - cum_negative`` for conflict probes."""
+
     def __init__(
         self,
         package: PackageType,
@@ -238,6 +242,7 @@ class Assignment(Generic[PackageType, VersionType]):
         self.cum_positive = cum_positive
         self.cum_negative = cum_negative
         self.cum_decision = cum_decision
+        self._effective = None
 
     def _values(self) -> tuple[object, ...]:
         return (
@@ -626,13 +631,16 @@ class PartialSolution(Generic[PackageType, VersionType]):
         if is_positive and cum_positive is None:
             return False
 
-        if cum_positive is None:
-            assert assignment.cum_negative is not None
-            effective = ~assignment.cum_negative
-        elif assignment.cum_negative is None:
-            effective = cum_positive
-        else:
-            effective = cum_positive - assignment.cum_negative
+        effective = assignment._effective
+        if effective is None:
+            if cum_positive is None:
+                assert assignment.cum_negative is not None
+                effective = ~assignment.cum_negative
+            elif assignment.cum_negative is None:
+                effective = cum_positive
+            else:
+                effective = cum_positive - assignment.cum_negative
+            assignment._effective = effective
 
         return term.satisfies(effective)
 

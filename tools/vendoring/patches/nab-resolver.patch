@@ -195,7 +195,7 @@ index c771106..22c8e81 100644
 +    _register_fallback_parent(resolver, existing_pkg.package, existing_index)
      return True
 diff --git a/src/cpip/_vendor/nab_resolver/partial_solution.py b/src/cpip/_vendor/nab_resolver/partial_solution.py
-index 5e2e9aa..1eeb6ce 100644
+index 5e2e9aa..8373c6d 100644
 --- a/src/cpip/_vendor/nab_resolver/partial_solution.py
 +++ b/src/cpip/_vendor/nab_resolver/partial_solution.py
 @@ -16,7 +16,6 @@ from __future__ import annotations
@@ -206,7 +206,7 @@ index 5e2e9aa..1eeb6ce 100644
  from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast, overload
  from weakref import ref
  
-@@ -164,10 +163,23 @@ def _detach_snapshots(
+@@ -164,10 +163,24 @@ def _detach_snapshots(
              snapshot.detach()
  
  
@@ -215,6 +215,7 @@ index 5e2e9aa..1eeb6ce 100644
      """A single entry in the partial solution trail."""
  
 +    __slots__ = (
++        "_effective",
 +        "accumulated_range",
 +        "cause",
 +        "cum_decision",
@@ -231,7 +232,7 @@ index 5e2e9aa..1eeb6ce 100644
      package: PackageType
      """Which package this assignment constrains."""
  
-@@ -180,24 +192,95 @@ class Assignment(Generic[PackageType, VersionType]):
+@@ -180,24 +193,99 @@ class Assignment(Generic[PackageType, VersionType]):
      is_decision: bool
      """True if this is a version choice; False if derived by propagation."""
  
@@ -262,6 +263,9 @@ index 5e2e9aa..1eeb6ce 100644
 +    cum_decision: VersionType | None
 +    """The package's decided version as of this entry, if it had one."""
 +
++    _effective: RangeProtocol[VersionType] | None
++    """Lazily cached ``cum_positive - cum_negative`` for conflict probes."""
++
 +    def __init__(
 +        self,
 +        package: PackageType,
@@ -287,6 +291,7 @@ index 5e2e9aa..1eeb6ce 100644
 +        self.cum_positive = cum_positive
 +        self.cum_negative = cum_negative
 +        self.cum_decision = cum_decision
++        self._effective = None
 +
 +    def _values(self) -> tuple[object, ...]:
 +        return (
@@ -333,7 +338,7 @@ index 5e2e9aa..1eeb6ce 100644
  
  class PartialSolution(Generic[PackageType, VersionType]):
      """Tracks the resolver's current partial solution as a decision trail.
-@@ -340,6 +423,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -340,6 +428,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
              positive=True,
              cum_positive=exact_range,
              cum_negative=self._negative_ranges.get(package),
@@ -341,7 +346,7 @@ index 5e2e9aa..1eeb6ce 100644
          )
          self._assignments.append(assignment)
          self._assignments_by_package[package].append(assignment)
-@@ -386,6 +470,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -386,6 +475,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
              positive=positive,
              cum_positive=self._positive_ranges.get(package),
              cum_negative=self._negative_ranges.get(package),
@@ -349,7 +354,7 @@ index 5e2e9aa..1eeb6ce 100644
          )
          self._assignments.append(assignment)
          self._assignments_by_package[package].append(assignment)
-@@ -406,20 +491,22 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -406,20 +496,22 @@ class PartialSolution(Generic[PackageType, VersionType]):
          # Trail levels never decrease, so this pops exactly the assignments above
          # target_level; every other package keeps the positive and negative ranges
          # its cached effective range was derived from.
@@ -375,7 +380,7 @@ index 5e2e9aa..1eeb6ce 100644
                  self._positive_ranges.pop(package, None)
                  self._negative_ranges.pop(package, None)
                  self._decided_versions.pop(package, None)
-@@ -427,9 +514,6 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -427,9 +519,6 @@ class PartialSolution(Generic[PackageType, VersionType]):
              else:
                  self._update_package_state_after_backtrack(package, entries)
  
@@ -385,7 +390,7 @@ index 5e2e9aa..1eeb6ce 100644
      def _update_package_state_after_backtrack(
          self,
          package: PackageType,
-@@ -442,18 +526,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -442,18 +531,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
          never decrease, so popping a decision pops every later entry for the
          same package; a surviving decision is always the current one.
          """
@@ -408,7 +413,7 @@ index 5e2e9aa..1eeb6ce 100644
  
          if last_pos is None:
              self._positive_ranges.pop(package, None)
-@@ -482,6 +558,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -482,6 +563,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
          """
          return _take_snapshot(self._decided_versions, self._decision_snapshots)
  
@@ -419,6 +424,30 @@ index 5e2e9aa..1eeb6ce 100644
      def _freeze_decisions(self, package: PackageType) -> None:
          """Preserve the package's decided version in outstanding snapshots."""
          for holder in self._decision_snapshots:
+@@ -546,13 +631,16 @@ class PartialSolution(Generic[PackageType, VersionType]):
+         if is_positive and cum_positive is None:
+             return False
+ 
+-        if cum_positive is None:
+-            assert assignment.cum_negative is not None
+-            effective = ~assignment.cum_negative
+-        elif assignment.cum_negative is None:
+-            effective = cum_positive
+-        else:
+-            effective = cum_positive - assignment.cum_negative
++        effective = assignment._effective
++        if effective is None:
++            if cum_positive is None:
++                assert assignment.cum_negative is not None
++                effective = ~assignment.cum_negative
++            elif assignment.cum_negative is None:
++                effective = cum_positive
++            else:
++                effective = cum_positive - assignment.cum_negative
++            assignment._effective = effective
+ 
+         return term.satisfies(effective)
+ 
 diff --git a/src/cpip/_vendor/nab_resolver/propagate.py b/src/cpip/_vendor/nab_resolver/propagate.py
 index c6cf101..71b755e 100644
 --- a/src/cpip/_vendor/nab_resolver/propagate.py
