@@ -203,7 +203,14 @@ def _read_exact(stream: _ReadableStream, size: int) -> bytes | None:
     return chunks[0] if len(chunks) == 1 else b"".join(chunks)
 
 
-def _extract_exact(stream: _ReadableStream, path: str, size: int) -> None:
+def _extract_exact(
+    stream: _ReadableStream,
+    path: str,
+    size: int,
+    *,
+    mtime: int | None = None,
+    executable_mode: int | None = None,
+) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666)
 
     try:
@@ -228,6 +235,18 @@ def _extract_exact(stream: _ReadableStream, path: str, size: int) -> None:
                 view = view[written:]
 
             remaining -= len(chunk)
+
+        if mtime is not None:
+            if os.utime in os.supports_fd:
+                os.utime(fd, (mtime, mtime))
+            else:
+                os.utime(path, (mtime, mtime))
+
+        if executable_mode is not None:
+            if os.chmod in os.supports_fd:
+                os.chmod(fd, executable_mode)
+            else:
+                os.chmod(path, executable_mode)
 
     finally:
         os.close(fd)
@@ -380,17 +399,18 @@ def fast_untar(filename: str, location: str, mode: str) -> list[str] | None:
 
                 created_directories.add(parent)
 
-            _extract_exact(stream, path, size)
+            _extract_exact(
+                stream,
+                path,
+                size,
+                mtime=mtime,
+                executable_mode=executable_mode if member_mode & 0o111 else None,
+            )
 
             padding = (-size) % BLOCKSIZE
 
             if padding and _read_exact(stream, padding) is None:
                 raise _NotFastCompatible("truncated archive")
-
-            os.utime(path, (mtime, mtime))
-
-            if member_mode & 0o111:
-                os.chmod(path, executable_mode)
 
     except _NotFastCompatible:
         stream.close()
