@@ -53,6 +53,8 @@ CatalogSummary = tuple[
 
 _PENDING_CATALOGS_ATTRIBUTE = "_cpip_pending_catalogs"
 _PENDING_CATALOGS_LIMIT = 64
+_VALIDATED_CATALOGS_ATTRIBUTE = "_cpip_validated_catalogs"
+_VALIDATED_CATALOGS_LIMIT = 8
 
 
 def cache_key(url: str) -> str:
@@ -132,6 +134,36 @@ def _remember_pending_catalog(
         pending.pop(next(iter(pending)))
 
 
+def _validated_catalogs(
+    cache: Any,
+) -> dict[str, tuple[bytes, CatalogData]] | None:
+    """Return a small per-cache memo of blobs already validated in this process."""
+    try:
+        attributes = vars(cache)
+    except TypeError:
+        return None
+    validated = attributes.get(_VALIDATED_CATALOGS_ATTRIBUTE)
+    if validated is None:
+        validated = {}
+        attributes[_VALIDATED_CATALOGS_ATTRIBUTE] = validated
+    return validated
+
+
+def _remember_validated_catalog(
+    cache: Any,
+    url: str,
+    raw: bytes,
+    catalog: CatalogData,
+) -> None:
+    validated = _validated_catalogs(cache)
+    if validated is None:
+        return
+    validated.pop(url, None)
+    validated[url] = raw, catalog
+    while len(validated) > _VALIDATED_CATALOGS_LIMIT:
+        validated.pop(next(iter(validated)))
+
+
 def _load_catalog_uncached(
     cache: Any,
     url: str,
@@ -142,6 +174,13 @@ def _load_catalog_uncached(
     raw = cache.get_atomic(cache_key(url))
     if raw is None:
         return None
+    validated = _validated_catalogs(cache)
+    if validated is not None:
+        known = validated.get(url)
+        if known is not None and known[0] == raw:
+            validated.pop(url)
+            validated[url] = known
+            return known[1], raw
     try:
         payload = marshal.loads(raw)
         if (
@@ -158,7 +197,9 @@ def _load_catalog_uncached(
             valid_record(record) for record in unparsed
         ):
             return None
-        return (groups, unparsed), raw
+        catalog = groups, unparsed
+        _remember_validated_catalog(cache, url, raw, catalog)
+        return catalog, raw
     except (EOFError, TypeError, ValueError, KeyError, IndexError):
         return None
 
@@ -557,6 +598,7 @@ def save_catalog(cache: Any, url: str, catalog: CatalogData) -> None:
         return
     generation = catalog_generation(payload)
     cache.set_atomic(cache_key(url), payload)
+    _remember_validated_catalog(cache, url, payload, catalog)
     save_summary(cache, url, catalog, generation)
 
 
