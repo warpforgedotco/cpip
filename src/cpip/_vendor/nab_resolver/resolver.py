@@ -522,8 +522,10 @@ class Resolver(Generic[PackageType, VersionType]):
 
         dependencies = self.provider.get_dependencies(next_package, chosen_version)
         exact_range = self.range_type.singleton(chosen_version)
-        widened = self.provider.widen_decision(next_package, chosen_version)
-        parent_range = exact_range if widened is None else widened
+        parent_range = exact_range
+        if dependencies:
+            widened = self.provider.widen_decision(next_package, chosen_version)
+            parent_range = exact_range if widened is None else widened
         for dependency_package, dependency_range in dependencies.items():
             cross_package = dependency_package != next_package
             if not cross_package:

@@ -116,3 +116,31 @@ def test_replayed_clause_still_replays_requirement_refinement(monkeypatch: Any) 
 
     assert len(candidate.incompatibilities) == 1
     assert absorbed == [candidate.incompatibilities[0]] * 2
+
+
+def test_leaf_skips_widening_but_still_consumes_invalidations(
+    monkeypatch: Any,
+) -> None:
+    candidate = resolver()
+    cause: Incompatibility[Any, Any] = Incompatibility(
+        [], IncompatibilityCause.DEPENDENCY
+    )
+    candidate.solution.derive("leaf", Range.full(), positive=True, cause=cause)
+    consumed = 0
+
+    monkeypatch.setattr(candidate.provider, "get_dependencies", lambda *_args: {})
+
+    def reject_widen(*_args: Any) -> None:
+        raise AssertionError("leaf decisions must not be widened")
+
+    def consume() -> list[Any]:
+        nonlocal consumed
+        consumed += 1
+        return []
+
+    monkeypatch.setattr(candidate.provider, "widen_decision", reject_widen)
+    monkeypatch.setattr(candidate.provider, "consume_dependency_invalidations", consume)
+
+    candidate._decide_next("leaf")
+
+    assert consumed == 1

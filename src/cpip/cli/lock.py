@@ -43,9 +43,8 @@ def read_requirement_lines(filename: str) -> list[str]:
 
 def remote_hashed_wheel(candidate: object) -> dict[str, object] | None:
     """Render a remote wheel from its index facts without opening the archive."""
-    if (
-        getattr(candidate, "source_kind", None) != "wheel"
-        or getattr(candidate, "source_is_direct", False)
+    if getattr(candidate, "source_kind", None) != "wheel" or getattr(
+        candidate, "source_is_direct", False
     ):
         return None
     source = getattr(candidate, "source_url", None)
@@ -76,9 +75,8 @@ def remote_hashed_wheel(candidate: object) -> dict[str, object] | None:
 
 def remote_hashed_sdist(candidate: object) -> dict[str, object] | None:
     """Render a remote index sdist without downloading or unpacking it."""
-    if (
-        getattr(candidate, "source_kind", None) != "sdist"
-        or getattr(candidate, "source_is_direct", False)
+    if getattr(candidate, "source_kind", None) != "sdist" or getattr(
+        candidate, "source_is_direct", False
     ):
         return None
     source = getattr(candidate, "source_url", None)

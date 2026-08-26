@@ -23,6 +23,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import cpip.resolution.nab_provider as nab_provider
 from cpip.core.errors import ResolutionError
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
@@ -266,10 +267,7 @@ def test_selected_dependency_check_respects_uncertain_sources_and_markers(
         lambda package, version: candidate,
     )
 
-    assert (
-        adapter._selected_dependency_rejects("parent", Version("1.0.0"))
-        is expected
-    )
+    assert adapter._selected_dependency_rejects("parent", Version("1.0.0")) is expected
 
 
 @pytest.mark.parametrize("seed", range(12))
@@ -279,6 +277,20 @@ def test_transitive_forward_check_never_changes_the_answer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Random compatible releases must select identically without lookahead."""
+    monkeypatch.setattr(nab_provider, "_TRANSITIVE_FORWARD_CHECK_MIN_VERSIONS", 4)
+    checked = 0
+    partial_solution_rejects = NabProvider._partial_solution_rejects
+
+    def counting_check(
+        self: NabProvider,
+        package: str,
+        version: Version,
+    ) -> bool:
+        nonlocal checked
+        checked += 1
+        return partial_solution_rejects(self, package, version)
+
+    monkeypatch.setattr(NabProvider, "_partial_solution_rejects", counting_check)
     rng = random.Random(seed)
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
@@ -310,6 +322,7 @@ def test_transitive_forward_check_never_changes_the_answer(
 
     roots = ["app", "shared==1.0.0", "parent"]
     with_check = resolve(wheelhouse, roots)
+    assert checked > 0
     monkeypatch.setattr(
         NabProvider,
         "_partial_solution_rejects",

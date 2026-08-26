@@ -148,7 +148,28 @@ class NabProvider:
         """Start catalog requests while the resolver still has independent work."""
         prefetch = getattr(self.provider, "prefetch_available_versions", None)
         if prefetch is not None:
-            prefetch(requirements)
+            direct_packages = {
+                package
+                for package, requirement in self.requirements.items()
+                if requirement.url is not None
+            }
+            direct_packages.update(
+                _key(requirement)
+                for requirement in requirements
+                if requirement.url is not None
+            )
+            catalog_requirements = tuple(
+                requirement
+                for requirement in requirements
+                if requirement.url is None
+                and _key(requirement) not in direct_packages
+                and not any(
+                    constraint.url is not None
+                    for constraint in self._constraint_for(_key(requirement))
+                )
+            )
+            if catalog_requirements:
+                prefetch(catalog_requirements)
 
     def _versions(self, package: str) -> tuple[Version, ...]:
         requirement = self.requirements[package]
@@ -1122,11 +1143,6 @@ class NabProvider:
                 dependency
                 for dependency in dependencies_records
                 if _key(dependency) != package
-                and dependency.url is None
-                and not any(
-                    constraint.url is not None
-                    for constraint in self._constraint_for(_key(dependency))
-                )
             )
         )
         dependencies: dict[str, Range[Version]] = {}
@@ -1226,9 +1242,6 @@ class NabProvider:
                         Range.singleton(selected_dependency_version),
                     )
                     self._dependency_invalidations.setdefault(dependency_key, None)
-                    record = self.records.get(
-                        (dependency_key, selected_dependency_version), record
-                    )
             allowed = self._versions(dependency_key)
             selected = [
                 candidate

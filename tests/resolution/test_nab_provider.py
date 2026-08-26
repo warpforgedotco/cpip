@@ -60,7 +60,7 @@ class FakeProvider:
         self.prefetch_calls.append(names)
         self.events.append(("prefetch", names))
 
-    def find_candidates(self, requirement, *, allowed_versions):
+    def find_candidates(self, requirement, *, allowed_versions=None):
         self.events.append(("find", requirement.canonical_name))
         if allowed_versions is None:
             return tuple(
@@ -209,9 +209,7 @@ def test_dependency_prefetch_filters_unusable_catalog_requests(
     adapter = NabProvider(
         provider,
         ResolutionConfig(
-            constraints=(
-                "constrained @ https://example.invalid/constrained.whl",
-            ),
+            constraints=("constrained @ https://example.invalid/constrained.whl",),
         ),
     )
     root, root_range = adapter.add_root(parse_requirement("app"))
@@ -221,3 +219,36 @@ def test_dependency_prefetch_filters_unusable_catalog_requests(
     adapter.get_dependencies(root, Version("1"))
 
     assert provider.prefetch_calls == [("dep", "other")]
+
+
+def test_dependency_prefetch_respects_an_existing_direct_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FakeProvider()
+    provider.candidates[("app", Version("1"))].dependencies = (
+        parse_requirement("dep<2"),
+    )
+    adapter = NabProvider(provider, ResolutionConfig())
+    adapter.requirements["dep"] = parse_requirement(
+        "dep @ https://example.invalid/dep.whl"
+    )
+    root, root_range = adapter.add_root(parse_requirement("app"))
+    adapter.choose_version(root, root_range)
+    monkeypatch.setattr(adapter, "_versions", lambda _package: (Version("1"),))
+
+    adapter.get_dependencies(root, Version("1"))
+
+    assert provider.prefetch_calls == []
+
+
+@pytest.mark.parametrize("direct_first", [False, True])
+def test_root_prefetch_gives_direct_urls_precedence(direct_first: bool) -> None:
+    provider = FakeProvider()
+    adapter = NabProvider(provider, ResolutionConfig())
+    named = parse_requirement("dep")
+    direct = parse_requirement("dep @ https://example.invalid/dep.whl")
+    duplicates = [direct, named] if direct_first else [named, direct]
+
+    adapter.add_roots([parse_requirement("app"), *duplicates])
+
+    assert provider.prefetch_calls[0] == ("app",)
