@@ -23,7 +23,9 @@ from cpip.core.errors import InstallationError
 from cpip.core.utils import CACHE_INTERPRETER_TAG
 from cpip.core.wheel import validate_wheel
 from cpip.install.wheel_archive import (
+    compiled_parts,
     copy_member_with_metadata,
+    mapped_parts,
     validate_member_parts,
     zip_mode,
 )
@@ -67,6 +69,22 @@ else:
 
 
 ARCHIVE_CACHE_BUCKET = f"archive-{CACHE_INTERPRETER_TAG}"
+
+PYC_CACHE_SUBDIR = "pyc"
+"""Sibling of ``tree/`` holding the entry's byte-compiled modules.
+
+Kept outside ``tree/`` on purpose: ``tree/`` is described by the manifest's
+``entries`` tuple, which two independent readers decode as a list of wheel
+members (``wheel_install_plan_cache`` from its own receipt, and
+``wheel_archive_runtime.CachedWheelTreeArchive``). Synthetic ``__pycache__``
+rows would corrupt both. A sibling directory leaves the manifest untouched
+and makes ``--no-compile`` a matter of simply not reading it.
+
+Laid out by *mapped* (post-relocation) path, so it matches
+:func:`cpip.install.wheel_archive.compiled_parts` exactly. Absent for entries
+written before this cache learned to compile; the installer falls back to
+compiling in the stage, so a missing directory is a miss, never an error.
+"""
 
 _LOCK_WAIT_SECONDS = 30.0
 
@@ -339,6 +357,66 @@ def _record_metadata(
     return result
 
 
+def pyc_root(entry_root: str) -> str:
+    """The entry's byte-compiled tree, a sibling of ``tree/``."""
+    return os.path.join(entry_root, PYC_CACHE_SUBDIR)
+
+
+def _compile_archive_pyc(
+    tree: str, destination: str, entries: Iterable[ArchiveEntry]
+) -> int:
+    """Byte-compile the entry's modules once, into ``destination``.
+
+    Runs at fill time so that installing is a clone plus a path rewrite rather
+    than a compile. Returns how many modules were compiled.
+
+    A module that will not compile -- vendored Python 2 in a wheel, say -- is
+    skipped, not fatal: the installer falls back to compiling that one in the
+    stage, exactly as it did before this cache existed.
+    """
+    import py_compile
+
+    created: set[str] = set()
+
+    compiled_count = 0
+
+    for entry in entries:
+        mapped = mapped_parts(entry[0])
+
+        target = compiled_parts(mapped)
+
+        if target is None:
+            continue
+
+        source = os.path.join(tree, *entry[0].split("/"))
+
+        output = os.path.join(destination, *target)
+
+        parent = os.path.dirname(output)
+
+        if parent not in created:
+            os.makedirs(parent, exist_ok=True)
+
+            created.add(parent)
+
+        try:
+            written = py_compile.compile(
+                source,
+                cfile=output,
+                dfile="/".join(mapped),
+                doraise=False,
+                quiet=2,
+            )
+
+        except (OSError, ValueError):
+            continue
+
+        if written is not None:
+            compiled_count += 1
+
+    return compiled_count
+
+
 def _extract_archive(
     candidate: WheelInstallCandidate,
     digest: str,
@@ -424,6 +502,12 @@ def _extract_archive(
             raise InstallationError(
                 f"Wheel {candidate.path} has no valid dist-info metadata",
             )
+
+        _compile_archive_pyc(
+            tree,
+            os.path.join(temporary, PYC_CACHE_SUBDIR),
+            entries,
+        )
 
         manifest = (
             digest,

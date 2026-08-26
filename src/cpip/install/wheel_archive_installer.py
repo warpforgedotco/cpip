@@ -9,7 +9,6 @@ them into a real target directory.
 from __future__ import annotations
 
 import csv
-import functools
 import errno
 import io
 import os
@@ -17,8 +16,17 @@ import shutil
 from typing import TYPE_CHECKING
 
 from cpip.core.errors import InstallationError
-from cpip.install.wheel_archive import record_metadata_internal, validate_member_parts
-from cpip.install.wheel_archive_cache import INSTALL_WORKERS, prepare_cached_wheels
+from cpip.install.wheel_archive import (
+    compiled_parts,
+    mapped_parts,
+    record_metadata_internal,
+    validate_member_parts,
+)
+from cpip.install.wheel_archive_cache import (
+    INSTALL_WORKERS,
+    prepare_cached_wheels,
+    pyc_root,
+)
 from cpip.install.wheel_scripts import (
     entry_point_scripts,
     generate_entry_point_files,
@@ -27,6 +35,8 @@ from cpip.install.wheel_scripts import (
 from cpip.platform.clone import clone_path
 
 if TYPE_CHECKING:
+    from types import CodeType
+
     from cpip.build.metadata import InstalledMetadataDistribution
     from cpip.core.direct_url import DirectUrl
     from cpip.install.target import InstallTarget
@@ -114,55 +124,8 @@ def _eligible_target(target: InstallTarget, cache_dir: str) -> str | None:
     return root
 
 
-@functools.lru_cache(maxsize=65536)
-def _mapped_parts(relative: str) -> tuple[str, ...]:
-    """Where a wheel member lands in the target, as path parts.
-
-    A pure function of the member path, memoized: the same members recur
-    across the plan, the staged tree and the RECORD of every install.
-    """
-    parts = validate_member_parts(relative)
-
-    if not parts:
-        raise InstallationError(f"wheel member has an empty path: {relative!r}")
-
-    if not parts[0].endswith(".data"):
-        return parts
-
-    if len(parts) < 3 or parts[1] not in {
-        "purelib",
-        "platlib",
-        "scripts",
-        "data",
-        "headers",
-    }:
-        raise InstallationError(f"invalid wheel data path: {relative}")
-
-    if parts[1] == "scripts":
-        return ("Scripts" if os.name == "nt" else "bin", *parts[2:])
-
-    return parts[2:]
-
-
 def _normalized_destination(parts: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(os.path.normcase(part) for part in parts)
-
-
-def _compiled_parts(mapped: tuple[str, ...]) -> tuple[str, ...] | None:
-    """Where byte-compiling ``mapped`` lands its ``.pyc``, as path parts, or
-    ``None`` when ``_compile_members`` would not compile this member.
-
-    Uses the interpreter's own ``cache_from_source`` so the reserved and
-    preflighted path is exactly the one ``compileall`` writes.
-    """
-    if not mapped[-1].endswith(".py") or mapped[0] in {"bin", "Scripts"}:
-        return None
-
-    import importlib.util
-
-    compiled = importlib.util.cache_from_source("/".join(mapped))
-
-    return tuple(compiled.split("/"))
 
 
 def _reserve_destination(
@@ -223,11 +186,11 @@ def _build_plans(
         zip(requests, candidates, archives, strict=True),
     ):
         for entry in archive.entries:
-            mapped = _mapped_parts(entry[0])
+            mapped = mapped_parts(entry[0])
 
             _reserve_destination(trie, mapped, owner, candidate)
 
-            if pycompile and (compiled := _compiled_parts(mapped)) is not None:
+            if pycompile and (compiled := compiled_parts(mapped)) is not None:
                 _reserve_destination(trie, compiled, owner, candidate)
 
         scripts = entry_point_scripts(
@@ -377,37 +340,155 @@ def _file_metadata(path: str) -> tuple[str, str]:
         return record_metadata_internal(file.read())
 
 
-def _compile_members(
+def _rebind_code_filename(
+    code: CodeType,
+    filename: str,
+    code_type: type[CodeType],
+) -> CodeType:
+    """``code`` with ``co_filename`` -- and every nested code object's -- set.
+
+    The type is passed in and the ``isinstance`` test is done by the caller:
+    a module's constants are overwhelmingly not code objects, and at this
+    call volume a Python-level call per constant costs more than the rebind.
+    """
+    consts = code.co_consts
+
+    if not any(isinstance(const, code_type) for const in consts):
+        return code.replace(co_filename=filename)
+
+    return code.replace(
+        co_filename=filename,
+        co_consts=tuple(
+            _rebind_code_filename(const, filename, code_type)
+            if isinstance(const, code_type)
+            else const
+            for const in consts
+        ),
+    )
+
+
+def _timestamp_pyc(code: CodeType, source: os.stat_result) -> bytes:
+    """A timestamp-invalidated ``.pyc`` body for ``code``.
+
+    Byte-for-byte what ``compileall`` would have written next to a source with
+    ``source``'s mtime and size, so the interpreter validates it the same way.
+    """
+    import importlib.util
+    import marshal
+
+    return b"".join(
+        (
+            importlib.util.MAGIC_NUMBER,
+            (0).to_bytes(4, "little"),
+            (int(source.st_mtime) & 0xFFFFFFFF).to_bytes(4, "little"),
+            (source.st_size & 0xFFFFFFFF).to_bytes(4, "little"),
+            marshal.dumps(code),
+        ),
+    )
+
+
+def _materialize_pyc(
     stage: str,
+    install_root: str,
     archive: CachedWheelArchive,
 ) -> list[tuple[str, str, str]]:
-    """Byte-compile the wheel's ``.py`` members in the staged tree and return
-    their ``.pyc`` RECORD rows, the way the transactional route records them.
+    """Place the wheel's ``.pyc`` files in the staged tree and return their
+    RECORD rows, the way the transactional route records them.
 
-    Scripts under ``bin``/``Scripts`` are not modules and are left alone.
+    The archive cache compiled these once at fill time, so the work here is a
+    marshal round trip that rebinds ``co_filename`` to where the module will
+    actually live -- roughly nine times cheaper than compiling, and it names
+    the installed path rather than a staging directory that will not outlive
+    the install.
+
+    Members the cache has no ``.pyc`` for -- an entry written before the cache
+    learned to compile, a module that would not compile, a mismatched
+    interpreter magic -- fall back to compiling in the stage.
     """
+    import marshal
+    import types
 
-    import compileall
-    import importlib.util
+    code_type = types.CodeType
+
+    cached_root = pyc_root(os.path.dirname(archive.tree))
 
     rows: list[tuple[str, str, str]] = []
 
+    uncached: list[tuple[str, tuple[str, ...]]] = []
+
+    import importlib.util
+
+    magic = importlib.util.MAGIC_NUMBER
+
     for relative, _, _, _ in archive.entries:
-        mapped = _mapped_parts(relative)
+        mapped = mapped_parts(relative)
 
-        if not mapped[-1].endswith(".py") or mapped[0] in {"bin", "Scripts"}:
+        target = compiled_parts(mapped)
+
+        if target is None:
             continue
 
-        path = os.path.join(stage, "/".join(mapped))
+        source = os.path.join(stage, *mapped)
 
-        if not compileall.compile_file(path, force=True, quiet=1):
+        try:
+            with open(os.path.join(cached_root, *target), "rb") as file:
+                cached = file.read()
+
+        except OSError:
+            uncached.append((source, target))
+
             continue
 
-        compiled = importlib.util.cache_from_source(path)
+        if len(cached) <= 16 or cached[:4] != magic:
+            uncached.append((source, target))
 
-        compiled_relative = os.path.relpath(compiled, stage).replace(os.sep, "/")
+            continue
 
-        rows.append((compiled_relative, *_file_metadata(compiled)))
+        try:
+            code = _rebind_code_filename(
+                marshal.loads(cached[16:]),
+                os.path.join(install_root, *mapped),
+                code_type,
+            )
+
+            body = _timestamp_pyc(code, os.stat(source))
+
+        except (EOFError, OSError, ValueError, TypeError):
+            uncached.append((source, target))
+
+            continue
+
+        destination = os.path.join(stage, *target)
+
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+
+        with open(destination, "wb") as file:
+            file.write(body)
+
+        rows.append(("/".join(target), *record_metadata_internal(body)))
+
+    rows.extend(_compile_uncached(stage, uncached))
+
+    return rows
+
+
+def _compile_uncached(
+    stage: str,
+    members: list[tuple[str, tuple[str, ...]]],
+) -> list[tuple[str, str, str]]:
+    """Compile members the archive cache had no ``.pyc`` for, in the stage."""
+    if not members:
+        return []
+
+    import compileall
+
+    rows: list[tuple[str, str, str]] = []
+
+    for source, target in members:
+        if not compileall.compile_file(source, force=True, quiet=1):
+            continue
+
+        rows.append(("/".join(target), *_file_metadata(os.path.join(stage, *target))))
 
     return rows
 
@@ -416,6 +497,7 @@ def _finalize_wheel(
     stage: str,
     plan: _WheelInstallPlan,
     *,
+    install_root: str,
     script_executable: str | None,
     pycompile: bool = False,
 ) -> None:
@@ -440,7 +522,7 @@ def _finalize_wheel(
         parts = validate_member_parts(relative)
 
         if len(parts) >= 3 and parts[0].endswith(".data") and parts[1] == "scripts":
-            mapped = _mapped_parts(relative)
+            mapped = mapped_parts(relative)
 
             path = os.path.join(stage, "/".join(mapped))
 
@@ -520,7 +602,7 @@ def _finalize_wheel(
 
                 generated_paths.append(destination)
 
-    compiled_rows = _compile_members(stage, archive) if pycompile else ()
+    compiled_rows = _materialize_pyc(stage, install_root, archive) if pycompile else ()
 
     managed = {
         f"{dist_info}/INSTALLER",
@@ -533,7 +615,7 @@ def _finalize_wheel(
     rows: list[tuple[str, str, str]] = []
 
     for relative, digest, size, _ in archive.entries:
-        mapped = _mapped_parts(relative)
+        mapped = mapped_parts(relative)
 
         installed_relative = "/".join(mapped)
 
@@ -601,11 +683,11 @@ def _plan_destinations(
     destinations: set[str] = set()
 
     for relative, _, _, _ in plan.archive.entries:
-        mapped = _mapped_parts(relative)
+        mapped = mapped_parts(relative)
 
         destinations.add(os.path.join(root, "/".join(mapped)))
 
-        if pycompile and (compiled := _compiled_parts(mapped)) is not None:
+        if pycompile and (compiled := compiled_parts(mapped)) is not None:
             destinations.add(os.path.join(root, "/".join(compiled)))
 
     scripts_root = os.path.join(root, "Scripts" if os.name == "nt" else "bin")
@@ -888,6 +970,7 @@ def install_wheels_from_archive_cache(
                 _finalize_wheel(
                     stage,
                     plan,
+                    install_root=root,
                     script_executable=script_executable,
                     pycompile=pycompile,
                 )
@@ -899,6 +982,7 @@ def install_wheels_from_archive_cache(
                 _finalize_wheel(
                     stage,
                     plan,
+                    install_root=root,
                     script_executable=script_executable,
                     pycompile=pycompile,
                 )
