@@ -393,6 +393,20 @@ class Resolver(Generic[PackageType, VersionType]):
             list
         )
 
+        # Dependency clauses are indexed separately by the role of each term.
+        # An exact parent decision only needs clauses registered for that
+        # version; undecided parent ranges retain the exhaustive parent list.
+        self.dependency_parent_incompatibilities: defaultdict[Any, list[int]] = (
+            defaultdict(list)
+        )
+        self.dependency_parent_fallbacks: defaultdict[Any, list[int]] = defaultdict(
+            list
+        )
+        self.dependency_parent_versions: defaultdict[
+            Any, defaultdict[Any, list[int]]
+        ] = defaultdict(lambda: defaultdict(list))
+        self.dependency_parent_fallback_indices: set[int] = set()
+
         # Keyed by (package, dep_package, dep_constraint, dep_positive); used
         # to merge mergeable dependency clauses (pubgrub-rs's merge_dependents).
         self.dependency_index: dict[Any, int] = {}
@@ -521,11 +535,11 @@ class Resolver(Generic[PackageType, VersionType]):
         )
 
         dependencies = self.provider.get_dependencies(next_package, chosen_version)
-        if not dependencies:
-            return next_package
         exact_range = self.range_type.singleton(chosen_version)
-        widened = self.provider.widen_decision(next_package, chosen_version)
-        parent_range = exact_range if widened is None else widened
+        parent_range = exact_range
+        if dependencies:
+            widened = self.provider.widen_decision(next_package, chosen_version)
+            parent_range = exact_range if widened is None else widened
         for dependency_package, dependency_range in dependencies.items():
             cross_package = dependency_package != next_package
             if not cross_package:
@@ -537,21 +551,68 @@ class Resolver(Generic[PackageType, VersionType]):
                 if chosen_version in dependency_range:
                     continue
                 terms = [Term(next_package, exact_range, positive=True)]
+                incompatibility = Incompatibility(
+                    terms, cause=IncompatibilityCause.DEPENDENCY
+                )
+                incompat_index.add_incompatibility(self, incompatibility)
             else:
-                terms = [
-                    Term(next_package, parent_range, positive=True),
-                    Term(dependency_package, dependency_range, positive=False),
-                ]
-            incompatibility = Incompatibility(
-                terms, cause=IncompatibilityCause.DEPENDENCY
-            )
-            incompat_index.add_incompatibility(self, incompatibility)
-
-            if cross_package:
+                if widened is None:
+                    incompatibility = incompat_index.add_dependency_incompatibility(
+                        self,
+                        next_package,
+                        parent_range,
+                        dependency_package,
+                        dependency_range,
+                        exact_parent_version=chosen_version,
+                    )
+                else:
+                    incompatibility = incompat_index.add_dependency_incompatibility(
+                        self,
+                        next_package,
+                        parent_range,
+                        dependency_package,
+                        dependency_range,
+                    )
                 decide.absorb_redundant_requirement(
                     self, dependency_package, dependency_range, incompatibility
                 )
+        invalidated = self._backtrack_dependency_invalidations()
+        if invalidated is not None:
+            return invalidated
         return next_package
+
+    def _backtrack_dependency_invalidations(self) -> Any | None:
+        """Revisit decisions whose dependency features expanded after selection."""
+        consume = getattr(self.provider, "consume_dependency_invalidations", None)
+        if consume is None:
+            return None
+
+        decisions = self.solution.decisions()
+        earliest: tuple[int, Any] | None = None
+        for package in consume():
+            if package not in decisions:
+                continue
+            decision = next(
+                (
+                    assignment
+                    for assignment in self.solution.assignments_for(package)
+                    if assignment.is_decision
+                ),
+                None,
+            )
+            if decision is None or decision.decision_level <= 1:
+                continue
+            candidate = (decision.decision_level, package)
+            if earliest is None or candidate[0] < earliest[0]:
+                earliest = candidate
+
+        if earliest is None:
+            return None
+
+        self.solution.backtrack(earliest[0] - 1)
+        self.priority_keys.clear()
+        self.relation_cache.clear()
+        return earliest[1]
 
     def _build_result(self) -> dict[PackageType, VersionType]:
         """Build the final result, including only reachable packages.
@@ -573,6 +634,10 @@ class Resolver(Generic[PackageType, VersionType]):
         """Reset solver state for a new resolution."""
         self.incompatibilities.clear()
         self.package_to_incompatibilities.clear()
+        self.dependency_parent_incompatibilities.clear()
+        self.dependency_parent_fallbacks.clear()
+        self.dependency_parent_versions.clear()
+        self.dependency_parent_fallback_indices.clear()
         self.dependency_index.clear()
         self.solution = PartialSolution(range_type=self.range_type)
         self.stats = ResolverStats()

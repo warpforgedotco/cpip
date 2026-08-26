@@ -15,6 +15,8 @@ from cpip.resolution.nab_provider import NabProvider
 class FakeProvider:
     def __init__(self) -> None:
         self.available_calls = 0
+        self.events: list[tuple[str, tuple[str, ...] | str]] = []
+        self.prefetch_calls: list[tuple[str, ...]] = []
         self.versions = {
             "app": (Version("1"),),
             "dep": (Version("1"), Version("2")),
@@ -53,7 +55,13 @@ class FakeProvider:
             for version in self.versions[requirement.name]
         )
 
-    def find_candidates(self, requirement, *, allowed_versions):
+    def prefetch_available_versions(self, requirements):
+        names = tuple(requirement.canonical_name for requirement in requirements)
+        self.prefetch_calls.append(names)
+        self.events.append(("prefetch", names))
+
+    def find_candidates(self, requirement, *, allowed_versions=None):
+        self.events.append(("find", requirement.canonical_name))
         if allowed_versions is None:
             return tuple(
                 candidate
@@ -174,3 +182,73 @@ def test_dependency_markers_are_filtered_at_adapter_boundary() -> None:
     adapter.choose_version(root, root_range)
 
     assert adapter.get_dependencies(root, Version("1")) == {}
+
+
+def test_add_roots_prefetches_before_candidate_scans() -> None:
+    provider = FakeProvider()
+    adapter = NabProvider(provider, ResolutionConfig())
+
+    adapter.add_roots([parse_requirement("app"), parse_requirement("dep")])
+
+    assert provider.prefetch_calls[0] == ("app", "dep")
+    assert provider.events[0] == ("prefetch", ("app", "dep"))
+
+
+def test_dependency_prefetch_filters_unusable_catalog_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FakeProvider()
+    provider.candidates[("app", Version("1"))].dependencies = (
+        parse_requirement("dep<2"),
+        parse_requirement("other"),
+        parse_requirement("app[extra]"),
+        parse_requirement("ignored; python_version < '0'"),
+        parse_requirement("direct @ https://example.invalid/direct.whl"),
+        parse_requirement("constrained"),
+    )
+    adapter = NabProvider(
+        provider,
+        ResolutionConfig(
+            constraints=("constrained @ https://example.invalid/constrained.whl",),
+        ),
+    )
+    root, root_range = adapter.add_root(parse_requirement("app"))
+    adapter.choose_version(root, root_range)
+    monkeypatch.setattr(adapter, "_versions", lambda _package: (Version("1"),))
+
+    adapter.get_dependencies(root, Version("1"))
+
+    assert provider.prefetch_calls == [("dep", "other")]
+
+
+def test_dependency_prefetch_respects_an_existing_direct_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FakeProvider()
+    provider.candidates[("app", Version("1"))].dependencies = (
+        parse_requirement("dep<2"),
+    )
+    adapter = NabProvider(provider, ResolutionConfig())
+    adapter.requirements["dep"] = parse_requirement(
+        "dep @ https://example.invalid/dep.whl"
+    )
+    root, root_range = adapter.add_root(parse_requirement("app"))
+    adapter.choose_version(root, root_range)
+    monkeypatch.setattr(adapter, "_versions", lambda _package: (Version("1"),))
+
+    adapter.get_dependencies(root, Version("1"))
+
+    assert provider.prefetch_calls == []
+
+
+@pytest.mark.parametrize("direct_first", [False, True])
+def test_root_prefetch_gives_direct_urls_precedence(direct_first: bool) -> None:
+    provider = FakeProvider()
+    adapter = NabProvider(provider, ResolutionConfig())
+    named = parse_requirement("dep")
+    direct = parse_requirement("dep @ https://example.invalid/dep.whl")
+    duplicates = [direct, named] if direct_first else [named, direct]
+
+    adapter.add_roots([parse_requirement("app"), *duplicates])
+
+    assert provider.prefetch_calls[0] == ("app",)

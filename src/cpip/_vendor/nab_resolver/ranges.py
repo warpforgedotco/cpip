@@ -27,6 +27,8 @@ _EMPTY_REL = RangeRelation.EMPTY
 _SUBSET_REL = RangeRelation.SUBSET
 _DISJOINT_REL = RangeRelation.DISJOINT
 _OVERLAPPING_REL = RangeRelation.OVERLAPPING
+_POINTS_UNSET = object()
+_POINT_SET_MIN_INTERVALS = 16
 
 __all__ = [
     "NEGATIVE_INFINITY",
@@ -207,12 +209,45 @@ class Range(Generic[VersionType]):
     The list is sorted by lower bound and intervals do not overlap or touch.
     """
 
-    __slots__ = ("_hash", "_intervals")
+    __slots__ = ("_hash", "_intervals", "_points")
 
     def __init__(self, intervals: tuple[Interval, ...] = ()) -> None:
         """Create a range from pre-sorted, non-overlapping intervals."""
         self._intervals = intervals
         self._hash = 0
+        self._points: frozenset[VersionType] | None | object = _POINTS_UNSET
+
+    def _as_points(self) -> frozenset[VersionType] | None:
+        """Return the members of a discrete singleton range, else ``None``."""
+        cached = self._points
+        if cached is None or isinstance(cached, frozenset):
+            return cached
+
+        values: list[VersionType] = []
+        for lower, lower_inclusive, upper, upper_inclusive in self._intervals:
+            if (
+                lower is NEGATIVE_INFINITY
+                or upper is POSITIVE_INFINITY
+                or not lower_inclusive
+                or not upper_inclusive
+                or not _same_bound(lower, upper)
+            ):
+                self._points = None
+                return None
+            values.append(lower)
+
+        points = frozenset(values)
+        self._points = points
+        return points
+
+    @classmethod
+    def _from_points(cls, points: frozenset[VersionType]) -> Range[VersionType]:
+        """Build a normalized singleton range while retaining ``points``."""
+        result = cls(
+            tuple((version, True, version, True) for version in sorted(points))
+        )
+        result._points = points
+        return result
 
     @classmethod
     def empty(cls) -> Range[VersionType]:
@@ -278,6 +313,10 @@ class Range(Generic[VersionType]):
         package against the same range.
         """
         intervals = self._intervals
+        if len(intervals) >= _POINT_SET_MIN_INTERVALS:
+            points = self._as_points()
+            if points is not None:
+                return version in points
         low = 0
         high = len(intervals)
 
@@ -308,6 +347,14 @@ class Range(Generic[VersionType]):
             return NotImplemented
         left_intervals = self._intervals
         right_intervals = other._intervals
+        if (
+            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
+        ):
+            left_points = self._as_points()
+            right_points = other._as_points()
+            if left_points is not None and right_points is not None:
+                return self._from_points(left_points & right_points)
         left_count = len(left_intervals)
         right_count = len(right_intervals)
         result: list[Interval] = []
@@ -352,7 +399,17 @@ class Range(Generic[VersionType]):
         """Union of two ranges (versions in either)."""
         if not isinstance(other, Range):
             return NotImplemented
-        all_intervals = list(self._intervals) + list(other._intervals)
+        left_intervals = self._intervals
+        right_intervals = other._intervals
+        if (
+            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
+        ):
+            left_points = self._as_points()
+            right_points = other._as_points()
+            if left_points is not None and right_points is not None:
+                return self._from_points(left_points | right_points)
+        all_intervals = list(left_intervals) + list(right_intervals)
         return Range(_normalize_intervals(all_intervals))
 
     def __invert__(self) -> Range[VersionType]:
@@ -416,7 +473,16 @@ class Range(Generic[VersionType]):
         if not isinstance(other, Range):
             return NotImplemented
 
+        left_intervals = self._intervals
         right_intervals = other._intervals
+        if (
+            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
+        ):
+            left_points = self._as_points()
+            right_points = other._as_points()
+            if left_points is not None and right_points is not None:
+                return self._from_points(left_points - right_points)
         right_count = len(right_intervals)
         result: list[Interval] = []
         right_index = 0
@@ -425,7 +491,7 @@ class Range(Generic[VersionType]):
         # method: conflict analysis subtracts on every probe of the
         # assignment trail, and those two helpers were the largest self-time
         # of a deep backtrack.
-        for left in self._intervals:
+        for left in left_intervals:
             lower, lower_inclusive, upper, upper_inclusive = left
 
             # Retire right intervals that finish below this one; they cannot
@@ -451,7 +517,10 @@ class Range(Generic[VersionType]):
 
                 # The remainder ends before this right interval: nothing
                 # further right can touch it either.
-                if upper is not POSITIVE_INFINITY and right_lower is not NEGATIVE_INFINITY:
+                if (
+                    upper is not POSITIVE_INFINITY
+                    and right_lower is not NEGATIVE_INFINITY
+                ):
                     if upper == right_lower:
                         if not (upper_inclusive and right_lower_inclusive):
                             break
@@ -514,11 +583,20 @@ class Range(Generic[VersionType]):
         complement and a whole intersection only to ask whether the result was
         empty, which dominates resolution on packages with many releases.
         """
+        left_intervals = self._intervals
         right_intervals = other._intervals
+        if (
+            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
+        ):
+            left_points = self._as_points()
+            right_points = other._as_points()
+            if left_points is not None and right_points is not None:
+                return left_points <= right_points
         right_count = len(right_intervals)
         right_index = 0
 
-        for left in self._intervals:
+        for left in left_intervals:
             # Skip right intervals that end before this one starts; they can
             # never cover it, and neither can they cover anything later.
             left_lower, left_lower_inclusive = left[0], left[1]
@@ -563,6 +641,14 @@ class Range(Generic[VersionType]):
         """
         left_intervals = self._intervals
         right_intervals = other._intervals
+        if (
+            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
+        ):
+            left_points = self._as_points()
+            right_points = other._as_points()
+            if left_points is not None and right_points is not None:
+                return left_points.isdisjoint(right_points)
         left_count = len(left_intervals)
         right_count = len(right_intervals)
         left_index = right_index = 0
@@ -596,6 +682,20 @@ class Range(Generic[VersionType]):
 
         left_intervals = self._intervals
         right_intervals = other._intervals
+        if (
+            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
+        ):
+            left_points = self._as_points()
+            right_points = other._as_points()
+            if left_points is not None and right_points is not None:
+                is_subset = left_points <= right_points
+                is_disjoint = left_points.isdisjoint(right_points)
+                if is_subset:
+                    return _SUBSET_REL
+                if is_disjoint:
+                    return _DISJOINT_REL
+                return _OVERLAPPING_REL
         right_count = len(right_intervals)
 
         is_subset = True

@@ -1,12 +1,12 @@
 """Real-world-scale reproductions of documented catastrophic resolver cases.
 
 ``test_benchmark_resolution.py::test_uv_wrong_package_backtracking_families``
-already models these five incidents (uv issue
+already models these five incidents at a fast-CI-friendly scale (64 releases;
+uv issue
 https://github.com/astral-sh/uv/issues/8157: wrong-package backtracking
 where the resolver locks a recent release of one package, then rejects
 hundreds of releases of a related package before finding the one whose
-bound actually matches) at a fixed, fast-CI-friendly 64 versions per
-package.
+bound actually matches).
 
 These benchmarks model the same five families at the scale that made the
 real incidents notable in the first place -- ``catastrophic_wheelhouses``
@@ -18,8 +18,9 @@ tied to this exact urllib3/boto3/botocore pattern
 https://github.com/python-poetry/poetry/pull/7950) are from this
 population, not a toy one.
 
-Each case still resolves to the same 4 candidates as the fast-CI version;
-only the amount of backtracking work needed to get there changes.
+Separate benchmarks preserve the real transitive Boto3 topology: Boto3
+constrains Botocore, whose urllib3 requirement conflicts with the root. This
+keeps the historical exact-pin benchmark identities stable.
 """
 
 from __future__ import annotations
@@ -53,6 +54,25 @@ def test_catastrophic_boto3_urllib3(
 
     def resolve_case() -> int:
         return resolve(wheelhouse, ["boto3-urllib3-root"])
+
+    assert benchmark(resolve_case) == 4
+
+
+def test_catastrophic_transitive_boto3_urllib3(
+    benchmark: BenchmarkFixture,
+    catastrophic_transitive_boto3_wheelhouse: Path,
+) -> None:
+    """Exercise the large transitive Boto3/Botocore/urllib3 topology."""
+
+    def resolve_case() -> int:
+        return resolve(
+            catastrophic_transitive_boto3_wheelhouse,
+            [
+                "boto3-urllib3-root",
+                "boto3-urllib3-shared==1.1.0",
+                "boto3-urllib3-left",
+            ],
+        )
 
     assert benchmark(resolve_case) == 4
 

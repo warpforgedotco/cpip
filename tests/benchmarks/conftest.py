@@ -17,9 +17,11 @@ from benchmark_support import (
     make_nab_deep_backjump_family,
     make_nab_pip_backtracking_family,
     make_nab_smoke_fixture,
+    make_selected_dependency_graph,
     make_sdist,
     make_source_tree,
     make_stress_graph,
+    make_transitive_backtracking_graph,
     make_wheel,
     make_wrong_package_graph,
     requirement_lines,
@@ -85,13 +87,21 @@ def wrong_package_wheelhouses(
 
 
 @pytest.fixture(scope="session")
+def transitive_boto3_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    wheelhouse = tmp_path_factory.mktemp("transitive-boto3-wheelhouse")
+    make_transitive_backtracking_graph(wheelhouse, "boto3-urllib3", versions=256)
+    return wheelhouse
+
+
+@pytest.fixture(scope="session")
 def catastrophic_wheelhouses(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> dict[str, Path]:
     """The same wrong-package families, sized to their real PyPI release counts.
 
-    ``wrong_package_wheelhouses`` models these at a fixed 64 versions for a
-    fast regression signal. This models the same reported incidents
+    ``wrong_package_wheelhouses`` models these at a fast regression scale
+    (256 versions for transitive Boto3, 64 for the exact-pin cases). This
+    models the same reported incidents
     (https://github.com/astral-sh/uv/issues/8157) at the scale that actually
     made them notable, from live PyPI release counts recorded 2026-08-12:
     boto3 2093 / botocore 2491, numpy 150 / numba 136 / llvmlite 73,
@@ -115,6 +125,15 @@ def catastrophic_wheelhouses(
 
 
 @pytest.fixture(scope="session")
+def catastrophic_transitive_boto3_wheelhouse(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    wheelhouse = tmp_path_factory.mktemp("catastrophic-transitive-boto3-wheelhouse")
+    make_transitive_backtracking_graph(wheelhouse, "boto3-urllib3", versions=2048)
+    return wheelhouse
+
+
+@pytest.fixture(scope="session")
 def stress_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
     wheelhouse = tmp_path_factory.mktemp("stress-wheelhouse")
     make_stress_graph(wheelhouse)
@@ -131,6 +150,26 @@ def candidate_scan_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
             f"1.{index}.0",
             requires_python=">=99" if index >= 96 else ">=3.9",
         )
+    return wheelhouse
+
+
+@pytest.fixture(scope="session")
+def selected_dependency_wheelhouse(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    wheelhouse = tmp_path_factory.mktemp("selected-dependency-wheelhouse")
+    make_selected_dependency_graph(wheelhouse)
+    return wheelhouse
+
+
+@pytest.fixture(scope="session")
+def conflict_priority_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Catalogs for the wide post-backjump decision-order benchmark."""
+    wheelhouse = tmp_path_factory.mktemp("conflict-priority-wheelhouse")
+    for index in range(128):
+        make_wheel(wheelhouse, "conflict-priority-hot", f"1.{index}.0")
+    for index in range(96):
+        make_wheel(wheelhouse, f"conflict-priority-replay-{index}", "1.0.0")
     return wheelhouse
 
 

@@ -11,6 +11,8 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propa
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Sequence
+from heapq import merge
 from typing import TYPE_CHECKING, Any
 
 from .types import IncompatibilityState, SetRelation, Term
@@ -28,6 +30,26 @@ __all__ = [
 
 # Upper bound on relation_cache size; cleared on overflow to bound memory.
 RELATION_CACHE_MAX = 100_000
+
+
+def _related_incompatibility_groups(
+    resolver: Resolver[Any, Any], package: Any
+) -> tuple[Sequence[int], ...]:
+    """Return sorted clause-index groups relevant to ``package`` now.
+
+    Dependency clauses use their first term as the parent. Once that parent
+    has an exact decision, clauses registered exclusively for other versions
+    are contradicted without inspecting the rest of the clause. Undecided
+    parent ranges and widened clauses retain the exhaustive path.
+    """
+    general = resolver.package_to_incompatibilities.get(package, ())
+    decision = resolver.solution.decided_version(package)
+    if decision is None:
+        return general, resolver.dependency_parent_incompatibilities.get(package, ())
+
+    by_version = resolver.dependency_parent_versions.get(package)
+    exact = () if by_version is None else by_version.get(decision, ())
+    return general, resolver.dependency_parent_fallbacks.get(package, ()), exact
 
 
 def unit_propagation(
@@ -55,7 +77,6 @@ def unit_propagation(
     derive = solution.derive
     cache = resolver.relation_cache
     incompatibilities = resolver.incompatibilities
-    related_by_package = resolver.package_to_incompatibilities
     stats = resolver.stats
     observer = resolver.observer
     satisfied = SetRelation.SATISFIED
@@ -68,7 +89,38 @@ def unit_propagation(
         package = propagation_queue.popleft()
         in_queue.discard(package)
 
-        for incompatibility_index in related_by_package.get(package, ()):
+        groups = _related_incompatibility_groups(resolver, package)
+        general = groups[0]
+        second = groups[1]
+        if len(groups) == 2:
+            if not general:
+                related = second
+            elif not second:
+                related = general
+            else:
+                related = merge(general, second)
+        else:
+            third = groups[2]
+            if not general:
+                if not second:
+                    related = third
+                elif not third:
+                    related = second
+                else:
+                    related = merge(second, third)
+            elif not second:
+                related = general if not third else merge(general, third)
+            elif not third:
+                related = merge(general, second)
+            else:
+                related = merge(general, second, third)
+        if not related:
+            continue
+        previous_index = -1
+        for incompatibility_index in related:
+            if incompatibility_index == previous_index:
+                continue
+            previous_index = incompatibility_index
             incompatibility = incompatibilities[incompatibility_index]
 
             # evaluate_incompatibility, inlined.

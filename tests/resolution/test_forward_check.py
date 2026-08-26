@@ -20,8 +20,12 @@ from __future__ import annotations
 import random
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
+import cpip.resolution.nab_provider as nab_provider
+from cpip._vendor.nab_resolver import propagate
 from cpip.core.errors import ResolutionError
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
@@ -36,6 +40,8 @@ if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect
 
 from benchmark_support import (  # noqa: E402
     make_dependency_graph,
+    make_selected_dependency_graph,
+    make_transitive_backtracking_graph,
     make_wheel,
     make_wrong_package_graph,
     reset_caches,
@@ -59,6 +65,28 @@ def resolve(wheelhouse: Path, roots: list[str]) -> dict[str, str] | None:
     except ResolutionError:
         return None
     return {candidate.name: str(candidate.version) for candidate in result.candidates}
+
+
+def resolve_with_metrics(
+    wheelhouse: Path, roots: list[str]
+) -> tuple[dict[str, str] | None, dict[str, int | float] | None]:
+    """Resolve and retain the algorithm counters for differential checks."""
+    reset_caches()
+    engine = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    try:
+        result = engine.resolve(roots)
+    except ResolutionError:
+        return None, None
+    selected = {
+        candidate.name: str(candidate.version) for candidate in result.candidates
+    }
+    return selected, dict(result.metrics)
 
 
 def build_random_graph(wheelhouse: Path, seed: int) -> list[str]:
@@ -106,6 +134,16 @@ def test_forward_check_never_changes_the_answer(
         "_pins_are_impossible",
         lambda self, package, version: False,
     )
+    monkeypatch.setattr(
+        NabProvider,
+        "_partial_solution_rejects",
+        lambda self, package, version: False,
+    )
+    monkeypatch.setattr(
+        NabProvider,
+        "_selected_dependency_rejects",
+        lambda self, package, version: False,
+    )
     without_check = resolve(wheelhouse, roots)
 
     assert (with_check is None) == (without_check is None), (
@@ -114,6 +152,33 @@ def test_forward_check_never_changes_the_answer(
     assert with_check == without_check, (
         f"seed {seed}: the forward check changed the selected versions"
     )
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_exact_clause_dispatch_matches_exhaustive_propagation(
+    seed: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    roots = build_random_graph(wheelhouse, seed)
+    indexed = resolve_with_metrics(wheelhouse, roots)
+
+    def exhaustive_groups(resolver: Any, package: Any):
+        return (
+            resolver.package_to_incompatibilities.get(package, ()),
+            resolver.dependency_parent_incompatibilities.get(package, ()),
+        )
+
+    monkeypatch.setattr(
+        propagate,
+        "_related_incompatibility_groups",
+        exhaustive_groups,
+    )
+    exhaustive = resolve_with_metrics(wheelhouse, roots)
+
+    assert indexed == exhaustive, f"seed {seed}: indexed propagation diverged"
 
 
 def test_impossible_pins_are_skipped_without_conflicts(tmp_path: Path) -> None:
@@ -142,6 +207,230 @@ def test_impossible_pins_are_skipped_without_conflicts(tmp_path: Path) -> None:
         "fam-shared": "1.1.0",
     }
     assert result.metrics["nab_conflicts"] <= 2, result.metrics
+
+
+def test_transitive_conflicts_are_skipped_without_backtracking(tmp_path: Path) -> None:
+    """A known root range can disqualify every child of a newer candidate."""
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    make_transitive_backtracking_graph(wheelhouse, "fam", versions=256)
+
+    reset_caches()
+    engine = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    result = engine.resolve(["fam-root", "fam-shared==1.1.0", "fam-left"])
+
+    selected = {
+        candidate.name: str(candidate.version) for candidate in result.candidates
+    }
+    assert selected == {
+        "fam-root": "1.0.0",
+        "fam-left": "1.1.0",
+        "fam-right": "1.1.0",
+        "fam-shared": "1.1.0",
+    }
+    assert result.metrics["nab_conflicts"] <= 2, result.metrics
+
+
+def test_selected_dependency_conflicts_are_skipped_before_backtracking(
+    tmp_path: Path,
+) -> None:
+    """A late parent must not replay a wide graph for every blocked release."""
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    make_selected_dependency_graph(wheelhouse)
+
+    reset_caches()
+    engine = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    result = engine.resolve(["selected-application"])
+    selected = {
+        candidate.name: str(candidate.version) for candidate in result.candidates
+    }
+
+    assert selected["selected-parent"] == "1.1.0"
+    assert selected["selected-shared"] == "1.0.0"
+    assert len(selected) == 99
+    assert result.metrics["nab_conflicts"] <= 1, result.metrics
+    assert result.metrics["nab_rounds"] <= 110, result.metrics
+
+
+def test_selected_dependency_check_defers_when_every_release_is_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lookahead must leave PubGrub free to backtrack the selected package."""
+    adapter = NabProvider(
+        CandidateProvider.from_options(no_index=True),
+        ResolutionConfig(ignore_installed=True),
+    )
+    versions = [Version(f"{index}.0.0") for index in range(1, 17)]
+    adapter._active_decisions["selected"] = Version("1.0.0")
+    monkeypatch.setattr(
+        adapter,
+        "_selected_dependency_rejects",
+        lambda package, version: True,
+    )
+
+    assert adapter._newest_viable("demo", versions) == Version("16.0.0")
+
+
+@pytest.mark.parametrize("version_count, expected_calls", [(15, 0), (16, 1)])
+def test_selected_dependency_lookahead_is_reserved_for_wide_domains(
+    version_count: int,
+    expected_calls: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = NabProvider(
+        CandidateProvider.from_options(no_index=True),
+        ResolutionConfig(ignore_installed=True),
+    )
+    adapter._active_decisions["selected"] = Version("1.0.0")
+    calls = 0
+
+    def rejects(package: str, version: Version) -> bool:
+        nonlocal calls
+        calls += 1
+        return False
+
+    monkeypatch.setattr(adapter, "_selected_dependency_rejects", rejects)
+    monkeypatch.setattr(adapter, "_pins_are_impossible", lambda package, version: False)
+    versions = [Version(f"{index}.0.0") for index in range(1, version_count + 1)]
+
+    assert adapter._newest_viable("demo", versions) == versions[-1]
+    assert calls == expected_calls
+
+
+@pytest.mark.parametrize(
+    "dependency, source_kind, expected",
+    [
+        ("selected-shared<2; extra == 'feature'", "wheel", True),
+        ("selected-shared<2; extra == 'other'", "wheel", False),
+        (
+            "selected-shared @ https://example.invalid/shared.whl",
+            "wheel",
+            False,
+        ),
+        ("selected-shared<2", "sdist", False),
+    ],
+)
+def test_selected_dependency_check_respects_uncertain_sources_and_markers(
+    dependency: str,
+    source_kind: str,
+    expected: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = NabProvider(
+        CandidateProvider.from_options(no_index=True),
+        ResolutionConfig(ignore_installed=True),
+    )
+    adapter.requirements["parent"] = parse_requirement("parent[feature]")
+    adapter._active_decisions = {"selected-shared": Version("2.0.0")}
+    candidate = SimpleNamespace(
+        source_kind=source_kind,
+        dependencies=(parse_requirement(dependency),),
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_catalog_candidate",
+        lambda package, version: candidate,
+    )
+
+    assert adapter._selected_dependency_rejects("parent", Version("1.0.0")) is expected
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_transitive_forward_check_never_changes_the_answer(
+    seed: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Random compatible releases must select identically without lookahead."""
+    monkeypatch.setattr(nab_provider, "_TRANSITIVE_FORWARD_CHECK_MIN_VERSIONS", 4)
+    checked = 0
+    partial_solution_rejects = NabProvider._partial_solution_rejects
+
+    def counting_check(
+        self: NabProvider,
+        package: str,
+        version: Version,
+    ) -> bool:
+        nonlocal checked
+        checked += 1
+        return partial_solution_rejects(self, package, version)
+
+    monkeypatch.setattr(NabProvider, "_partial_solution_rejects", counting_check)
+    rng = random.Random(seed)
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    make_wheel(wheelhouse, "shared", "1.0.0")
+    make_wheel(wheelhouse, "shared", "2.0.0")
+
+    compatible = {index for index in range(1, 13) if rng.random() < 0.3}
+    compatible.add(rng.randint(1, 12))
+    for index in range(1, 13):
+        shared = "1.0.0" if index in compatible else "2.0.0"
+        make_wheel(
+            wheelhouse,
+            "child",
+            f"1.{index}.0",
+            requires=[f"shared=={shared}"],
+        )
+        make_wheel(
+            wheelhouse,
+            "parent",
+            f"1.{index}.0",
+            requires=[f"child>=1.{index}.0,<1.{index + 1}.0"],
+        )
+    make_wheel(
+        wheelhouse,
+        "app",
+        "1.0.0",
+        requires=["shared==1.0.0", "parent"],
+    )
+
+    roots = ["app", "shared==1.0.0", "parent"]
+    with_check = resolve(wheelhouse, roots)
+    assert checked > 0
+    monkeypatch.setattr(
+        NabProvider,
+        "_partial_solution_rejects",
+        lambda self, package, version: False,
+    )
+    without_check = resolve(wheelhouse, roots)
+
+    assert with_check == without_check, seed
+
+
+def test_transitive_check_stays_off_small_candidate_domains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ordinary packages must not pay speculative two-hop metadata reads."""
+    provider = CandidateProvider.from_options(no_index=True)
+    adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
+    versions = [Version(f"1.{index}.0") for index in range(255)]
+
+    monkeypatch.setattr(
+        adapter,
+        "_pins_are_impossible",
+        lambda package, version: False,
+    )
+
+    def explode(package: str, version: Version) -> bool:
+        raise AssertionError((package, version))
+
+    monkeypatch.setattr(adapter, "_partial_solution_rejects", explode)
+
+    assert adapter._newest_viable("demo", versions) == versions[-1]
 
 
 def test_unsolvable_graphs_still_fail(tmp_path: Path) -> None:
@@ -219,7 +508,7 @@ def test_unreadable_metadata_is_undecidable_not_fatal(tmp_path: Path) -> None:
     )
     adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
     adapter.requirements["app"] = parse_requirement("app")
-    adapter._catalog_candidate_cache["app"] = {Version("1.0.0"): Exploding()}
+    adapter._catalog_candidate_cache[("app", Version("1.0.0"))] = Exploding()
 
     assert adapter._pins_are_impossible("app", Version("1.0.0")) is False
 
