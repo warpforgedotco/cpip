@@ -47,6 +47,25 @@ def test_read_metadata_message_preserves_headers_folding_and_payload(
     assert metadata.get_payload() == "Description body\r\n"
 
 
+def test_read_metadata_message_uses_fast_archive_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheel = tmp_path / "demo-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            "demo-1.0.dist-info/METADATA",
+            "Name: demo\nVersion: 1.0\n",
+        )
+
+    def unexpected_zipfile(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise AssertionError("ordinary wheels should use WheelArchive")
+
+    monkeypatch.setattr(zipfile, "ZipFile", unexpected_zipfile)
+
+    assert read_metadata_message(wheel).get("Name") == "demo"
+
+
 @pytest.mark.parametrize(
     "filename, expected",
     [

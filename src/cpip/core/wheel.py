@@ -68,6 +68,13 @@ if TYPE_CHECKING:
 
         def open(self, name: str) -> IO[bytes]: ...
 
+    class MetadataArchiveSource(Protocol):
+        """The smaller archive surface needed for core metadata."""
+
+        def read(self, name: str) -> bytes: ...
+
+        def namelist(self) -> list[str]: ...
+
     class MetadataCache(Protocol):
         """Minimal cache contract needed by wheel parsing."""
 
@@ -1068,12 +1075,21 @@ def read_core_metadata_headers(
 def read_metadata_message(path: str):
     import zipfile
 
+    from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
+
+    try:
+        with open(path, "rb", buffering=0) as file:
+            archive = WheelArchive(file)
+            return read_metadata_message_internal(archive, path)
+    except WheelhouseUnavailable:
+        pass
+
     with zipfile.ZipFile(path) as archive:
         return read_metadata_message_internal(archive, path)
 
 
 def read_metadata_message_internal(
-    archive: ZipArchiveSource,
+    archive: MetadataArchiveSource,
     path: str,
     *,
     expected_name: str | None = None,
@@ -1112,21 +1128,17 @@ def read_metadata_message_internal(
             metadata_names = matching
 
     try:
-        metadata_file = archive.open(metadata_names[0])
+        contents = archive.read(metadata_names[0]).decode("utf-8")
 
     except KeyError as exc:
         raise InstallationError(f"Wheel has no METADATA: {path}") from exc
 
-    with metadata_file as file:
-        try:
-            contents = file.read().decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise InstallationError(
+            f"Error decoding metadata for {path}: {metadata_names[0]}",
+        ) from exc
 
-        except UnicodeDecodeError as exc:
-            raise InstallationError(
-                f"Error decoding metadata for {path}: {metadata_names[0]}",
-            ) from exc
-
-        return parse_metadata_text(contents)
+    return parse_metadata_text(contents)
 
 
 _NAME_SEPARATORS_RE = re.compile(r"[-_.]+")
