@@ -360,7 +360,9 @@ class Range(Generic[VersionType]):
             return lower_inclusive
         if upper is POSITIVE_INFINITY:
             return True
-        return not (version > upper or (_same_bound(version, upper) and not upper_inclusive))
+        return not (
+            version > upper or (_same_bound(version, upper) and not upper_inclusive)
+        )
 
     def __and__(self, other: object) -> Range[VersionType]:
         """Compute the intersection of two ranges (versions in both)."""
@@ -652,16 +654,15 @@ class Range(Generic[VersionType]):
         return True
 
     def relation(self, other: Range[VersionType]) -> RangeRelation:
-        """Return how self's members sit against other's.
-
-        The empty range is both a subset and disjoint, so it is answered ahead
-        of the walks instead of by running both of them.
-        """
+        """Return how self's members sit against other's in one interval walk."""
         if self.is_empty:
             return _EMPTY_REL
+
+        left_intervals = self._intervals
+        right_intervals = other._intervals
         if (
-            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
+            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
+            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
         ):
             left_points = self._as_points()
             right_points = other._as_points()
@@ -671,9 +672,53 @@ class Range(Generic[VersionType]):
                 if left_points.isdisjoint(right_points):
                     return _DISJOINT_REL
                 return _OVERLAPPING_REL
-        if self.is_subset(other):
+
+        right_count = len(right_intervals)
+        is_subset = True
+        is_disjoint = True
+        right_index = 0
+
+        for left in left_intervals:
+            left_lower, left_lower_inclusive = left[0], left[1]
+            while right_index < right_count:
+                right = right_intervals[right_index]
+                right_upper = right[2]
+                if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
+                    break
+                if right_upper == left_lower:
+                    if right[3] and left_lower_inclusive:
+                        break
+                elif not right_upper < left_lower:
+                    break
+                right_index += 1
+
+            if right_index >= right_count:
+                is_subset = False
+                if not is_disjoint:
+                    return _OVERLAPPING_REL
+                break
+
+            right = right_intervals[right_index]
+            if _ends_before(left, right):
+                is_subset = False
+                if not is_disjoint:
+                    return _OVERLAPPING_REL
+                continue
+
+            is_disjoint = False
+            lower, lower_inclusive = _max_lower_bound(left, right)
+            upper, upper_inclusive = _min_upper_bound(left, right)
+            if (
+                lower_inclusive is not left[1]
+                or upper_inclusive is not left[3]
+                or not _same_bound(lower, left[0])
+                or not _same_bound(upper, left[2])
+            ):
+                return _OVERLAPPING_REL
+
+        if is_subset:
             return _SUBSET_REL
-        if self.is_disjoint(other):
+        if is_disjoint:
             return _DISJOINT_REL
         return _OVERLAPPING_REL
 

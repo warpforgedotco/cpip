@@ -674,7 +674,7 @@ index c6cf101..71b755e 100644
          resolver.next_range_token = token + 1
          tokens[range_] = token
 diff --git a/src/cpip/_vendor/nab_resolver/ranges.py b/src/cpip/_vendor/nab_resolver/ranges.py
-index 568bd5a..ca3ba89 100644
+index 568bd5a..6b50ba1 100644
 --- a/src/cpip/_vendor/nab_resolver/ranges.py
 +++ b/src/cpip/_vendor/nab_resolver/ranges.py
 @@ -27,6 +27,8 @@ _EMPTY_REL = RangeRelation.EMPTY
@@ -786,7 +786,7 @@ index 568bd5a..ca3ba89 100644
  
      @classmethod
      def at_least(cls, version: VersionType) -> Range[VersionType]:
-@@ -284,23 +337,43 @@ class Range(Generic[VersionType]):
+@@ -284,23 +337,45 @@ class Range(Generic[VersionType]):
          return len(self._intervals) == 0
  
      def __contains__(self, version: object) -> bool:
@@ -824,7 +824,9 @@ index 568bd5a..ca3ba89 100644
 +        if upper is POSITIVE_INFINITY:
              return True
 -        return False
-+        return not (version > upper or (_same_bound(version, upper) and not upper_inclusive))
++        return not (
++            version > upper or (_same_bound(version, upper) and not upper_inclusive)
++        )
  
      def __and__(self, other: object) -> Range[VersionType]:
          """Compute the intersection of two ranges (versions in both)."""
@@ -841,7 +843,7 @@ index 568bd5a..ca3ba89 100644
          result: list[Interval] = []
          left_index = right_index = 0
          while left_index < len(self._intervals) and right_index < len(other._intervals):
-@@ -327,7 +400,7 @@ class Range(Generic[VersionType]):
+@@ -327,7 +402,7 @@ class Range(Generic[VersionType]):
              # Advance the side with the smaller upper bound
              left_upper = left_interval[2]
              right_upper = right_interval[2]
@@ -850,7 +852,7 @@ index 568bd5a..ca3ba89 100644
                  left_index += 1
                  right_index += 1
              elif left_upper is POSITIVE_INFINITY or (
-@@ -343,6 +416,14 @@ class Range(Generic[VersionType]):
+@@ -343,6 +418,14 @@ class Range(Generic[VersionType]):
          """Union of two ranges (versions in either)."""
          if not isinstance(other, Range):
              return NotImplemented
@@ -865,7 +867,7 @@ index 568bd5a..ca3ba89 100644
          all_intervals = list(self._intervals) + list(other._intervals)
          return Range(_normalize_intervals(all_intervals))
  
-@@ -405,6 +486,15 @@ class Range(Generic[VersionType]):
+@@ -405,6 +488,15 @@ class Range(Generic[VersionType]):
          if not isinstance(other, Range):
              return NotImplemented
  
@@ -881,7 +883,7 @@ index 568bd5a..ca3ba89 100644
          right_intervals = other._intervals
          right_count = len(right_intervals)
          result: list[Interval] = []
-@@ -478,6 +568,15 @@ class Range(Generic[VersionType]):
+@@ -478,6 +570,15 @@ class Range(Generic[VersionType]):
          ``other`` always leave a gap, so an interval of self is covered only
          when a single interval of other holds all of it.
          """
@@ -897,7 +899,7 @@ index 568bd5a..ca3ba89 100644
          right_intervals = other._intervals
          right_count = len(right_intervals)
          right_index = 0
-@@ -495,7 +594,12 @@ class Range(Generic[VersionType]):
+@@ -495,7 +596,12 @@ class Range(Generic[VersionType]):
              lower, lower_inclusive = _max_lower_bound(left, right)
              upper, upper_inclusive = _min_upper_bound(left, right)
  
@@ -911,7 +913,7 @@ index 568bd5a..ca3ba89 100644
                  return False
  
          return True
-@@ -510,6 +614,15 @@ class Range(Generic[VersionType]):
+@@ -510,6 +616,15 @@ class Range(Generic[VersionType]):
          Stops at the first shared version rather than building the whole
          intersection.
          """
@@ -927,13 +929,25 @@ index 568bd5a..ca3ba89 100644
          left_intervals = self._intervals
          right_intervals = other._intervals
          left_count = len(left_intervals)
-@@ -546,6 +659,18 @@ class Range(Generic[VersionType]):
-         """
+@@ -539,16 +654,71 @@ class Range(Generic[VersionType]):
+         return True
+ 
+     def relation(self, other: Range[VersionType]) -> RangeRelation:
+-        """Return how self's members sit against other's.
+-
+-        The empty range is both a subset and disjoint, so it is answered ahead
+-        of the walks instead of by running both of them.
+-        """
++        """Return how self's members sit against other's in one interval walk."""
          if self.is_empty:
              return _EMPTY_REL
+-        if self.is_subset(other):
++
++        left_intervals = self._intervals
++        right_intervals = other._intervals
 +        if (
-+            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
-+            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
++            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
++            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
 +        ):
 +            left_points = self._as_points()
 +            right_points = other._as_points()
@@ -943,10 +957,58 @@ index 568bd5a..ca3ba89 100644
 +                if left_points.isdisjoint(right_points):
 +                    return _DISJOINT_REL
 +                return _OVERLAPPING_REL
-         if self.is_subset(other):
++
++        right_count = len(right_intervals)
++        is_subset = True
++        is_disjoint = True
++        right_index = 0
++
++        for left in left_intervals:
++            left_lower, left_lower_inclusive = left[0], left[1]
++            while right_index < right_count:
++                right = right_intervals[right_index]
++                right_upper = right[2]
++                if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
++                    break
++                if right_upper == left_lower:
++                    if right[3] and left_lower_inclusive:
++                        break
++                elif not right_upper < left_lower:
++                    break
++                right_index += 1
++
++            if right_index >= right_count:
++                is_subset = False
++                if not is_disjoint:
++                    return _OVERLAPPING_REL
++                break
++
++            right = right_intervals[right_index]
++            if _ends_before(left, right):
++                is_subset = False
++                if not is_disjoint:
++                    return _OVERLAPPING_REL
++                continue
++
++            is_disjoint = False
++            lower, lower_inclusive = _max_lower_bound(left, right)
++            upper, upper_inclusive = _min_upper_bound(left, right)
++            if (
++                lower_inclusive is not left[1]
++                or upper_inclusive is not left[3]
++                or not _same_bound(lower, left[0])
++                or not _same_bound(upper, left[2])
++            ):
++                return _OVERLAPPING_REL
++
++        if is_subset:
              return _SUBSET_REL
-         if self.is_disjoint(other):
-@@ -588,6 +713,7 @@ class Range(Generic[VersionType]):
+-        if self.is_disjoint(other):
++        if is_disjoint:
+             return _DISJOINT_REL
+         return _OVERLAPPING_REL
+ 
+@@ -588,6 +758,7 @@ class Range(Generic[VersionType]):
          """Restore from :meth:`__getstate__`, leaving the hash to be recomputed."""
          (self._intervals,) = state
          self._hash = 0
