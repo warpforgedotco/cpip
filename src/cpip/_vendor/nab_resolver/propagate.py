@@ -83,16 +83,20 @@ def unit_propagation(
     Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation
     """
     groups = _related_incompatibility_groups(resolver, changed_package)
-    nonempty = tuple(group for group in groups if group)
-    if not nonempty:
-        return None
-    return _unit_propagation_core(resolver, changed_package, nonempty)
+    epoch = resolver.solution.contradiction_epoch
+    contradicted_at = resolver.clause_contradicted_at
+    for group in groups:
+        for incompatibility_index in group:
+            if contradicted_at[incompatibility_index] != epoch:
+                return _unit_propagation_core(resolver, changed_package, groups, epoch)
+    return None
 
 
 def _unit_propagation_core(
     resolver: Resolver[Any, Any],
     changed_package: Any,
     initial_groups: tuple[Sequence[int], ...],
+    epoch: int,
 ) -> Incompatibility[Any, Any] | None:
     """Run propagation after the entry package has relevant clauses."""
     propagation_queue: deque[Any] = deque([changed_package])
@@ -109,17 +113,16 @@ def _unit_propagation_core(
     cache = resolver.relation_cache
     satisfied = SetRelation.SATISFIED
     contradicted = SetRelation.CONTRADICTED
-    epoch = solution.contradiction_epoch
 
     while propagation_queue:
         package = propagation_queue.popleft()
         in_queue.discard(package)
         if initial_groups:
-            nonempty = initial_groups
+            groups = initial_groups
             initial_groups = ()
         else:
             groups = _related_incompatibility_groups(resolver, package)
-            nonempty = tuple(group for group in groups if group)
+        nonempty = tuple(group for group in groups if group)
         if not nonempty:
             continue
         related_indices = nonempty[0] if len(nonempty) == 1 else merge(*nonempty)
