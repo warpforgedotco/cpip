@@ -37,6 +37,19 @@ if TYPE_CHECKING:
 
 stdlib_pkgs = frozenset({"python", "wsgiref", "argparse"})
 
+_NORMALIZED_METADATA_KEYS = {
+    name: name.lower()
+    for name in (
+        "Metadata-Version",
+        "Name",
+        "Version",
+        "Requires-Python",
+        "Requires-Dist",
+        "Provides-Extra",
+        "Summary",
+    )
+}
+
 
 class LightMetadata:
     """A minimal, dict-backed stand-in for ``email.message.Message``'s read side."""
@@ -80,7 +93,11 @@ def parse_metadata_text(text: str) -> LightMetadata:
             fields[current_key][-1] += "\n" + line.strip()
         else:
             key, separator, value = line.partition(":")
-            current_key = key.strip().lower() if separator else None
+            current_key = (
+                _NORMALIZED_METADATA_KEYS.get(key) or key.strip().lower()
+                if separator
+                else None
+            )
             if current_key is not None:
                 values = fields.get(current_key)
                 if values is None:
