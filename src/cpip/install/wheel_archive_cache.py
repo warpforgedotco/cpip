@@ -471,22 +471,26 @@ def pyc_root(entry_root: str) -> str:
 
 
 def _compile_archive_pyc(
-    tree: str, destination: str, entries: Iterable[ArchiveEntry]
+    tree: str,
+    destination: str,
+    entries: Iterable[ArchiveEntry],
 ) -> int:
     """Byte-compile the entry's modules once, into ``destination``.
 
-    Runs at fill time so that installing is a clone plus a path rewrite rather
-    than a compile. Returns how many modules were compiled.
+    Runs at fill time so that installing is a clone plus a path rewrite
+    rather than a compile. Returns how many modules were compiled.
+
+    Compiling holds the GIL, so this is the one part of extraction threads
+    cannot overlap; it goes to worker processes instead
+    (:mod:`cpip.install.bytecode`), with anything they decline compiled here.
 
     A module that will not compile -- vendored Python 2 in a wheel, say -- is
     skipped, not fatal: the installer falls back to compiling that one in the
     stage, exactly as it did before this cache existed.
     """
-    import py_compile
+    jobs: list[tuple[str, str, str]] = []
 
     created: set[str] = set()
-
-    compiled_count = 0
 
     for entry in entries:
         mapped = mapped_parts(entry[0])
@@ -495,8 +499,6 @@ def _compile_archive_pyc(
 
         if target is None:
             continue
-
-        source = os.path.join(tree, *entry[0].split("/"))
 
         output = os.path.join(destination, *target)
 
@@ -507,22 +509,40 @@ def _compile_archive_pyc(
 
             created.add(parent)
 
-        try:
-            written = py_compile.compile(
-                source,
-                cfile=output,
-                dfile="/".join(mapped),
-                doraise=False,
-                quiet=2,
-            )
+        jobs.append(
+            (
+                os.path.join(tree, *entry[0].split("/")),
+                output,
+                "/".join(mapped),
+            ),
+        )
 
-        except (OSError, ValueError):
-            continue
+    if not jobs:
+        return 0
 
-        if written is not None:
-            compiled_count += 1
+    from cpip.install.bytecode import compile_jobs
 
-    return compiled_count
+    for source, output, display in compile_jobs(jobs):
+        _compile_one(source, output, display)
+
+    return sum(1 for _, output, _ in jobs if os.path.exists(output))
+
+
+def _compile_one(source: str, output: str, display: str) -> None:
+    """Compile one module in this process, for whatever the workers declined."""
+    import py_compile
+
+    try:
+        py_compile.compile(
+            source,
+            cfile=output,
+            dfile=display,
+            doraise=False,
+            quiet=2,
+        )
+
+    except (OSError, ValueError, RecursionError, MemoryError):
+        pass
 
 
 def _extract_archive(
