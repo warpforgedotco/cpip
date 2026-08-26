@@ -107,7 +107,7 @@ def write_windows_script(path: str, script: str, *, gui: bool) -> None:
 
     from importlib.resources import files
 
-    launcher = (files("cpip._vendor.launchers") / launcher_name).read_bytes()
+    launcher = (files("cpip._launchers") / launcher_name).read_bytes()
 
     import zipfile
 

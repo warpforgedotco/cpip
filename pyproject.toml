@@ -44,7 +44,8 @@ backend-path = ["src"]
 
 [dependency-groups]
 benchmark = ["pytest-codspeed>=5.0.3", "pytest-benchmark>=5", "tomli>=2", "uv==0.12.1"]
-typing = ["ruff", "ty"]
+typing = ["ruff", "ty", "typing-extensions==4.16.0"]
+vendoring = ["vendoring==1.4.0; python_version >= '3.11'"]
 test = [
     "cryptography",
     "filelock",
@@ -73,6 +74,36 @@ default-groups = ["typing"]
 
 [tool.uv.build-backend]
 module-name = "cpip"
+
+[tool.vendoring]
+destination = "src/cpip/_vendor/"
+requirements = "src/cpip/_vendor/vendor.txt"
+namespace = "cpip._vendor"
+protected-files = ["VENDORED.md", "vendor.txt"]
+patches-dir = "tools/vendoring/patches"
+
+[tool.vendoring.typing-stubs]
+requests = []
+
+[tool.vendoring.transformations]
+substitute = [
+    { match = "(?m)^import urllib3\\.connection$", replace = "from urllib3 import connection" },
+    { match = "import urllib3\\.contrib\\.pyopenssl", replace = "from urllib3.contrib import pyopenssl" },
+    { match = "(?m)^import charset_normalizer\\.md as md_module$", replace = "from charset_normalizer import md as md_module" },
+    { match = "Defaults for the six provider methods", replace = "Defaults for the seven provider methods" },
+    { match = "``receive_partial_solution_hint``, ``consume_pending_clauses``", replace = "``consume_priority_invalidations``, ``receive_partial_solution_hint``,\\n    ``consume_pending_clauses``" },
+    { match = "``narrow_for_display``, the six", replace = "``narrow_for_display``, the" },
+]
+drop = [
+    "*.dist-info/",
+    "bin/",
+    "certifi/tests/",
+    "requests/packages.py",
+    "**/__pycache__/",
+    "**/*.pyc",
+    "charset_normalizer/*.so",
+    "charset_normalizer/*.pyd",
+]
 
 [tool.ruff]
 extend-exclude = ["tests/cli/data", "src/cpip/_vendor"]

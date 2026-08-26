@@ -1,26 +1,53 @@
 # Vendored dependencies
 
-This directory contains the vendored runtime dependency set: the HTTP
-transport stack plus the dependency resolver and its typing shim. Versions
-are intentionally pinned so cpip remains usable without packages installed
-in the host environment.
+The Python dependencies in this directory are generated with
+[`vendoring`](https://github.com/pradyunsg/vendoring), pinned in `vendor.txt`,
+and imported through the `cpip._vendor` namespace. The vendoring workflow
+requires Python 3.11 or newer. Refresh them from the repository root with:
 
-| Package | Version | License |
+```console
+uv run --group vendoring vendoring sync -v
+```
+
+`nab-resolver` is built from commit
+`fff87ab94138b10c9192bc675f665e3b863ec32a` in the `nab-resolver`
+subdirectory of <https://github.com/notatallshaw/nab>. The direct Git reference
+is supported by `vendoring sync`, but not by the tool's `update` or SBOM
+parsers; update that commit manually and keep this document as its provenance
+record until a published release can be pinned with `==`.
+
+| Package | Version/source | License |
 | --- | --- | --- |
 | requests | 2.32.4 | Apache-2.0 |
 | urllib3 | 2.6.3 | MIT |
 | certifi | 2026.7.22 | MPL-2.0 |
 | charset-normalizer | 3.4.9 | MIT |
 | idna | 3.18 | BSD-3-Clause |
-| nab-resolver | 0.0.13.dev0 | MIT |
+| nab-resolver | 0.0.15.dev0 at `fff87ab9` | MIT |
 | typing_extensions | 4.16.0 | PSF-2.0 |
 | tomli | 2.4.1 | MIT |
-| distlib Windows launchers | frozen snapshot inherited from pip | PSF-2.0 |
 
-License texts are stored under `licenses/`, except for Tomli's
-`tomli/LICENSE` and the launchers' `launchers/DISTLIB-LICENSE.txt`. The latter
-is also the PSF-2.0 text governing typing_extensions. The launcher binaries
-are intentionally frozen with this repository; their SHA-256 digests are:
+The tool extracts license texts beside their packages, with single-module
+licenses and the nab source license at this directory's root. Tests verify
+that every expected license is shipped.
+
+## Local patches
+
+Patches under `tools/vendoring/patches` are applied to un-namespaced wheel
+sources before imports are rewritten. A second `vendoring sync` must reproduce
+the same tracked tree.
+
+| Distribution | Patch | Purpose |
+| --- | --- | --- |
+| requests | `requests.patch` | Prevent unrelated host `chardet` or `simplejson` installations from changing cpip's HTTP behavior and omit the compatibility `requests.packages` shim. |
+| certifi | `certifi.patch` | Resolve `cacert.pem` through the `cpip._vendor.certifi` resource package. |
+| nab-resolver | `nab-resolver.patch` | Preserve cpip's late-extras invalidation contract and provider priority invalidations; accelerate large discrete ranges, membership, dependency-clause construction, exact-parent clause dispatch, and backtracking; compare infinity bounds safely; and avoid importing `dataclasses` during ordinary cpip startup. Exact dispatch retains upstream contradiction-epoch stamps and falls back to exhaustive dispatch for undecided, widened, or unhashable parent versions. |
+
+## Windows launchers
+
+The distlib-compatible Windows launchers are frozen repository resources under
+`cpip._launchers`, outside this tool-owned directory. They are not refreshed by
+`vendoring`. Their SHA-256 digests are:
 
 | File | SHA-256 |
 | --- | --- |
@@ -30,26 +57,3 @@ are intentionally frozen with this repository; their SHA-256 digests are:
 | `w32.exe` | `47872cc77f8e18cf642f868f23340a468e537e64521d9a3a416c8b84384d064b` |
 | `w64-arm.exe` | `c5dc9884a8f458371550e09bd396e5418bf375820a31b9899f6499bf391c7b2e` |
 | `w64.exe` | `7a319ffaba23a017d7b1e18ba726ba6c54c53d6446db55f92af53c279894f8ad` |
-
-To refresh the Python stack, resolve each pinned release above for Python
-3.10, copy the package sources and license texts here, remove generated
-caches and native optional modules, then update this file and run the full
-test suite. The launcher snapshot is not part of that refresh process.
-
-## Local patches
-
-A refresh overwrites these. Re-apply them, or land them upstream first and
-drop the entry once the pinned version carries the change.
-
-| Package | Patch | Why |
-| --- | --- | --- |
-| nab-resolver | `incompat_index.py`, `propagate.py`, `resolver.py`: version-keyed dependency-parent clause dispatch | Every dependency clause was indexed under both packages. When a backtracking parent selected its next exact version, unit propagation consequently rescanned the clauses learned for every previously rejected version even though their positive parent terms were immediately contradicted. Exact, non-widened dependency clauses are now registered under the concrete parent version that produced them; propagation over a decision merges only general clauses, widened fallbacks, and that version's clauses in original formula order. Undecided parent ranges retain the exhaustive index, and arbitrary or widened clauses are promoted to the fallback path. `tests/resolution/test_dependency_clause_interning.py` pins role registration, exact dispatch, exhaustive undecided behavior, and widening; randomized resolution is differential-tested against exhaustive dispatch in `test_forward_check.py`. |
-| nab-resolver | `ranges.py`: lazy point-set fast paths for discrete ranges | Resolver constraints are interval-shaped in the generic API, but cpip materializes dependency domains as hundreds of closed singleton intervals -- one per published version. Unit propagation consequently spent most of a deep backtrack walking Python interval lists to compute ordinary finite-set relations. `Range` recognizes that representation lazily for ranges of at least 16 intervals and caches a `frozenset`, using C-level set algebra for membership, intersection, union, difference, subset, disjointness, and `relation`; smaller and continuous ranges retain the interval algorithms, avoiding point-shape detection overhead on ordinary dependency ranges. The interval tuple remains authoritative for equality, hashing, display, and diagnostics. `tests/resolution/test_ranges.py` differential-tests discrete and mixed operations, threshold behavior, and `test_discrete_release_range_algebra` tracks the hot shape. A 128-release backtracking resolve drops from a 0.36 s median to 0.22 s with identical rounds, conflicts, and pins. |
-| nab-resolver | `incompat_index.py`, `resolver.py`: intern cross-package dependency clauses before construction | Backjumps repeatedly reconsider the same stable package versions. The formula and its dependency index survive those jumps, but the decision loop previously allocated both terms and an incompatibility, unioned the parent ranges, and only then discovered that the canonical clause already covered the decision. The specialized insertion path probes the existing dependency key first, returns a covered clause unchanged, or widens it at the same formula position. Requirement refinements are still absorbed on every replay because those derivations are backtracked independently. `tests/resolution/test_dependency_clause_interning.py` pins identity reuse, in-place widening, distinct keys, and refinement replay. |
-| nab-resolver | `ranges.py`: `is_subset`, `is_disjoint`, `relation`, `__contains__`, `__sub__`, and `Range.__hash__` | `is_subset` and `is_disjoint` built a whole complement and intersection only to ask whether the result was empty, and `relation` called them up to three times. They now walk the interval lists once and stop early, `__contains__` binary-searches the sorted intervals instead of scanning them, which matters because a decision tests every release of a package against the same range, `__sub__` carves intervals directly instead of building the complement of its operand and intersecting, and a range hashes its intervals once instead of on every cache lookup. On a 64-release backtracking workload this removes 85% of `Range.__and__` calls and about 40% of resolution time. Behavior is unchanged: `tests/resolution/test_ranges.py` differential-tests the walks against the set-algebra definitions they replace. |
-| nab-resolver | `partial_solution.py`: `backtrack` rebuilds from per-assignment `cum_positive`/`cum_negative`/`cum_decision` snapshots | `backtrack` walked every package in the trail index and rescanned each one's surviving assignments to recover its positive range, negative range and decision. Each `Assignment` now carries the package's state as of that entry, so backtracking visits only the packages it popped and reads the surviving top entry outright. Behavior is unchanged: `tests/resolution/test_partial_solution.py` compares the incrementally maintained state against a replay of the surviving assignments over randomized decide/derive/backtrack sequences. |
-| nab-resolver | `decide.py`, `resolver.py`, `conflict.py`, `partial_solution.py`: sort keys cached across decision scans | `choose_package_to_decide` rebuilt every undecided package's sort key on every decision, which is quadratic over a resolution and dominates once a requirements file gets wide (27% of a 600-root resolve). Keys now persist in `Resolver.priority_keys` and are dropped only as their inputs move: `PartialSolution.drain_touched` reports ranges, `ResolverStats.drain_priority_touched` reports conflict and culprit counts (recorded in `__setitem__`, so no call site can miss one), and the new `ResolverProvider.consume_priority_invalidations` reports provider state. A provider that does not implement it, or returns `None`, gets the previous full rebuild. Behavior is unchanged: `tests/resolution/test_decision_key_cache.py` compares the whole decision sequence against the uncached path and drives each invalidation source separately. **Reusing a key whose input moved is not a slower resolution but a differently-ordered one** -- caching with no invalidation still resolves every benchmark graph correctly while taking 47% longer on the backtracking workload, so a refresh must re-apply all four reporting sites, not just `decide.py`. |
-| nab-resolver | `ranges.py`: `_same_bound`, used by `_max_lower_bound`, `_min_upper_bound`, `__and__`, `is_subset`, `is_disjoint` | Five places asked whether two bounds were equal with `==` (or a tuple `!=` over whole intervals) even when one side was an infinity sentinel, so every intersection and subset test asked a version to compare itself with a sentinel and relied on the version type handing the question back through reflected dispatch. With `cpip.core.versions.Version` a tuple whose elements are its ordering key, a bound never needs to know the sentinels exist: `_same_bound` tests identity first, answers False when either side is a sentinel, and compares with `==` only between two versions. Behavior is unchanged: `tests/resolution/test_ranges.py::test_bounds_are_never_compared_with_a_sentinel` drives the range algebra with a bound type whose comparisons refuse anything but their own type, so a sentinel reaching a bound comparison fails the test -- which is how `is_subset`/`is_disjoint` were found. |
-| nab-resolver | `propagate.py`: `unit_propagation` inlines the per-term relation check; `ranges.py`: `__sub__`, `is_subset`, `relation` inline `_ends_before`/`_interval_is_empty`; `partial_solution.py`: `get` returns without `typing.cast`; `root.py`: `_RootPackage` uses the identity hash | Unit propagation is the resolver's inner loop: on a deep backtrack it evaluates tens of thousands of terms, and each one paid two Python calls (`evaluate_incompatibility` -> `term_relation`), re-fetched the solution, the relation cache and the incompatibility tables from the resolver, allocated a negated `Term` to read three fields off it, and called `Term.is_positive()`. The interval helpers were the largest self-time of those backtracks on CodSpeed (`_ends_before` 8%, `term_relation` 7%), and `typing.cast` is a real call on the hottest read of the partial solution; the root sentinel's Python-level `__hash__` ran on every package-keyed dict lookup. The loop now keeps the resolver's collaborators in locals and does the relation check inline (the standalone `evaluate_incompatibility`/`term_relation` stay as the reference form), and the interval walks test bounds inline. Behavior is unchanged: `tests/resolution/test_ranges.py` differential-tests the walks against their set-algebra definitions and against bounds that refuse foreign operands, and the resolver suites (`test_nab_provider.py`, `test_decision_key_cache.py`, the nab smoke benchmarks) pin the decision sequence. Calls per resolve on nab's pip deep-backtracking graph: 163k -> 125k. |
-| nab-resolver | `ranges.py`, `root.py`, `types.py`: `override` (and `Self`) from `typing` when the interpreter provides them, the vendored `typing_extensions` only as the fallback | The vendored `typing_extensions` module is 1.4 ms of import time that every `cpip` process paid on Python 3.12, where `typing.override` and `typing.Self` already exist; `Self` is annotation-only and sits behind `TYPE_CHECKING`. Behavior is unchanged. |
-| nab-resolver | `resolver.py`, `partial_solution.py`: `ResolverStats` and `Assignment` written as plain classes instead of `@dataclass`es | `dataclasses` (which imports `inspect`) was loaded by every cpip process that resolves, for two classes; cpip's own models had already dropped the decorator. Both constructors keep the same parameter order and defaults, `ResolverStats` keeps the `_RecordingCounts` wrapping its `__post_init__` did, and `Assignment` keeps value equality that ignores the `_effective` cache. On a refresh, re-apply rather than restore the decorators. |

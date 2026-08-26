@@ -1,4 +1,4 @@
-"""Cached sort keys must not change which package is decided next.
+"""The decision queue must not change which package is decided next.
 
 ``choose_package_to_decide`` reuses each package's sort key between decision
 scans and rebuilds only the ones whose inputs were reported to have moved --
@@ -264,6 +264,7 @@ def test_a_moved_conflict_count_rebuilds_the_key() -> None:
     assert choose(resolver) == "alpha"
 
     resolver.stats.package_conflict_counts["beta"] += 1
+    resolver.priority_epoch += 1
     assert choose(resolver) == "beta"
 
 
@@ -272,6 +273,7 @@ def test_a_moved_culprit_count_rebuilds_the_key() -> None:
     assert choose(resolver) == "alpha"
 
     resolver.stats.package_culprit_counts["beta"] += 1
+    resolver.priority_epoch += 1
     assert choose(resolver) == "beta"
 
 
@@ -315,10 +317,10 @@ def test_a_restart_drops_every_key() -> None:
 
     resolver, stub = scan_resolver()
     assert choose(resolver) == "alpha"
-    assert resolver.priority_keys
+    assert resolver.decision_queue._keys  # noqa: SLF001
 
     resolver.stats.package_conflict_counts["alpha"] = 99
     threshold, remaining, restarted = conflict.maybe_restart(resolver, 1, 1)
 
     assert restarted
-    assert not resolver.priority_keys
+    assert not resolver.decision_queue._keys  # noqa: SLF001

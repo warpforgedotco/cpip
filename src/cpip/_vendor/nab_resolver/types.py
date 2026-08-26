@@ -12,20 +12,12 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#definition
 from __future__ import annotations
 
 import enum
-from typing import Generic, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
 
-try:
-    from typing import override
-except ImportError:  # pragma: no cover - Python < 3.12
-    from cpip._vendor.typing_extensions import override
-
-TYPE_CHECKING = False
+from ._compat import override
 
 if TYPE_CHECKING:
-    try:
-        from typing import Self
-    except ImportError:  # pragma: no cover - Python < 3.11
-        from cpip._vendor.typing_extensions import Self
+    from cpip._vendor.typing_extensions import Self
 
 __all__ = [
     "Incompatibility",
@@ -35,6 +27,7 @@ __all__ = [
     "RangeProtocol",
     "RangeRelation",
     "RelationProtocol",
+    "RootRequirement",
     "SetRelation",
     "Term",
     "VersionType",
@@ -52,9 +45,23 @@ VersionType_contra = TypeVar("VersionType_contra", contravariant=True)
 class RangeProtocol(Protocol[VersionType_contra]):
     """Contract for version range types used by the resolver.
 
-    Both :class:`nab_resolver.ranges.Range` and
-    :class:`packaging.ranges.VersionRange` satisfy this protocol.  Mixing
-    range types within a single resolution is unsupported.
+    Beyond the signatures, conflict resolution only terminates while
+    ``x.is_subset((x - y) | y)`` holds for every term constraint ``x`` and
+    every ``y``; otherwise a clause resolves into itself and the loop spins.
+    :class:`nab_resolver.ranges.Range` holds it everywhere.  A type whose
+    widest value carries membership that ``-`` drops does not:
+    ``packaging.ranges.VersionRange.full()`` admits arbitrary ``===`` strings
+    and loses them to any ``y`` that removes versions.  The resolver therefore
+    records ``~empty()`` in place of any supplied range equal to :meth:`full`,
+    which may be strictly narrower.
+
+    That substitution covers the value equal to :meth:`full` and nothing else.
+    A range that keeps membership ``-`` drops without equalling it, such as
+    :meth:`full` minus an ``===`` literal, is the caller's to keep out of a
+    term; conflict resolution's step budget reports one as an internal error
+    rather than spinning on it.
+
+    Mixing range types within a single resolution is unsupported.
     """
 
     @classmethod
@@ -64,7 +71,11 @@ class RangeProtocol(Protocol[VersionType_contra]):
 
     @classmethod
     def full(cls) -> Self:
-        """Create a range containing all versions."""
+        """Create the widest range the type can express.
+
+        This is the identity for intersection folds, and may be wider than a
+        legal term constraint.
+        """
         ...
 
     @classmethod
@@ -99,6 +110,10 @@ class RangeProtocol(Protocol[VersionType_contra]):
 
     def is_subset(self, other: Self) -> bool:
         """Return whether every version in self is also in other."""
+        ...
+
+    def is_superset(self, other: Self) -> bool:
+        """Return whether every version in other is also in self."""
         ...
 
     def is_disjoint(self, other: Self) -> bool:
@@ -243,6 +258,57 @@ class RelationProtocol(Protocol):
         ...
 
 
+class RootRequirement(Generic[PackageType, VersionType]):
+    """One requirement as the caller wrote it, kept as its own clause.
+
+    A caller that passes a mapping has to intersect its requirements on a
+    package first, and the resolver then proves the failure against the
+    intersection, naming a range nobody wrote.  Passing a sequence of these
+    keeps each requirement separate all the way into the report.
+
+    ``origin`` is opaque to the resolver and travels onto the ROOT
+    incompatibility, so a caller's own error reporter can identify the
+    requirement behind a clause.  Two requirements on one package can share a
+    range, so the range alone cannot tell them apart.
+    """
+
+    package: PackageType
+    constraint: RangeProtocol[VersionType]
+    origin: Any = None
+
+    def __init__(
+        self,
+        package: PackageType,
+        constraint: RangeProtocol[VersionType],
+        origin: Any = None,
+    ) -> None:
+        object.__setattr__(self, "package", package)
+        object.__setattr__(self, "constraint", constraint)
+        object.__setattr__(self, "origin", origin)
+        object.__setattr__(self, "_frozen", True)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError(f"cannot assign to field {name!r}")
+        object.__setattr__(self, name, value)
+
+    def __eq__(self, other: object) -> bool:
+        return type(other) is RootRequirement and (
+            self.package,
+            self.constraint,
+            self.origin,
+        ) == (other.package, other.constraint, other.origin)
+
+    def __hash__(self) -> int:
+        return hash((self.package, self.constraint, self.origin))
+
+    def __repr__(self) -> str:
+        return (
+            f"RootRequirement(package={self.package!r}, "
+            f"constraint={self.constraint!r}, origin={self.origin!r})"
+        )
+
+
 class SetRelation(enum.Enum):
     """How the partial solution relates to a term.
 
@@ -258,6 +324,10 @@ class IncompatibilityState(enum.Enum):
     """Result of evaluating an incompatibility against the partial solution."""
 
     CONFLICT = enum.auto()
+    """Every term is satisfied."""
+
+    CONTRADICTED = enum.auto()
+    """At least one term is contradicted, so the clause already holds."""
 
 
 class IncompatibilityCause(enum.Enum):
@@ -301,10 +371,25 @@ class Incompatibility(Generic[PackageType, VersionType]):
     clause. The clause's term carries the requirement range that backtracking
     needs, so the user's constraint is kept here for the message.
 
+    ``dependency_range`` holds the required range for a ``DEPENDENCY`` clause
+    of a package on itself, whose two terms merge into one because a clause
+    holds at most one term per package.
+
+    ``origin`` holds the caller's :class:`RootRequirement` origin for a
+    ``ROOT`` clause, opaque to the resolver and never read by it.
+
     Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#incompatibility
     """
 
-    __slots__ = ("cause", "cause_left", "cause_right", "constraint_range", "terms")
+    __slots__ = (
+        "cause",
+        "cause_left",
+        "cause_right",
+        "constraint_range",
+        "dependency_range",
+        "origin",
+        "terms",
+    )
 
     def __init__(
         self,
@@ -313,6 +398,8 @@ class Incompatibility(Generic[PackageType, VersionType]):
         cause_left: Incompatibility[PackageType, VersionType] | None = None,
         cause_right: Incompatibility[PackageType, VersionType] | None = None,
         constraint_range: RangeProtocol[VersionType] | None = None,
+        origin: Any = None,
+        dependency_range: RangeProtocol[VersionType] | None = None,
     ) -> None:
         """Create an incompatibility with terms and a cause."""
         self.terms = terms
@@ -320,6 +407,8 @@ class Incompatibility(Generic[PackageType, VersionType]):
         self.cause_left = cause_left
         self.cause_right = cause_right
         self.constraint_range = constraint_range
+        self.origin = origin
+        self.dependency_range = dependency_range
 
     @override
     def __repr__(self) -> str:

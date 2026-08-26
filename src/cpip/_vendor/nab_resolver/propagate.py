@@ -19,7 +19,7 @@ from .types import IncompatibilityState, SetRelation, Term
 
 if TYPE_CHECKING:
     from .resolver import Resolver
-    from .types import Incompatibility
+    from .types import Incompatibility, RangeProtocol
 
 __all__ = [
     "classify_relation",
@@ -31,24 +31,34 @@ __all__ = [
 # Upper bound on relation_cache size; cleared on overflow to bound memory.
 RELATION_CACHE_MAX = 100_000
 
+# A probe that misses builds its key for nothing, and on a conflict-heavy
+# resolve most probes miss.  So the memo runs only while its hit rate over a
+# window of probes pays for the key, and a longer window re-samples it later in
+# case the resolve changes shape.
+RELATION_GATE_WINDOW = 4_096
+RELATION_GATE_MIN_HITS = 1_024
+RELATION_GATE_RECHECK = 65_536
+
+# Upper bound on the address-keyed token memo, cleared on overflow together
+# with the range objects it holds alive.  A larger cap wipes less often and so
+# holds on to more ranges, which costs peak memory.
+RANGE_ID_MEMO_MAX = 8_192
+
 
 def _related_incompatibility_groups(
     resolver: Resolver[Any, Any], package: Any
 ) -> tuple[Sequence[int], ...]:
-    """Return sorted clause-index groups relevant to ``package`` now.
-
-    Dependency clauses use their first term as the parent. Once that parent
-    has an exact decision, clauses registered exclusively for other versions
-    are contradicted without inspecting the rest of the clause. Undecided
-    parent ranges and widened clauses retain the exhaustive path.
-    """
+    """Return sorted clause-index groups relevant to ``package`` now."""
     general = resolver.package_to_incompatibilities.get(package, ())
     decision = resolver.solution.decided_version(package)
     if decision is None:
         return general, resolver.dependency_parent_incompatibilities.get(package, ())
 
     by_version = resolver.dependency_parent_versions.get(package)
-    exact = () if by_version is None else by_version.get(decision, ())
+    try:
+        exact = () if by_version is None else by_version.get(decision, ())
+    except TypeError:
+        return general, resolver.dependency_parent_incompatibilities.get(package, ())
     return general, resolver.dependency_parent_fallbacks.get(package, ()), exact
 
 
@@ -62,128 +72,70 @@ def unit_propagation(
     conflicting incompatibility if all terms are satisfied, or
     None if propagation completes without conflict.
 
-    The per-term relation check is inlined here rather than calling
-    ``term_relation`` per term: this loop is the resolver's inner loop
-    during backtracking, and on a deep backtrack it evaluates tens of
-    thousands of terms, each of which would otherwise pay two function
-    calls and re-fetch the solution, the relation cache and the
-    incompatibility tables from the resolver.
+    One contradicted term settles a clause for the rest of the solution's
+    contradiction epoch.  Each clause records the epoch it was last settled in,
+    and is skipped while that stamp is current.
 
     Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation
     """
-    solution = resolver.solution
-    solution_get = solution.get
-    has_positive_constraint = solution.has_positive_constraint
-    derive = solution.derive
-    cache = resolver.relation_cache
-    incompatibilities = resolver.incompatibilities
-    stats = resolver.stats
-    observer = resolver.observer
-    satisfied = SetRelation.SATISFIED
-    contradicted = SetRelation.CONTRADICTED
-
     propagation_queue: deque[Any] = deque([changed_package])
     in_queue: set[Any] = {changed_package}
+
+    contradicted_at = resolver.clause_contradicted_at
+    epoch = resolver.solution.contradiction_epoch
 
     while propagation_queue:
         package = propagation_queue.popleft()
         in_queue.discard(package)
-
         groups = _related_incompatibility_groups(resolver, package)
-        general = groups[0]
-        second = groups[1]
-        if len(groups) == 2:
-            if not general:
-                related = second
-            elif not second:
-                related = general
-            else:
-                related = merge(general, second)
-        else:
-            third = groups[2]
-            if not general:
-                if not second:
-                    related = third
-                elif not third:
-                    related = second
-                else:
-                    related = merge(second, third)
-            elif not second:
-                related = general if not third else merge(general, third)
-            elif not third:
-                related = merge(general, second)
-            else:
-                related = merge(general, second, third)
-        if not related:
+        nonempty = tuple(group for group in groups if group)
+        if not nonempty:
             continue
+        related_indices = nonempty[0] if len(nonempty) == 1 else merge(*nonempty)
+
         previous_index = -1
-        for incompatibility_index in related:
+        for incompatibility_index in related_indices:
             if incompatibility_index == previous_index:
                 continue
             previous_index = incompatibility_index
-            incompatibility = incompatibilities[incompatibility_index]
-
-            # evaluate_incompatibility, inlined.
-            undetermined_term = None
-            conflict = True
-            for term in incompatibility.terms:
-                # term_relation, inlined.
-                assignment = solution_get(term.package)
-                if assignment is None:
-                    relation = None
-                else:
-                    positive = term._positive  # noqa: SLF001
-                    key = (positive, assignment, term.constraint)
-                    relation = cache.get(key)
-                    if relation is None:
-                        range_relation = assignment.relation(term.constraint)
-                        relation = classify_relation(
-                            term,
-                            subset=range_relation.is_subset,
-                            disjoint=range_relation.is_disjoint,
-                        )
-                        if len(cache) >= RELATION_CACHE_MAX:
-                            cache.clear()
-                        cache[key] = relation
-                    if (
-                        (positive and relation is satisfied)
-                        or (not positive and relation is contradicted)
-                    ) and not has_positive_constraint(term.package):
-                        relation = None
-                if relation is satisfied:
-                    continue
-                if relation is contradicted or undetermined_term is not None:
-                    conflict = False
-                    undetermined_term = None
-                    break
-                undetermined_term = term
-
-            if undetermined_term is None:
-                if conflict:
-                    return incompatibility
+            if contradicted_at[incompatibility_index] == epoch:
                 continue
 
-            # Derive the negation of the one undetermined term.
-            negated_package = undetermined_term.package
-            negated_positive = not undetermined_term._positive  # noqa: SLF001
-            range_before = solution_get(negated_package)
-            derive(
-                negated_package,
-                undetermined_term.constraint,
-                positive=negated_positive,
-                cause=incompatibility,
-            )
-            range_after = solution_get(negated_package)
-            if range_before != range_after:
-                stats.derivations += 1
-                observer.on_derivation(
-                    negated_package,
-                    positive=negated_positive,
+            incompatibility = resolver.incompatibilities[incompatibility_index]
+            evaluation = evaluate_incompatibility(resolver, incompatibility)
+
+            if evaluation is IncompatibilityState.CONTRADICTED:
+                contradicted_at[incompatibility_index] = epoch
+                continue
+
+            if evaluation is IncompatibilityState.CONFLICT:
+                return incompatibility
+
+            if isinstance(evaluation, Term):
+                negated_term = evaluation.negate()
+                range_before = resolver.solution.get(negated_term.package)
+                resolver.solution.derive(
+                    negated_term.package,
+                    negated_term.constraint,
+                    positive=negated_term.is_positive(),
                     cause=incompatibility,
                 )
-                if negated_package not in in_queue:
-                    propagation_queue.append(negated_package)
-                    in_queue.add(negated_package)
+                range_after = resolver.solution.get(negated_term.package)
+
+                # A derive that empties a range advances the epoch, which
+                # retires the stamps taken before it.
+                epoch = resolver.solution.contradiction_epoch
+
+                if range_before != range_after:
+                    resolver.stats.derivations += 1
+                    resolver.observer.on_derivation(
+                        negated_term.package,
+                        positive=negated_term.is_positive(),
+                        cause=incompatibility,
+                    )
+                    if negated_term.package not in in_queue:
+                        propagation_queue.append(negated_term.package)
+                        in_queue.add(negated_term.package)
 
     return None
 
@@ -195,11 +147,9 @@ def evaluate_incompatibility(
 
     Returns:
       ``IncompatibilityState.CONFLICT``: all terms satisfied
+      ``IncompatibilityState.CONTRADICTED``: some term is contradicted
       ``Term``: exactly one undetermined term (unit propagation candidate)
-      ``None``: 0 or 2+ undetermined terms (nothing to do yet)
-
-    ``unit_propagation`` inlines this; it stays as the reference form and
-    for callers outside the hot loop.
+      ``None``: two or more undetermined terms (nothing to do yet)
     """
     undetermined_term: Term[Any, Any] | None = None
 
@@ -208,7 +158,7 @@ def evaluate_incompatibility(
         if relation is SetRelation.SATISFIED:
             continue
         if relation is SetRelation.CONTRADICTED:
-            return None
+            return IncompatibilityState.CONTRADICTED
         if undetermined_term is not None:
             return None
         undetermined_term = term
@@ -216,6 +166,52 @@ def evaluate_incompatibility(
     if undetermined_term is not None:
         return undetermined_term
     return IncompatibilityState.CONFLICT
+
+
+def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> int:
+    """Return the token for ``range_``, minting one the first time it is seen.
+
+    Equal ranges share a token, so the relation cache keys on range value
+    rather than on identity.  The address memo the caller reads first is only
+    sound while the object it answers for is alive, so ``interned_ranges``
+    holds on to every range that memo records.
+    """
+    tokens = resolver.range_tokens
+    token = tokens.get(range_)
+    if token is None:
+        if len(tokens) >= RANGE_ID_MEMO_MAX:
+            tokens.clear()
+        token = resolver.next_range_token
+        resolver.next_range_token = token + 1
+        tokens[range_] = token
+
+    id_tokens = resolver.range_token_by_id
+    if len(id_tokens) >= RANGE_ID_MEMO_MAX:
+        id_tokens.clear()
+        resolver.interned_ranges.clear()
+    id_tokens[id(range_)] = token
+    resolver.interned_ranges.append(range_)
+
+    return token
+
+
+def _resample_relation_gate(resolver: Resolver[Any, Any]) -> None:
+    """Judge the window of probes that just ended and open the next one.
+
+    While the memo is on, the window counts hits, and too few switch the memo
+    off and drop the entries it collected.  While it is off, the window is only
+    the wait before the memo is tried again.
+    """
+    if not resolver.relation_cache_on:
+        resolver.relation_cache_on = True
+    elif resolver.relation_gate_hits < RELATION_GATE_MIN_HITS:
+        resolver.relation_cache_on = False
+        resolver.relation_cache.clear()
+        resolver.relation_gate_countdown = RELATION_GATE_RECHECK
+        return
+
+    resolver.relation_gate_hits = 0
+    resolver.relation_gate_countdown = RELATION_GATE_WINDOW
 
 
 def term_relation(resolver: Resolver[Any, Any], term: Term[Any, Any]) -> SetRelation:
@@ -231,24 +227,51 @@ def term_relation(resolver: Resolver[Any, Any], term: Term[Any, Any]) -> SetRela
     if assignment is None:
         return SetRelation.UNDETERMINED
 
-    positive = term._positive  # noqa: SLF001
+    positive = term.is_positive()
+    constraint = term.constraint
+
+    countdown = resolver.relation_gate_countdown - 1
+    if countdown:
+        resolver.relation_gate_countdown = countdown
+    else:
+        _resample_relation_gate(resolver)
+
     cache = resolver.relation_cache
-    key = (positive, assignment, term.constraint)
-    result = cache.get(key)
+    # key stays None while the memo is off, so a miss below stores nothing.
+    key = None
+    result = None
+    if resolver.relation_cache_on:
+        # Both lookups stay inline because most probes hit while the memo is
+        # on; only a miss pays for the call into _intern_range.
+        id_tokens = resolver.range_token_by_id
+        assignment_token = id_tokens.get(id(assignment))
+        if assignment_token is None:
+            assignment_token = _intern_range(resolver, assignment)
+        constraint_token = id_tokens.get(id(constraint))
+        if constraint_token is None:
+            constraint_token = _intern_range(resolver, constraint)
+
+        key = (positive, assignment_token, constraint_token)
+        result = cache.get(key)
+
     if result is None:
-        relation = assignment.relation(term.constraint)
+        relation = assignment.relation(constraint)
         result = classify_relation(
             term, subset=relation.is_subset, disjoint=relation.is_disjoint
         )
-        if len(cache) >= RELATION_CACHE_MAX:
-            cache.clear()
-        cache[key] = result
+        if key is not None:
+            if len(cache) >= RELATION_CACHE_MAX:
+                cache.clear()
+            cache[key] = result
+    else:
+        resolver.relation_gate_hits += 1
 
     needs_positive = (positive and result is SetRelation.SATISFIED) or (
         not positive and result is SetRelation.CONTRADICTED
     )
     if needs_positive and not resolver.solution.has_positive_constraint(term.package):
         return SetRelation.UNDETERMINED
+
     return result
 
 

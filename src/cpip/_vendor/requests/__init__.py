@@ -45,9 +45,7 @@ from cpip._vendor import urllib3
 from .exceptions import RequestsDependencyWarning
 
 try:
-    from cpip._vendor.charset_normalizer import (
-        __version__ as charset_normalizer_version,
-    )
+    from cpip._vendor.charset_normalizer import __version__ as charset_normalizer_version
 except ImportError:
     charset_normalizer_version = None
 

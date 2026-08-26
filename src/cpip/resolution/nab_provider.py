@@ -1305,8 +1305,7 @@ class NabProvider:
         dependency edge.  Distinct versions give disjoint, non-touching
         singletons, so sorting once produces exactly what ``Range`` wants.
         """
-        ordered = sorted(set(versions))
-        return Range(tuple((version, True, version, True) for version in ordered))
+        return Range.from_versions(versions)
 
     def begin_decision_scan(self) -> None:
         return None

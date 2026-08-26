@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from cpip._vendor.nab_resolver import decide, incompat_index, propagate
 from cpip._vendor.nab_resolver.ranges import Range
-from cpip._vendor.nab_resolver.resolver import Resolver
+from cpip._vendor.nab_resolver.resolver import Resolver, Solution
 from cpip._vendor.nab_resolver.types import Incompatibility, IncompatibilityCause, Term
 
 
@@ -35,6 +36,23 @@ class Provider:
 
 def resolver() -> Resolver[str, int]:
     return Resolver(Provider())
+
+
+def test_solution_is_explicitly_unhashable() -> None:
+    solution = Solution(pins={"package": 1}, edges=(), roots=("package",))
+
+    with pytest.raises(TypeError):
+        hash(solution)
+
+
+def test_range_token_memo_is_bounded() -> None:
+    candidate = resolver()
+
+    for version in range(propagate.RANGE_ID_MEMO_MAX + 1):
+        propagate._intern_range(candidate, Range.singleton(version))  # noqa: SLF001
+
+    assert len(candidate.range_tokens) == 1
+    assert candidate.next_range_token == propagate.RANGE_ID_MEMO_MAX + 1
 
 
 def test_dependency_clause_is_reused_when_parent_range_is_covered() -> None:
@@ -175,6 +193,37 @@ def test_widened_merge_promotes_exact_clause_to_fallback() -> None:
         (),
         [0],
         (),
+    )
+
+
+def test_unhashable_parent_version_uses_exhaustive_fallback() -> None:
+    class Version:
+        __hash__ = None
+
+        def __init__(self, value: int) -> None:
+            self.value = value
+
+        def __eq__(self, other: object) -> bool:
+            return isinstance(other, Version) and self.value == other.value
+
+        def __lt__(self, other: Version) -> bool:
+            return self.value < other.value
+
+    candidate = resolver()
+    version = Version(1)
+    incompat_index.add_dependency_incompatibility(
+        candidate,
+        "parent",
+        Range.singleton(version),
+        "dependency",
+        Range.singleton(1),
+        exact_parent_version=version,
+    )
+    candidate.solution.decide("parent", version)
+
+    assert propagate._related_incompatibility_groups(candidate, "parent") == (
+        (),
+        [0],
     )
 
 

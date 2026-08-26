@@ -21,7 +21,7 @@ from ..exceptions import (
 from .util import reraise
 
 if typing.TYPE_CHECKING:
-    from typing_extensions import Self
+    from cpip._vendor.typing_extensions import Self
 
     from ..connectionpool import ConnectionPool
     from ..response import BaseHTTPResponse
