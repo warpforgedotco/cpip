@@ -9,6 +9,7 @@ from pathlib import Path
 from benchmark_support import make_wheel, reset_caches
 from cpip.build.build_backend import ProjectBuilder, prepare_project_metadata
 from cpip.build.metadata import InstalledDistributionStore
+from cpip._vendor.nab_resolver.ranges import Range
 from cpip.core.errors import BuildError
 from cpip.core.packaging import SpecifierSet, parse_requirement
 from cpip.core.wheel import read_metadata_message
@@ -50,6 +51,27 @@ def test_pep440_specifier_parsing(benchmark: BenchmarkFixture) -> None:
         return sum(len(SpecifierSet(value).specifiers) for value in values * 100)
 
     assert benchmark(parse_all) > 0
+
+
+def test_discrete_release_range_algebra(benchmark: BenchmarkFixture) -> None:
+    """Set algebra over the finite release domains used by the resolver."""
+    left = Range(tuple((value, True, value, True) for value in range(0, 512, 2)))
+    right = Range(tuple((value, True, value, True) for value in range(0, 512, 3)))
+
+    def combine_ranges() -> int:
+        intersection = left & right
+        union = left | right
+        difference = left - right
+        relation = left.relation(right)
+        return (
+            len(intersection._intervals)
+            + len(union._intervals)
+            + len(difference._intervals)
+            + relation.is_subset
+            + relation.is_disjoint
+        )
+
+    assert benchmark(combine_ranges) == 597
 
 
 def test_requirement_primitive_parsing(benchmark: BenchmarkFixture) -> None:

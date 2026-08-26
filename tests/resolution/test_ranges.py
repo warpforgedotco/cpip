@@ -84,6 +84,10 @@ def random_range(rng: random.Random) -> Range:
     return build(intervals)
 
 
+def point_range(values: set[int]) -> Range:
+    return Range(tuple((value, True, value, True) for value in sorted(values)))
+
+
 @pytest.mark.parametrize("seed", range(12))
 def test_contains_matches_a_linear_scan(seed: int) -> None:
     rng = random.Random(seed)
@@ -109,6 +113,47 @@ def test_predicates_match_set_algebra_and_membership(seed: int) -> None:
         relation = left.relation(right)
         assert relation.is_subset == left.is_subset(right)
         assert relation.is_disjoint == left.is_disjoint(right)
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_discrete_fast_paths_match_set_operations(seed: int) -> None:
+    """Finite release domains retain the exact interval-set semantics."""
+    rng = random.Random(seed + 200)
+
+    for _ in range(30):
+        left_values = set(rng.sample(range(256), rng.randint(0, 160)))
+        right_values = set(rng.sample(range(256), rng.randint(0, 160)))
+        left = point_range(left_values)
+        right = point_range(right_values)
+
+        assert members(left & right) == (left_values & right_values) & set(PROBES)
+        assert members(left | right) == (left_values | right_values) & set(PROBES)
+        assert members(left - right) == (left_values - right_values) & set(PROBES)
+        assert left.is_subset(right) == (left_values <= right_values)
+        assert left.is_disjoint(right) == left_values.isdisjoint(right_values)
+
+        relation = left.relation(right)
+        assert relation.is_subset == (left_values <= right_values)
+        assert relation.is_disjoint == left_values.isdisjoint(right_values)
+        for probe in rng.sample(range(256), 12):
+            assert (probe in left) == (probe in left_values)
+
+        for result in (left & right, left | right, left - right):
+            assert result._intervals == tuple(
+                (value, True, value, True)
+                for value in sorted(probe for probe in range(256) if probe in result)
+            )
+
+
+def test_discrete_and_continuous_ranges_use_the_same_semantics() -> None:
+    points = point_range({1, 3, 5, 7})
+    span = Range.between(2, 6)
+
+    assert members(points & span) == {3, 5}
+    assert members(points | span) == members(points) | members(span)
+    assert members(points - span) == {1, 7}
+    assert not points.is_subset(span)
+    assert not points.is_disjoint(span)
 
 
 def test_empty_range_is_subset_and_disjoint() -> None:
