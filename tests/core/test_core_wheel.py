@@ -66,6 +66,25 @@ def test_read_metadata_message_uses_fast_archive_reader(
     assert read_metadata_message(wheel).get("Name") == "demo"
 
 
+@pytest.mark.parametrize("version", ["1.0", "1.0rc1"])
+def test_read_metadata_message_prefers_matching_dist_info(
+    tmp_path: Path,
+    version: str,
+) -> None:
+    wheel = tmp_path / f"demo-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            "aaa-1.0.dist-info/METADATA",
+            "Name: aaa\nVersion: 1.0\n",
+        )
+        archive.writestr(
+            f"demo-{version}.dist-info/METADATA",
+            f"Name: demo\nVersion: {version}\n",
+        )
+
+    assert read_metadata_message(wheel).get("Name") == "demo"
+
+
 @pytest.mark.parametrize(
     "filename, expected",
     [

@@ -1088,6 +1088,15 @@ def read_metadata_message(path: str):
         return read_metadata_message_internal(archive, path)
 
 
+def _metadata_filename_name(path: str) -> str | None:
+    """Return the distribution prefix without validating irrelevant fields."""
+    filename = os.path.basename(os.fspath(path))
+    if not filename.endswith(".whl"):
+        return None
+    distribution, separator, _ = filename.partition("-")
+    return distribution if separator and _is_escaped_name(distribution) else None
+
+
 def read_metadata_message_internal(
     archive: MetadataArchiveSource,
     path: str,
@@ -1105,9 +1114,12 @@ def read_metadata_message_internal(
         raise InstallationError(f"Wheel has no METADATA: {path}")
 
     if expected_name is None:
-        parsed = parse_wheel_filename(path)
+        expected_name = _metadata_filename_name(path)
 
-        expected_name = parsed[0] if parsed is not None else None
+        if expected_name is None:
+            parsed = parse_wheel_filename(path)
+
+            expected_name = parsed[0] if parsed is not None else None
 
     if expected_name is not None:
         expected = canonicalize_name(expected_name).replace("-", "_")
