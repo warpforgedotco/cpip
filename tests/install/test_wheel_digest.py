@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import sys
 from pathlib import Path
@@ -137,6 +138,11 @@ def test_prepare_cached_wheels_reads_the_digests_once(
         return original(self)
 
     monkeypatch.setattr(metadata_cache.WheelMetadataCache, "_reader", counting)
+
+    def unexpected_pool(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("a fully warm batch should not start worker threads")
+
+    monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", unexpected_pool)
 
     archives = prepare_cached_wheels(candidates, cache_dir)
 
