@@ -49,7 +49,7 @@ index c771106..22c8e81 100644
  
  # A dependency-style clause is exactly two terms (parent + dep).
  _DEPENDENCY_CLAUSE_TERMS = 2
-@@ -35,19 +39,132 @@ _DEPENDENCY_CLAUSE_TERMS = 2
+@@ -35,19 +39,138 @@ _DEPENDENCY_CLAUSE_TERMS = 2
  _NOT_CONTRADICTED = -1
  
  
@@ -148,6 +148,12 @@ index c771106..22c8e81 100644
 +        existing = resolver.incompatibilities[existing_index]
 +        existing_package, existing_dependency = existing.terms
 +        if package_range.is_subset(existing_package.constraint):
++            if exact_parent_version is _MISSING:
++                _register_fallback_parent(resolver, package, existing_index)
++            else:
++                _register_exact_parent(
++                    resolver, package, exact_parent_version, existing_index
++                )
 +            return existing
 +
 +        merged = Incompatibility(

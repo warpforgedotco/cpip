@@ -147,6 +147,37 @@ def test_exact_parent_decision_dispatches_only_its_version_clauses() -> None:
     assert candidate.incompatibilities == [first, second, general]
 
 
+def test_reused_dependency_clause_registers_each_exact_parent_version() -> None:
+    candidate = resolver()
+    dependency_range = Range.singleton(1)
+    first = incompat_index.add_dependency_incompatibility(
+        candidate,
+        "parent",
+        Range.between(1, 4),
+        "dependency",
+        dependency_range,
+        exact_parent_version=1,
+    )
+    repeated = incompat_index.add_dependency_incompatibility(
+        candidate,
+        "parent",
+        Range.singleton(2),
+        "dependency",
+        dependency_range,
+        exact_parent_version=2,
+    )
+
+    candidate.solution.decide("parent", 2)
+
+    assert repeated is first
+    assert candidate.dependency_parent_versions["parent"] == {1: [0], 2: [0]}
+    assert propagate._related_incompatibility_groups(candidate, "parent") == (
+        (),
+        (),
+        [0],
+    )
+
+
 def test_undecided_parent_dispatches_every_dependency_clause() -> None:
     candidate = resolver()
     cause: Incompatibility[Any, Any] = Incompatibility(
