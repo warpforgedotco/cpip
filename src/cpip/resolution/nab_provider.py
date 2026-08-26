@@ -471,12 +471,12 @@ class NabProvider:
                 return (cached,)
             records = self.provider.release_candidates(requirement, version)
             if records is not None:
-                return tuple(
-                    self.provider.get_materializer_internal().materialize(
-                        requirement,
-                        records,
-                    )
-                )
+                materializer = self.provider.get_materializer_internal()
+                materialize_one = getattr(materializer, "materialize_one", None)
+                if len(records) == 1 and materialize_one is not None:
+                    candidate = materialize_one(requirement, records[0])
+                    return () if candidate is None else (candidate,)
+                return tuple(materializer.materialize(requirement, records))
         return tuple(
             self.provider.find_candidates(
                 requirement,
