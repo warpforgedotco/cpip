@@ -377,7 +377,9 @@ class PartialSolution(Generic[PackageType, VersionType]):
         """
         cached = self._effective_range_cache.get(package, _UNSET)
         if cached is not _UNSET:
-            return cast("RangeProtocol[VersionType] | None", cached)
+            # ``typing.cast`` is a runtime call, and this is the hottest read
+            # in propagation. The sentinel proves the cached union here.
+            return cached  # ty: ignore[invalid-return-type]
 
         positive = self._positive_ranges.get(package)
         negative = self._negative_ranges.get(package)
