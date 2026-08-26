@@ -1079,7 +1079,7 @@ def read_metadata_message(path: str):
 
     try:
         with open(path, "rb", buffering=0) as file:
-            archive = WheelArchive(file)
+            archive = WheelArchive(file, metadata_only=True)
             return read_metadata_message_internal(archive, path)
     except WheelhouseUnavailable:
         pass
