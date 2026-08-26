@@ -125,6 +125,14 @@ class NabProvider:
         name = canonicalize_name(package.split("[", 1)[0])
         return self.constraints_by_name.get(name, ())
 
+    def _prefetch_available_versions(
+        self, requirements: tuple[Requirement, ...]
+    ) -> None:
+        """Start catalog requests while the resolver still has independent work."""
+        prefetch = getattr(self.provider, "prefetch_available_versions", None)
+        if prefetch is not None:
+            prefetch(requirements)
+
     def _versions(self, package: str) -> tuple[Version, ...]:
         requirement = self.requirements[package]
         memo = self._version_memo.get(package)
@@ -827,6 +835,18 @@ class NabProvider:
             )
             self.choose_version(package, Range.singleton(version))
             record = self.records[(package, version)]
+        self._prefetch_available_versions(
+            tuple(
+                dependency
+                for dependency in dependencies_records
+                if _key(dependency) != package
+                and dependency.url is None
+                and not any(
+                    constraint.url is not None
+                    for constraint in self._constraint_for(_key(dependency))
+                )
+            )
+        )
         dependencies: dict[str, Range[Version]] = {}
         for dependency in dependencies_records:
             if _key(dependency) == package:
@@ -1062,6 +1082,7 @@ class NabProvider:
 
     def add_roots(self, requirements: list[Requirement]) -> dict[str, Range[Version]]:
         """Register roots with extras merged before NAB builds its graph."""
+        self._prefetch_available_versions(tuple(requirements))
         root_names = {requirement.canonical_name for requirement in requirements}
         merged = list(requirements)
         for requirement in tuple(merged):
