@@ -64,6 +64,36 @@ migration code: a cache of another version is simply never read."""
 CACHE_VERSION_TAG = f"v{CACHE_VERSION}"
 
 
+def default_worker_count() -> int:
+    """How many threads a machine-sized pool should use.
+
+    Install work is filesystem- and decompression-bound rather than pure
+    Python, so a small multiple of the available cores beats a fixed number
+    on a large machine and avoids oversubscribing a small one. Callers still
+    cap this by how much work they actually have.
+
+    ``CPIP_CONCURRENCY`` overrides it; a value that is not a positive integer
+    is ignored rather than fatal.
+    """
+    override = os.environ.get("CPIP_CONCURRENCY")
+
+    if override:
+        try:
+            requested = int(override)
+
+        except ValueError:
+            requested = 0
+
+        if requested > 0:
+            return requested
+
+    available = getattr(os, "process_cpu_count", None)
+
+    cores = available() if available is not None else os.cpu_count()
+
+    return min(32, (cores or 1) + 4)
+
+
 def ensure_dir(path: str) -> None:
     try:
         os.makedirs(path)

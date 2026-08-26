@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
 from cpip.core.wheel import WheelCandidate
+from cpip.install.wheel_archive_cache import INSTALL_WORKERS
 from cpip.index.candidate_materialization import LazyWheelCandidate
 
 _MATERIALIZATION_WORKERS = 32
@@ -107,7 +108,7 @@ def prepare_install_candidates(
     archive_futures: dict[Future[object], int] = {}
 
     with ThreadPoolExecutor(
-        max_workers=min(4, count),
+        max_workers=min(INSTALL_WORKERS, count),
         thread_name_prefix="cpip-archive",
     ) as archive_pool:
 

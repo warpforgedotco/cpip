@@ -9,6 +9,7 @@ from cpip.core.errors import InstallationError
 from cpip.core.wheel import WheelCandidate
 from cpip.install.target import InstallTarget
 from cpip.install.transaction import InstallTransaction
+from cpip.install.wheel_archive_cache import INSTALL_WORKERS
 from cpip.install.wheel_archive import (
     DestinationCache,
     ResolvedRoots,
@@ -146,7 +147,9 @@ def install_wheels_directly(
             if parallel:
                 from concurrent.futures import ThreadPoolExecutor
 
-                with ThreadPoolExecutor(max_workers=min(4, len(requests))) as pool:
+                with ThreadPoolExecutor(
+                    max_workers=min(INSTALL_WORKERS, len(requests))
+                ) as pool:
                     futures = [
                         pool.submit(install_one, index, request, candidate)
                         for index, (request, candidate) in enumerate(
