@@ -222,14 +222,41 @@ def test_selected_dependency_check_defers_when_every_release_is_blocked(
         CandidateProvider.from_options(no_index=True),
         ResolutionConfig(ignore_installed=True),
     )
-    versions = [Version("1.0.0"), Version("2.0.0")]
+    versions = [Version(f"{index}.0.0") for index in range(1, 17)]
+    adapter._active_decisions["selected"] = Version("1.0.0")
     monkeypatch.setattr(
         adapter,
         "_selected_dependency_rejects",
         lambda package, version: True,
     )
 
-    assert adapter._newest_viable("demo", versions) == Version("2.0.0")
+    assert adapter._newest_viable("demo", versions) == Version("16.0.0")
+
+
+@pytest.mark.parametrize("version_count, expected_calls", [(15, 0), (16, 1)])
+def test_selected_dependency_lookahead_is_reserved_for_wide_domains(
+    version_count: int,
+    expected_calls: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = NabProvider(
+        CandidateProvider.from_options(no_index=True),
+        ResolutionConfig(ignore_installed=True),
+    )
+    adapter._active_decisions["selected"] = Version("1.0.0")
+    calls = 0
+
+    def rejects(package: str, version: Version) -> bool:
+        nonlocal calls
+        calls += 1
+        return False
+
+    monkeypatch.setattr(adapter, "_selected_dependency_rejects", rejects)
+    monkeypatch.setattr(adapter, "_pins_are_impossible", lambda package, version: False)
+    versions = [Version(f"{index}.0.0") for index in range(1, version_count + 1)]
+
+    assert adapter._newest_viable("demo", versions) == versions[-1]
+    assert calls == expected_calls
 
 
 @pytest.mark.parametrize(

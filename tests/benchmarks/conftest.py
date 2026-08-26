@@ -81,14 +81,16 @@ def wrong_package_wheelhouses(
         "apache-beam-dill",
     ):
         wheelhouse = tmp_path_factory.mktemp(f"{name}-wheelhouse")
-        builder = (
-            make_transitive_backtracking_graph
-            if name == "boto3-urllib3"
-            else make_wrong_package_graph
-        )
-        builder(wheelhouse, name, versions=256 if name == "boto3-urllib3" else 64)
+        make_wrong_package_graph(wheelhouse, name, versions=64)
         cases[name] = wheelhouse
     return cases
+
+
+@pytest.fixture(scope="session")
+def transitive_boto3_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    wheelhouse = tmp_path_factory.mktemp("transitive-boto3-wheelhouse")
+    make_transitive_backtracking_graph(wheelhouse, "boto3-urllib3", versions=256)
+    return wheelhouse
 
 
 @pytest.fixture(scope="session")
@@ -117,14 +119,18 @@ def catastrophic_wheelhouses(
         ("apache-beam-dill", 108),
     ):
         wheelhouse = tmp_path_factory.mktemp(f"catastrophic-{name}-wheelhouse")
-        builder = (
-            make_transitive_backtracking_graph
-            if name == "boto3-urllib3"
-            else make_wrong_package_graph
-        )
-        builder(wheelhouse, name, versions=versions)
+        make_wrong_package_graph(wheelhouse, name, versions=versions)
         cases[name] = wheelhouse
     return cases
+
+
+@pytest.fixture(scope="session")
+def catastrophic_transitive_boto3_wheelhouse(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    wheelhouse = tmp_path_factory.mktemp("catastrophic-transitive-boto3-wheelhouse")
+    make_transitive_backtracking_graph(wheelhouse, "boto3-urllib3", versions=2048)
+    return wheelhouse
 
 
 @pytest.fixture(scope="session")

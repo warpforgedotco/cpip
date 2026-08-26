@@ -33,6 +33,7 @@ from cpip.resolution.nab_types import (
 
 _MISSING = object()
 _FORWARD_CHECK_BATCH = 32
+_SELECTED_FORWARD_CHECK_MIN_VERSIONS = 16
 # Two-hop metadata scans only repay their cost on genuinely large root domains.
 _TRANSITIVE_FORWARD_CHECK_MIN_VERSIONS = 256
 
@@ -146,12 +147,23 @@ class NabProvider:
         self, requirements: tuple[Requirement, ...]
     ) -> None:
         """Start catalog requests while the resolver still has independent work."""
+        if not requirements:
+            return
+
+        if isinstance(self.provider, CandidateProvider) and (
+            self.provider.session is None
+            or not self.provider.prefetch_remote_sources
+            or len(requirements) < 2
+        ):
+            return
+
         prefetch = getattr(self.provider, "prefetch_available_versions", None)
         if prefetch is not None:
+            incoming_packages = {_key(requirement) for requirement in requirements}
             direct_packages = {
                 package
                 for package, requirement in self.requirements.items()
-                if requirement.url is not None
+                if package in incoming_packages and requirement.url is not None
             }
             direct_packages.update(
                 _key(requirement)
@@ -168,7 +180,10 @@ class NabProvider:
                     for constraint in self._constraint_for(_key(requirement))
                 )
             )
-            if catalog_requirements:
+            if catalog_requirements and (
+                not isinstance(self.provider, CandidateProvider)
+                or len(catalog_requirements) >= 2
+            ):
                 prefetch(catalog_requirements)
 
     def _versions(self, package: str) -> tuple[Version, ...]:
@@ -499,6 +514,9 @@ class NabProvider:
             return matching[0]
 
         newest_first = sorted(matching, reverse=True)
+        check_selected_dependencies = len(
+            newest_first
+        ) >= _SELECTED_FORWARD_CHECK_MIN_VERSIONS and bool(self._active_decisions)
         check_partial_solution = (
             len(newest_first) >= _TRANSITIVE_FORWARD_CHECK_MIN_VERSIONS
         )
@@ -509,9 +527,9 @@ class NabProvider:
                     package,
                     newest_first[index : index + _FORWARD_CHECK_BATCH],
                 )
-            selected_dependency_rejects = self._selected_dependency_rejects(
-                package,
-                version,
+            selected_dependency_rejects = (
+                check_selected_dependencies
+                and self._selected_dependency_rejects(package, version)
             )
             pins_are_impossible = (
                 not selected_dependency_rejects
@@ -830,10 +848,26 @@ class NabProvider:
         if cached is not _MISSING:
             return cached
 
-        self._prefetch_catalog_candidates(package, (version,))
-        cached = self._catalog_candidate_cache.get(key, _MISSING)
-        if cached is not _MISSING:
-            return cached
+        if isinstance(self.provider, CandidateProvider):
+            requirement = parse_requirement(package)
+            try:
+                records = self.provider.release_candidates(requirement, version)
+            except (CpipError, OSError, ValueError):
+                records = ()
+            if records is not None:
+                candidate = None
+                if len(records) == 1:
+                    try:
+                        candidate = (
+                            self.provider.get_materializer_internal().materialize_one(
+                                requirement,
+                                records[0],
+                            )
+                        )
+                    except (CpipError, OSError, ValueError):
+                        candidate = None
+                self._catalog_candidate_cache[key] = candidate
+                return candidate
 
         candidate = self._catalog_by_version(package).get(version)
         self._catalog_candidate_cache[key] = candidate

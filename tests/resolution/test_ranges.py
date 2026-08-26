@@ -156,6 +156,28 @@ def test_discrete_and_continuous_ranges_use_the_same_semantics() -> None:
     assert not points.is_disjoint(span)
 
 
+def test_point_set_cache_is_reserved_for_large_discrete_ranges() -> None:
+    small = point_range(set(range(15)))
+    large = point_range(set(range(16)))
+    small_cache = small._points
+
+    assert 7 in small
+    assert small.relation(Range.between(0, 20)).is_subset
+    assert small._points is small_cache
+
+    assert 7 in large
+    assert isinstance(large._points, frozenset)
+
+
+def test_large_discrete_binary_operation_converts_both_operands() -> None:
+    small = point_range({1, 3})
+    large = point_range(set(range(0, 32, 2)))
+
+    assert members(small & large) == set()
+    assert isinstance(small._points, frozenset)
+    assert isinstance(large._points, frozenset)
+
+
 def test_empty_range_is_subset_and_disjoint() -> None:
     empty: Range = Range.empty()
     other = Range.between(1, 5)

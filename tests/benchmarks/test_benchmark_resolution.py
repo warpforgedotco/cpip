@@ -161,15 +161,29 @@ def test_uv_wrong_package_backtracking_families(
     def resolve_cases() -> int:
         total = 0
         for name, wheelhouse in wrong_package_wheelhouses.items():
-            requirements = [f"{name}-root"]
-            if name == "boto3-urllib3":
-                requirements.extend(
-                    [f"{name}-shared==1.1.0", f"{name}-left"],
-                )
-            total += resolve(wheelhouse, requirements)
+            total += resolve(wheelhouse, [f"{name}-root"])
         return total
 
     assert benchmark(resolve_cases) == 20
+
+
+def test_transitive_boto3_urllib3_backtracking(
+    benchmark: BenchmarkFixture,
+    transitive_boto3_wheelhouse: Path,
+) -> None:
+    """Track the transitive Boto3 topology without changing an old benchmark."""
+
+    def resolve_case() -> int:
+        return resolve(
+            transitive_boto3_wheelhouse,
+            [
+                "boto3-urllib3-root",
+                "boto3-urllib3-shared==1.1.0",
+                "boto3-urllib3-left",
+            ],
+        )
+
+    assert benchmark(resolve_case) == 4
 
 
 def test_top88_requirements_stress(

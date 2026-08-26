@@ -1,8 +1,8 @@
 """Real-world-scale reproductions of documented catastrophic resolver cases.
 
 ``test_benchmark_resolution.py::test_uv_wrong_package_backtracking_families``
-already models these five incidents at a fast-CI-friendly scale (256 Boto3
-releases, 64 for the exact-pin families; uv issue
+already models these five incidents at a fast-CI-friendly scale (64 releases;
+uv issue
 https://github.com/astral-sh/uv/issues/8157: wrong-package backtracking
 where the resolver locks a recent release of one package, then rejects
 hundreds of releases of a related package before finding the one whose
@@ -18,10 +18,9 @@ tied to this exact urllib3/boto3/botocore pattern
 https://github.com/python-poetry/poetry/pull/7950) are from this
 population, not a toy one.
 
-The Boto3 case preserves the real transitive topology: Boto3 constrains
-Botocore, whose urllib3 requirement conflicts with the root.  The other four
-cases retain the exact-sibling-pin shape from the fast-CI benchmark.  Each
-still resolves to four candidates; only the candidate population changes.
+Separate benchmarks preserve the real transitive Boto3 topology: Boto3
+constrains Botocore, whose urllib3 requirement conflicts with the root. This
+keeps the historical exact-pin benchmark identities stable.
 """
 
 from __future__ import annotations
@@ -54,8 +53,20 @@ def test_catastrophic_boto3_urllib3(
     wheelhouse = catastrophic_wheelhouses["boto3-urllib3"]
 
     def resolve_case() -> int:
+        return resolve(wheelhouse, ["boto3-urllib3-root"])
+
+    assert benchmark(resolve_case) == 4
+
+
+def test_catastrophic_transitive_boto3_urllib3(
+    benchmark: BenchmarkFixture,
+    catastrophic_transitive_boto3_wheelhouse: Path,
+) -> None:
+    """Exercise the large transitive Boto3/Botocore/urllib3 topology."""
+
+    def resolve_case() -> int:
         return resolve(
-            wheelhouse,
+            catastrophic_transitive_boto3_wheelhouse,
             [
                 "boto3-urllib3-root",
                 "boto3-urllib3-shared==1.1.0",

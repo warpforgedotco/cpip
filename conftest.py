@@ -234,6 +234,7 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
                 )
         elif (
             module_path.startswith("tests/benchmarks/")
+            or module_path.startswith("scripts/benchmark/tests/")
             or module_path == "tests/test_workspace_boundaries.py"
         ):
             item.add_marker(pytest.mark.unit)
