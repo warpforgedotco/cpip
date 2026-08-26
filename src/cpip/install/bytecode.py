@@ -26,6 +26,7 @@ from cpip.core.utils import default_worker_count
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Iterable, Iterator
+    from typing import IO
 
 CompileJob = tuple[str, str, str]
 """A module to compile: source path, ``.pyc`` path, and the name to record
@@ -108,7 +109,7 @@ class _Worker:
             process.kill()
 
 
-def _wait_readable(stream: object, timeout: float) -> bool:
+def _wait_readable(stream: IO[str], timeout: float) -> bool:
     """Whether ``stream`` has a line waiting within ``timeout`` seconds.
 
     A worker that wedges must not wedge the install with it.
