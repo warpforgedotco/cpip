@@ -1267,7 +1267,7 @@ index 2035d02..9728321 100644
  class Solution(Generic[PackageType, VersionType]):
      """Pins and dependency relationships from a finished resolution.
  
-@@ -82,6 +80,37 @@ class Solution(Generic[PackageType, VersionType]):
+@@ -82,6 +80,40 @@ class Solution(Generic[PackageType, VersionType]):
      edges: tuple[tuple[PackageType, PackageType], ...]
      roots: tuple[PackageType, ...]
  
@@ -1286,6 +1286,9 @@ index 2035d02..9728321 100644
 +        if getattr(self, "_frozen", False):
 +            raise AttributeError(f"cannot assign to field {name!r}")
 +        object.__setattr__(self, name, value)
++
++    def __delattr__(self, name: str) -> None:
++        raise AttributeError(f"cannot delete field {name!r}")
 +
 +    def __eq__(self, other: object) -> bool:
 +        return type(other) is Solution and (
@@ -1549,7 +1552,7 @@ index e91a66b..cbcc3c1 100644
  class RootRequirement(Generic[PackageType, VersionType]):
      """One requirement as the caller wrote it, kept as its own clause.
  
-@@ -281,6 +276,38 @@ class RootRequirement(Generic[PackageType, VersionType]):
+@@ -281,6 +276,41 @@ class RootRequirement(Generic[PackageType, VersionType]):
      constraint: RangeProtocol[VersionType]
      origin: Any = None
  
@@ -1568,6 +1571,9 @@ index e91a66b..cbcc3c1 100644
 +        if getattr(self, "_frozen", False):
 +            raise AttributeError(f"cannot assign to field {name!r}")
 +        object.__setattr__(self, name, value)
++
++    def __delattr__(self, name: str) -> None:
++        raise AttributeError(f"cannot delete field {name!r}")
 +
 +    def __eq__(self, other: object) -> bool:
 +        return type(other) is RootRequirement and (

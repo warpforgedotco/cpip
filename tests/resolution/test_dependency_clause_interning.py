@@ -8,7 +8,12 @@ import pytest
 from cpip._vendor.nab_resolver import decide, incompat_index, propagate
 from cpip._vendor.nab_resolver.ranges import Range
 from cpip._vendor.nab_resolver.resolver import Resolver, Solution
-from cpip._vendor.nab_resolver.types import Incompatibility, IncompatibilityCause, Term
+from cpip._vendor.nab_resolver.types import (
+    Incompatibility,
+    IncompatibilityCause,
+    RootRequirement,
+    Term,
+)
 
 
 class Provider:
@@ -43,6 +48,16 @@ def test_solution_is_explicitly_unhashable() -> None:
 
     with pytest.raises(TypeError):
         hash(solution)
+
+
+def test_replacement_value_types_reject_attribute_deletion() -> None:
+    solution = Solution(pins={"package": 1}, edges=(), roots=("package",))
+    requirement = RootRequirement("package", Range.singleton(1))
+
+    with pytest.raises(AttributeError, match="cannot delete field 'pins'"):
+        del solution.pins
+    with pytest.raises(AttributeError, match="cannot delete field 'constraint'"):
+        del requirement.constraint
 
 
 def test_range_token_memo_is_bounded() -> None:
