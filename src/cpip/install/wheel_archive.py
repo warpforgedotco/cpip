@@ -83,6 +83,20 @@ def compiled_parts(mapped: tuple[str, ...]) -> tuple[str, ...] | None:
     archive cache writes at fill time and the path the installer materializes
     are all the same one. Scripts under ``bin``/``Scripts`` are not modules
     and are left alone.
+
+    Only the *file name* comes from ``cache_from_source``; the directory is
+    rebuilt from ``mapped``. Two reasons. On Windows it joins with a
+    backslash, so splitting its result on ``/`` yields one part with
+    separators buried in it -- a wrong collision-trie key and a RECORD row
+    that violates the wheel spec. And under ``sys.pycache_prefix`` it answers
+    with a path somewhere else entirely, which an installer must ignore: the
+    bytecode belongs beside the module it was built from.
+
+    The name is taken after the last separator of either kind rather than
+    with ``os.path.basename``, which only recognizes the separators of the
+    platform it is running on. A member name cannot contain a backslash --
+    :func:`validate_member_parts` rejects those -- so any backslash here came
+    from the interpreter, whichever one answered.
     """
     if not mapped[-1].endswith(".py") or mapped[0] in {"bin", "Scripts"}:
         return None
@@ -91,7 +105,9 @@ def compiled_parts(mapped: tuple[str, ...]) -> tuple[str, ...] | None:
 
     compiled = importlib.util.cache_from_source("/".join(mapped))
 
-    return tuple(compiled.split("/"))
+    name = compiled.replace("\\", "/").rpartition("/")[2]
+
+    return (*mapped[:-1], "__pycache__", name)
 
 
 def destination_internal_parts_text(

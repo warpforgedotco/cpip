@@ -191,3 +191,74 @@ def test_shared_resolved_roots_survive_concurrent_misses(
         os.path.join(expected_root, "pkg", f"sub{index}") for index in range(3)
     }
     assert len(directories) == 3
+
+
+class TestCompiledParts:
+    """Where byte-compilation lands, as path parts.
+
+    The parts are used three ways -- as a collision-trie key, as a target
+    preflight path, and joined with "/" into a RECORD row -- so every one of
+    them has to be a single path component.
+    """
+
+    def test_directory_comes_from_the_member_not_the_interpreter(self) -> None:
+        from cpip.install.wheel_archive import compiled_parts, mapped_parts
+
+        parts = compiled_parts(mapped_parts("pkg/sub/mod.py"))
+
+        assert parts is not None
+        assert parts[:3] == ("pkg", "sub", "__pycache__")
+        assert parts[-1].startswith("mod.")
+        assert parts[-1].endswith(".pyc")
+
+    def test_scripts_are_not_compiled(self) -> None:
+        from cpip.install.wheel_archive import compiled_parts, mapped_parts
+
+        assert compiled_parts(mapped_parts("f-1.0.data/scripts/tool.py")) is None
+        assert compiled_parts(mapped_parts("pkg/data.txt")) is None
+
+    def test_windows_separators_never_leak_into_a_part(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``cache_from_source`` joins with a backslash on Windows.
+
+        Splitting its answer on "/" there yields one part with separators
+        buried in it: a wrong trie key, and a RECORD row that violates the
+        wheel spec. Only the file name may come from it.
+        """
+        import importlib.util
+
+        from cpip.install.wheel_archive import compiled_parts, mapped_parts
+
+        monkeypatch.setattr(
+            importlib.util,
+            "cache_from_source",
+            lambda path: "pkg\\sub\\__pycache__\\mod.cpython-312.pyc",
+        )
+
+        parts = compiled_parts(mapped_parts("pkg/sub/mod.py"))
+
+        assert parts == ("pkg", "sub", "__pycache__", "mod.cpython-312.pyc")
+        assert not any("\\" in part or "/" in part for part in parts)
+
+    def test_pycache_prefix_does_not_relocate_installed_bytecode(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Under ``sys.pycache_prefix`` the interpreter answers with a path
+        somewhere else entirely. An installer has to ignore that -- the
+        bytecode belongs beside the module it was built from."""
+        import importlib.util
+
+        from cpip.install.wheel_archive import compiled_parts, mapped_parts
+
+        monkeypatch.setattr(
+            importlib.util,
+            "cache_from_source",
+            lambda path: "/var/pycache/pkg/sub/mod.cpython-312.pyc",
+        )
+
+        parts = compiled_parts(mapped_parts("pkg/sub/mod.py"))
+
+        assert parts == ("pkg", "sub", "__pycache__", "mod.cpython-312.pyc")
