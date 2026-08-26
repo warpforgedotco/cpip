@@ -1462,6 +1462,22 @@ index 2035d02..9728321 100644
          self.clause_contradicted_at.clear()
          self.dependency_index.clear()
          self.solution = PartialSolution(range_type=self.range_type)
+diff --git a/src/cpip/_vendor/nab_resolver/root.py b/src/cpip/_vendor/nab_resolver/root.py
+index d13c593..1735fc6 100644
+--- a/src/cpip/_vendor/nab_resolver/root.py
++++ b/src/cpip/_vendor/nab_resolver/root.py
+@@ -24,9 +24,8 @@ class _RootPackage:
+     def __repr__(self) -> str:
+         return "<root>"
+ 
+-    @override
+-    def __hash__(self) -> int:
+-        return hash("__nab_root__")
++    # Keep object's C-level identity hash. A Python override adds a frame to
++    # every package-keyed lookup involving the virtual root.
+ 
+ 
+ ROOT = _RootPackage()
 diff --git a/src/cpip/_vendor/nab_resolver/types.py b/src/cpip/_vendor/nab_resolver/types.py
 index e91a66b..cbcc3c1 100644
 --- a/src/cpip/_vendor/nab_resolver/types.py
