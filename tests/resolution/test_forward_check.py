@@ -20,6 +20,7 @@ from __future__ import annotations
 import random
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from cpip.core.errors import ResolutionError
@@ -36,6 +37,7 @@ if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect
 
 from benchmark_support import (  # noqa: E402
     make_dependency_graph,
+    make_selected_dependency_graph,
     make_transitive_backtracking_graph,
     make_wheel,
     make_wrong_package_graph,
@@ -112,6 +114,11 @@ def test_forward_check_never_changes_the_answer(
         "_partial_solution_rejects",
         lambda self, package, version: False,
     )
+    monkeypatch.setattr(
+        NabProvider,
+        "_selected_dependency_rejects",
+        lambda self, package, version: False,
+    )
     without_check = resolve(wheelhouse, roots)
 
     assert (with_check is None) == (without_check is None), (
@@ -176,6 +183,93 @@ def test_transitive_conflicts_are_skipped_without_backtracking(tmp_path: Path) -
         "fam-shared": "1.1.0",
     }
     assert result.metrics["nab_conflicts"] <= 2, result.metrics
+
+
+def test_selected_dependency_conflicts_are_skipped_before_backtracking(
+    tmp_path: Path,
+) -> None:
+    """A late parent must not replay a wide graph for every blocked release."""
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    make_selected_dependency_graph(wheelhouse)
+
+    reset_caches()
+    engine = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    result = engine.resolve(["selected-application"])
+    selected = {
+        candidate.name: str(candidate.version) for candidate in result.candidates
+    }
+
+    assert selected["selected-parent"] == "1.1.0"
+    assert selected["selected-shared"] == "1.0.0"
+    assert len(selected) == 99
+    assert result.metrics["nab_conflicts"] <= 1, result.metrics
+    assert result.metrics["nab_rounds"] <= 110, result.metrics
+
+
+def test_selected_dependency_check_defers_when_every_release_is_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lookahead must leave PubGrub free to backtrack the selected package."""
+    adapter = NabProvider(
+        CandidateProvider.from_options(no_index=True),
+        ResolutionConfig(ignore_installed=True),
+    )
+    versions = [Version("1.0.0"), Version("2.0.0")]
+    monkeypatch.setattr(
+        adapter,
+        "_selected_dependency_rejects",
+        lambda package, version: True,
+    )
+
+    assert adapter._newest_viable("demo", versions) == Version("2.0.0")
+
+
+@pytest.mark.parametrize(
+    "dependency, source_kind, expected",
+    [
+        ("selected-shared<2; extra == 'feature'", "wheel", True),
+        ("selected-shared<2; extra == 'other'", "wheel", False),
+        (
+            "selected-shared @ https://example.invalid/shared.whl",
+            "wheel",
+            False,
+        ),
+        ("selected-shared<2", "sdist", False),
+    ],
+)
+def test_selected_dependency_check_respects_uncertain_sources_and_markers(
+    dependency: str,
+    source_kind: str,
+    expected: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = NabProvider(
+        CandidateProvider.from_options(no_index=True),
+        ResolutionConfig(ignore_installed=True),
+    )
+    adapter.requirements["parent"] = parse_requirement("parent[feature]")
+    adapter._active_decisions = {"selected-shared": Version("2.0.0")}
+    candidate = SimpleNamespace(
+        source_kind=source_kind,
+        dependencies=(parse_requirement(dependency),),
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_catalog_candidate",
+        lambda package, version: candidate,
+    )
+
+    assert (
+        adapter._selected_dependency_rejects("parent", Version("1.0.0"))
+        is expected
+    )
 
 
 @pytest.mark.parametrize("seed", range(12))

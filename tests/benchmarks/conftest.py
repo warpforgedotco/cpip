@@ -17,6 +17,7 @@ from benchmark_support import (
     make_nab_deep_backjump_family,
     make_nab_pip_backtracking_family,
     make_nab_smoke_fixture,
+    make_selected_dependency_graph,
     make_sdist,
     make_source_tree,
     make_stress_graph,
@@ -143,6 +144,15 @@ def candidate_scan_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
             f"1.{index}.0",
             requires_python=">=99" if index >= 96 else ">=3.9",
         )
+    return wheelhouse
+
+
+@pytest.fixture(scope="session")
+def selected_dependency_wheelhouse(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    wheelhouse = tmp_path_factory.mktemp("selected-dependency-wheelhouse")
+    make_selected_dependency_graph(wheelhouse)
     return wheelhouse
 
 

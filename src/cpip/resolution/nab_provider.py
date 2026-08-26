@@ -449,7 +449,7 @@ class NabProvider:
         )
 
     def _newest_viable(self, package: str, matching: list[Version]) -> Version:
-        """Pick the newest version whose exact pins are not already impossible.
+        """Pick the newest version not disproved by available dependency facts.
 
         The resolver has no lookahead: it decides a version, decides its
         dependencies, and only then discovers that two of them pin the same
@@ -462,6 +462,11 @@ class NabProvider:
         Looking one level past the pins is enough to rule those out up front.
         Restores the behavior of ``preflight_exact_dependencies``, which the
         deleted local-wheelhouse kernel ran for exactly this reason.
+
+        A candidate can also be disproved when one of its direct dependencies
+        excludes a version already selected in the current partial solution.
+        Detecting that here avoids discarding and replaying every unrelated
+        decision between the dependency and this late candidate.
 
         Rejecting a satisfiable version would silently return an older
         solution, so this defers to the resolver on anything it cannot decide
@@ -483,16 +488,62 @@ class NabProvider:
                     package,
                     newest_first[index : index + _FORWARD_CHECK_BATCH],
                 )
-            pins_are_impossible = self._pins_are_impossible(package, version)
+            selected_dependency_rejects = self._selected_dependency_rejects(
+                package,
+                version,
+            )
+            pins_are_impossible = (
+                not selected_dependency_rejects
+                and self._pins_are_impossible(package, version)
+            )
             partial_solution_rejects = (
-                not pins_are_impossible
+                not selected_dependency_rejects
+                and not pins_are_impossible
                 and check_partial_solution
                 and (self._partial_solution_rejects(package, version))
             )
-            if not pins_are_impossible and not partial_solution_rejects:
+            if (
+                not selected_dependency_rejects
+                and not pins_are_impossible
+                and not partial_solution_rejects
+            ):
                 return version
             rejected_any = True
         return newest_first[0]
+
+    def _selected_dependency_rejects(
+        self,
+        package: str,
+        version: Version,
+    ) -> bool:
+        """Whether this wheel excludes an exact version already selected.
+
+        This is a one-hop proof only. Unknown metadata and URL dependencies
+        remain possible, and rejecting every release makes ``_newest_viable``
+        defer to PubGrub so an earlier decision can still be backtracked.
+        """
+        if not self._active_decisions:
+            return False
+
+        candidate = self._catalog_candidate(package, version)
+        dependencies = None if candidate is None else _dependencies_or_none(candidate)
+        if dependencies is None or getattr(candidate, "source_kind", None) != "wheel":
+            return False
+
+        extras = self.requirements[package].extras
+        for dependency in dependencies:
+            if not marker_applies(dependency.marker, extras=extras):
+                continue
+            if dependency.url is not None:
+                continue
+
+            selected = self._active_decisions.get(_key(dependency))
+            if selected is not None and not dependency.specifier.contains(
+                selected,
+                allow_prereleases=True,
+            ):
+                return True
+        return False
 
     def _partial_solution_rejects(self, package: str, version: Version) -> bool:
         """Whether active constraints make a candidate transitively impossible.

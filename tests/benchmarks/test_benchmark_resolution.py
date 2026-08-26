@@ -90,6 +90,18 @@ def test_resolve_with_backtracking(
     assert benchmark(resolve_conflicting) > 0
 
 
+def test_selected_dependency_lookahead(
+    benchmark: BenchmarkFixture,
+    selected_dependency_wheelhouse: Path,
+) -> None:
+    """Avoid replaying a wide graph for candidates blocked by a decision."""
+
+    def resolve_selected_conflict() -> int:
+        return resolve(selected_dependency_wheelhouse, ["selected-application"])
+
+    assert benchmark(resolve_selected_conflict) == 99
+
+
 def test_uv_wrong_package_backtracking_families(
     benchmark: BenchmarkFixture,
     wrong_package_wheelhouses: dict[str, Path],

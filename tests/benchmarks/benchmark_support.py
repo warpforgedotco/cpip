@@ -299,6 +299,40 @@ def make_transitive_backtracking_graph(
     )
 
 
+def make_selected_dependency_graph(
+    wheelhouse: Path,
+    *,
+    branches: int = 96,
+    versions: int = 32,
+) -> None:
+    """Build a wide graph with a late candidate conflicting with a decision."""
+    make_wheel(wheelhouse, "selected-shared", "1.0.0")
+    make_wheel(wheelhouse, "selected-shared", "2.0.0")
+
+    for index in range(branches):
+        make_wheel(wheelhouse, f"selected-branch-{index}", "1.0.0")
+
+    for index in range(1, versions + 1):
+        shared = "1.0.0" if index == 1 else "2.0.0"
+        make_wheel(
+            wheelhouse,
+            "selected-parent",
+            f"1.{index}.0",
+            requires=[f"selected-shared=={shared}"],
+        )
+
+    make_wheel(
+        wheelhouse,
+        "selected-application",
+        "1.0.0",
+        requires=[
+            "selected-shared==1.0.0",
+            *(f"selected-branch-{index}" for index in range(branches)),
+            "selected-parent",
+        ],
+    )
+
+
 def make_nab_smoke_fixture(wheelhouse: Path) -> None:
     """Build the explicit packages from nab's offline deterministic smoke suite.
 
