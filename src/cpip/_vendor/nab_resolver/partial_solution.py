@@ -461,7 +461,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             if package in self._positive_ranges:
                 new_range = self._positive_ranges[package] & constraint
             else:
-                new_range = self._range_type.full() & constraint
+                new_range = constraint
             self._freeze_ranges(package)
             self._positive_ranges[package] = new_range
             if package not in self._decided_versions:
@@ -471,7 +471,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             if package in self._negative_ranges:
                 new_range = self._negative_ranges[package] | constraint
             else:
-                new_range = self._range_type.empty() | constraint
+                new_range = constraint
             self._negative_ranges[package] = new_range
 
         self._refresh_effective_range(package)
