@@ -243,8 +243,6 @@ class InstallTransaction:
             append_created = self.created_internal.append
             use_directory_fds = os.open in os.supports_dir_fd
             directory_fds: dict[str, int] = {}
-            umask = os.umask(0o777)
-            os.umask(umask)
             try:
                 for item in self.staged_internal:
                     backup_if_needed(item.destination_text)
@@ -287,7 +285,7 @@ class InstallTransaction:
                             0o666 if item.mode is None else item.mode,
                             dir_fd=directory_fd,
                         )
-                        if item.mode is not None and item.mode & umask:
+                        if item.mode is not None:
                             chmod(item.destination_text, item.mode)
                 for path in sorted(self.deletions):
                     self.backup_if_needed(path)

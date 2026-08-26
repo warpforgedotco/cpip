@@ -206,10 +206,7 @@ def test_staged_contents_mode_exact_under_permissive_umask(
     tmp_path: Path,
     mode: int,
 ) -> None:
-    """With umask 022 neither 0o644 nor 0o755 loses any bits at creation,
-    so commit's chmod-skip path is the one that must still produce the
-    exact requested mode on disk.
-    """
+    """Explicit modes are reproduced exactly under a permissive umask."""
     destination = tmp_path / "demo.py"
     old_umask = os.umask(0o022)
     try:
@@ -224,9 +221,7 @@ def test_staged_contents_mode_exact_under_permissive_umask(
 
 @pytest.mark.skipif(os.name == "nt", reason="os.chmod ignores mode bits on Windows")
 def test_staged_contents_mode_exact_under_stripping_umask(tmp_path: Path) -> None:
-    """umask 077 strips group/other bits at creation, so the follow-up
-    chmod must run to restore the full requested mode.
-    """
+    """Explicit modes are restored after a restrictive umask masks creation."""
     destination = tmp_path / "demo.sh"
     old_umask = os.umask(0o077)
     try:
@@ -239,6 +234,24 @@ def test_staged_contents_mode_exact_under_stripping_umask(tmp_path: Path) -> Non
         os.umask(old_umask)
 
     assert stat_mode(destination) == 0o755
+
+
+def test_commit_does_not_read_process_umask(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "demo.txt"
+
+    def unexpected_umask(_mode: int) -> int:
+        raise AssertionError("commit must not mutate the process-global umask")
+
+    monkeypatch.setattr(transaction.os, "umask", unexpected_umask)
+
+    with InstallTransaction() as install_transaction:
+        install_transaction.add_contents(destination, b"payload", mode=0o644)
+        install_transaction.commit()
+
+    assert destination.read_bytes() == b"payload"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="os.chmod ignores mode bits on Windows")
