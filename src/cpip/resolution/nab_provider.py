@@ -1289,7 +1289,11 @@ class NabProvider:
         if memo is not None and memo[0] is requirement and memo[1] == conflicts:
             return memo[2]
 
-        priority = (len(self._versions(package)), -conflicts, package)
+        # A package that has already caused a backjump is more valuable than
+        # an unrelated package with a smaller catalog.  Keeping catalog size
+        # first makes a deep backjump replay every one-release package before
+        # returning to the decision that can actually advance the solve.
+        priority = (-conflicts, len(self._versions(package)), package)
         self._priority_memo[package] = (requirement, conflicts, priority)
         return priority
 

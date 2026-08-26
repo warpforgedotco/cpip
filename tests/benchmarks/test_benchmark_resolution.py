@@ -8,12 +8,20 @@ touch the network.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from benchmark_support import cold_metadata_cache_dir, reset_caches
+from cpip._vendor.nab_resolver import decide
+from cpip._vendor.nab_resolver.ranges import Range
+from cpip._vendor.nab_resolver.resolver import Resolver
+from cpip._vendor.nab_resolver.types import Incompatibility, IncompatibilityCause
 from cpip.core.errors import ResolutionError
+from cpip.core.packaging import parse_requirement
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.files import parse_requirements
+from cpip.resolution.models import ResolutionConfig
+from cpip.resolution.nab_provider import NabProvider
 from pytest_codspeed import BenchmarkFixture
 
 
@@ -100,6 +108,48 @@ def test_selected_dependency_lookahead(
         return resolve(selected_dependency_wheelhouse, ["selected-application"])
 
     assert benchmark(resolve_selected_conflict) == 99
+
+
+def test_conflict_activity_avoids_wide_replay(
+    benchmark: BenchmarkFixture,
+    conflict_priority_wheelhouse: Path,
+) -> None:
+    """Choose the conflict package before replaying a wide stable suffix."""
+    reset_caches()
+    candidate_provider = CandidateProvider.from_options(
+        find_links=[str(conflict_priority_wheelhouse)],
+        no_index=True,
+    )
+    provider = NabProvider(
+        candidate_provider,
+        ResolutionConfig(
+            find_links=(str(conflict_priority_wheelhouse),),
+            ignore_installed=True,
+        ),
+    )
+    resolver: Resolver[str, Any] = Resolver(provider)
+    cause: Incompatibility[str, Any] = Incompatibility(
+        [], IncompatibilityCause.DEPENDENCY
+    )
+    packages = [
+        "conflict-priority-hot",
+        *(f"conflict-priority-replay-{index}" for index in range(96)),
+    ]
+    for package in packages:
+        provider.requirements[package] = parse_requirement(package)
+        resolver.solution.derive(
+            package,
+            Range.full(),
+            positive=True,
+            cause=cause,
+        )
+        provider._versions(package)
+
+    resolver.stats.package_conflict_counts["conflict-priority-hot"] += 1
+
+    assert benchmark(decide.choose_package_to_decide, resolver) == (
+        "conflict-priority-hot"
+    )
 
 
 def test_uv_wrong_package_backtracking_families(

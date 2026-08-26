@@ -157,6 +157,17 @@ def selected_dependency_wheelhouse(
 
 
 @pytest.fixture(scope="session")
+def conflict_priority_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Catalogs for the wide post-backjump decision-order benchmark."""
+    wheelhouse = tmp_path_factory.mktemp("conflict-priority-wheelhouse")
+    for index in range(128):
+        make_wheel(wheelhouse, "conflict-priority-hot", f"1.{index}.0")
+    for index in range(96):
+        make_wheel(wheelhouse, f"conflict-priority-replay-{index}", "1.0.0")
+    return wheelhouse
+
+
+@pytest.fixture(scope="session")
 def metadata_variation_wheels(tmp_path_factory: pytest.TempPathFactory) -> list[Path]:
     wheelhouse = tmp_path_factory.mktemp("metadata-variation-wheelhouse")
     wheels = []
