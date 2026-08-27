@@ -5,6 +5,7 @@ opens when something is, and never changes what gets resolved."""
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -146,3 +147,59 @@ def test_the_window_does_not_change_what_is_resolved(
     without_window = resolve()
 
     assert with_window == without_window
+
+
+@pytest.mark.parametrize(
+    "target, error",
+    [
+        ("release_candidates", KeyError("nope")),
+        ("get_materializer_internal", RuntimeError("nope")),
+    ],
+)
+def test_a_failing_lookahead_does_not_fail_the_resolve(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+    error: Exception,
+) -> None:
+    """Speculation is discardable, so nothing it raises may reach the resolver."""
+    wheelhouse = tmp_path / "wheels"
+    wheelhouse.mkdir()
+    make_transitive_backtracking_graph(wheelhouse, "boom", versions=64)
+
+    def resolve() -> dict[str, str]:
+        reset_caches()
+        engine = ResolutionEngine(
+            provider=CandidateProvider.from_options(
+                find_links=[str(wheelhouse)],
+                no_index=True,
+            ),
+            ignore_installed=True,
+        )
+        return {
+            c.name: str(c.version) for c in engine.resolve(["boom-root"]).candidates
+        }
+
+    expected = resolve()
+
+    inside = threading.local()
+    real_window = NabProvider._prefetch_descent_window
+
+    def window(self: NabProvider, package: str, newest_first: Any, index: int) -> None:
+        inside.on = True
+        try:
+            real_window(self, package, newest_first, index)
+        finally:
+            inside.on = False
+
+    real_target = getattr(CandidateProvider, target)
+
+    def failing(*args: Any, **kwargs: Any) -> Any:
+        if getattr(inside, "on", False):
+            raise error
+        return real_target(*args, **kwargs)
+
+    monkeypatch.setattr(NabProvider, "_prefetch_descent_window", window)
+    monkeypatch.setattr(CandidateProvider, target, failing)
+
+    assert resolve() == expected

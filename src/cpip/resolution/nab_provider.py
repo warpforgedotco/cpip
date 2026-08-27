@@ -610,6 +610,21 @@ class NabProvider:
 
         size = min(_DESCENT_PREFETCH_WINDOW, 1 << min(attempts - 1, 5))
 
+        try:
+            self._start_descent_window(package, newest_first, index, size)
+
+        except Exception:  # noqa: BLE001 - lookahead must not fail a resolve
+            # Nothing here is needed for correctness: whatever it would have
+            # warmed is fetched on demand by the step that reaches it.
+            pass
+
+    def _start_descent_window(
+        self,
+        package: str,
+        newest_first: list[Version],
+        index: int,
+        size: int,
+    ) -> None:
         window = newest_first[index + 1 : index + 1 + size]
 
         if not window:
@@ -633,11 +648,7 @@ class NabProvider:
 
             self._descent_prefetched.add(key)
 
-            try:
-                found = self.provider.release_candidates(requirement, version)
-
-            except (CpipError, OSError, ValueError):
-                continue
+            found = self.provider.release_candidates(requirement, version)
 
             if found:
                 records.extend(found)
