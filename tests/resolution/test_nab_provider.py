@@ -98,6 +98,11 @@ class IndexedFakeProvider(CandidateProvider):
         return SimpleNamespace(materialize=lambda requirement, records: records)
 
 
+class EmptyConstraints(tuple):
+    def __iter__(self):
+        raise AssertionError("empty constraints do not need filtering")
+
+
 def test_constraints_are_indexed_once(monkeypatch: pytest.MonkeyPatch) -> None:
     marker_calls = 0
     marker_applies = cpip.resolution.nab_provider.marker_applies
@@ -208,6 +213,11 @@ def test_eligible_versions_only_checks_prerelease_policy_for_prereleases(
         return False
 
     monkeypatch.setattr(adapter, "_allows", deny)
+    monkeypatch.setattr(
+        adapter,
+        "_constraint_for",
+        lambda _package: EmptyConstraints(),
+    )
 
     assert adapter._eligible_versions(package) == (stable,)
     assert calls == [("dep", prerelease)]
@@ -229,6 +239,11 @@ def test_choose_version_only_checks_prerelease_policy_for_prereleases(
         return False
 
     monkeypatch.setattr(adapter, "_allows", deny)
+    monkeypatch.setattr(
+        adapter,
+        "_constraint_for",
+        lambda _package: EmptyConstraints(),
+    )
 
     assert adapter.choose_version(package, version_range) == stable
     assert calls == [("dep", prerelease)]
@@ -247,6 +262,11 @@ def test_forward_check_only_checks_prerelease_policy_for_prereleases(
         return False
 
     monkeypatch.setattr(adapter, "_allows", deny)
+    monkeypatch.setattr(
+        adapter,
+        "_constraint_for",
+        lambda _package: EmptyConstraints(),
+    )
     monkeypatch.setattr(
         adapter,
         "_matching_catalog_versions",
@@ -269,10 +289,6 @@ def test_forward_check_only_checks_prerelease_policy_for_prereleases(
 def test_choose_version_does_not_iterate_empty_constraints(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class EmptyConstraints(tuple):
-        def __iter__(self):
-            raise AssertionError("empty constraints do not need filtering")
-
     adapter = NabProvider(
         FakeProvider(),
         ResolutionConfig(ignore_installed=True),
@@ -306,17 +322,40 @@ def test_dependency_constraints_are_looked_up_once_per_dependency(
     adapter.choose_version(root, root_range)
     monkeypatch.setattr(adapter, "_prefetch_available_versions", lambda _: None)
     lookups = []
-    constraint_for = adapter._constraint_for
 
     def count_lookup(package: str):
         lookups.append(package)
-        return constraint_for(package)
+        return EmptyConstraints()
 
     monkeypatch.setattr(adapter, "_constraint_for", count_lookup)
 
-    adapter.get_dependencies(root, Version("1"))
+    dependencies = adapter.get_dependencies(root, Version("1"))
 
     assert lookups == ["dep"]
+    assert dependencies["dep"] == Range.singleton(Version("1"))
+
+
+def test_exact_dependency_does_not_iterate_empty_constraints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FakeProvider()
+    provider.candidates[("app", Version("1"))].dependencies = (
+        parse_requirement("dep==1"),
+    )
+    adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
+    root, root_range = adapter.add_root(parse_requirement("app"))
+    adapter.choose_version(root, root_range)
+    monkeypatch.setattr(adapter, "_prefetch_available_versions", lambda _: None)
+    monkeypatch.setattr(
+        adapter,
+        "_constraint_for",
+        lambda _package: EmptyConstraints(),
+    )
+
+    dependencies = adapter.get_dependencies(root, Version("1"))
+
+    assert dependencies["dep"] == Range.singleton(Version("1"))
+    assert adapter.requirements["dep"].url is None
 
 
 def test_exact_transitive_dependency_skips_catalog_enumeration() -> None:

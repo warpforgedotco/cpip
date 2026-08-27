@@ -278,6 +278,13 @@ class NabProvider:
         requirement = self.requirements[package]
         constraints = self._constraint_for(package)
         versions = self._versions(package)
+        if not constraints:
+            return tuple(
+                version
+                for version in versions
+                if requirement.specifier.contains(version, allow_prereleases=True)
+                and (not version.is_prerelease or self._allows(package, version))
+            )
         return tuple(
             version
             for version in versions
@@ -777,20 +784,29 @@ class NabProvider:
         """Whether every selectable child release conflicts with active ranges."""
         child_name = _key(dependency)
         constraints = self._constraint_for(child_name)
-        matching = [
-            version
-            for version in self._matching_catalog_versions(dependency)
-            if (active is None or version in active)
-            and (not version.is_prerelease or self._allows(child_name, version))
-            and all(
-                constraint.url is None
-                and constraint.specifier.contains(
-                    version,
-                    allow_prereleases=True,
+        catalog_versions = self._matching_catalog_versions(dependency)
+        if constraints:
+            matching = [
+                version
+                for version in catalog_versions
+                if (active is None or version in active)
+                and (not version.is_prerelease or self._allows(child_name, version))
+                and all(
+                    constraint.url is None
+                    and constraint.specifier.contains(
+                        version,
+                        allow_prereleases=True,
+                    )
+                    for constraint in constraints
                 )
-                for constraint in constraints
-            )
-        ]
+            ]
+        else:
+            matching = [
+                version
+                for version in catalog_versions
+                if (active is None or version in active)
+                and (not version.is_prerelease or self._allows(child_name, version))
+            ]
         if not matching:
             return False
 
@@ -1389,14 +1405,16 @@ class NabProvider:
                     )
                     dependency_key = _key(dependency)
             dependency_constraints = self._constraint_for(dependency_key)
-            dependency_url = next(
-                (
-                    constraint.url
-                    for constraint in dependency_constraints
-                    if constraint.url is not None
-                ),
-                dependency.url,
-            )
+            dependency_url = dependency.url
+            if dependency_constraints:
+                dependency_url = next(
+                    (
+                        constraint.url
+                        for constraint in dependency_constraints
+                        if constraint.url is not None
+                    ),
+                    dependency.url,
+                )
             if dependency_url != dependency.url:
                 dependency = Requirement(
                     name=dependency.name,
@@ -1445,15 +1463,22 @@ class NabProvider:
                 )
                 continue
             allowed = self._versions(dependency_key)
-            selected = [
-                candidate
-                for candidate in allowed
-                if dependency.specifier.contains(candidate, allow_prereleases=True)
-                and all(
-                    constraint.specifier.contains(candidate, allow_prereleases=True)
-                    for constraint in dependency_constraints
-                )
-            ]
+            if dependency_constraints:
+                selected = [
+                    candidate
+                    for candidate in allowed
+                    if dependency.specifier.contains(candidate, allow_prereleases=True)
+                    and all(
+                        constraint.specifier.contains(candidate, allow_prereleases=True)
+                        for constraint in dependency_constraints
+                    )
+                ]
+            else:
+                selected = [
+                    candidate
+                    for candidate in allowed
+                    if dependency.specifier.contains(candidate, allow_prereleases=True)
+                ]
             dependency_range = self._finite_range(selected)
             previous = dependencies.get(dependency_key)
             dependencies[dependency_key] = (
