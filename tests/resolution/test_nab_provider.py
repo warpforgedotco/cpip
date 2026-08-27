@@ -152,6 +152,120 @@ def test_selected_release_materializes_without_catalog_rescan() -> None:
     assert provider.release_calls == 1
 
 
+@pytest.mark.parametrize(
+    "version_text, allow_prereleases, policy, expected, expected_calls",
+    [
+        ("1", False, False, True, []),
+        ("1", True, False, True, []),
+        ("2a1", True, False, True, []),
+        ("2a1", False, "absent", True, []),
+        ("2a1", False, None, True, ["dep"]),
+        ("2a1", False, True, True, ["dep"]),
+        ("2a1", False, False, False, ["dep"]),
+    ],
+)
+def test_prerelease_policy_truth_table(
+    version_text: str,
+    allow_prereleases: bool,
+    policy: bool | None | str,
+    expected: bool,
+    expected_calls: list[str],
+) -> None:
+    provider = FakeProvider()
+    calls: list[str] = []
+    if policy != "absent":
+
+        def allows_prereleases(package: str) -> bool | None:
+            calls.append(package)
+            assert policy is None or isinstance(policy, bool)
+            return policy
+
+        provider.release_control = SimpleNamespace(
+            allows_prereleases=allows_prereleases
+        )
+    adapter = NabProvider(
+        provider,
+        ResolutionConfig(allow_prereleases=allow_prereleases),
+    )
+
+    assert adapter._allows("dep", Version(version_text)) is expected
+    assert calls == expected_calls
+
+
+def test_eligible_versions_only_checks_prerelease_policy_for_prereleases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FakeProvider()
+    stable = Version("1")
+    prerelease = Version("2a1")
+    provider.versions["dep"] = (stable, prerelease)
+    adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
+    package, _ = adapter.add_root(parse_requirement("dep"))
+    calls: list[tuple[str, Version]] = []
+
+    def deny(package: str, version: Version) -> bool:
+        calls.append((package, version))
+        return False
+
+    monkeypatch.setattr(adapter, "_allows", deny)
+
+    assert adapter._eligible_versions(package) == (stable,)
+    assert calls == [("dep", prerelease)]
+
+
+def test_choose_version_only_checks_prerelease_policy_for_prereleases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FakeProvider()
+    stable = Version("1")
+    prerelease = Version("2a1")
+    provider.versions["dep"] = (stable, prerelease)
+    adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
+    package, version_range = adapter.add_root(parse_requirement("dep"))
+    calls: list[tuple[str, Version]] = []
+
+    def deny(package: str, version: Version) -> bool:
+        calls.append((package, version))
+        return False
+
+    monkeypatch.setattr(adapter, "_allows", deny)
+
+    assert adapter.choose_version(package, version_range) == stable
+    assert calls == [("dep", prerelease)]
+
+
+def test_forward_check_only_checks_prerelease_policy_for_prereleases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = NabProvider(FakeProvider(), ResolutionConfig(ignore_installed=True))
+    stable = Version("1")
+    prerelease = Version("2a1")
+    calls: list[tuple[str, Version]] = []
+
+    def deny(package: str, version: Version) -> bool:
+        calls.append((package, version))
+        return False
+
+    monkeypatch.setattr(adapter, "_allows", deny)
+    monkeypatch.setattr(
+        adapter,
+        "_matching_catalog_versions",
+        lambda _dependency: (stable, prerelease),
+    )
+    monkeypatch.setattr(adapter, "_prefetch_catalog_candidates", lambda *_args: None)
+    monkeypatch.setattr(adapter, "_catalog_candidate", lambda *_args: object())
+    monkeypatch.setattr(
+        adapter,
+        "_candidate_conflicts_with_active",
+        lambda *_args, **_kwargs: False,
+    )
+
+    assert not adapter._dependency_domain_is_blocked(
+        parse_requirement("dep"), active=None
+    )
+    assert calls == [("dep", prerelease)]
+
+
 def test_choose_version_does_not_iterate_empty_constraints(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

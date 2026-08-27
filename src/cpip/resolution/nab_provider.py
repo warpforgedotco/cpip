@@ -282,7 +282,7 @@ class NabProvider:
             version
             for version in versions
             if requirement.specifier.contains(version, allow_prereleases=True)
-            and self._allows(package, version)
+            and (not version.is_prerelease or self._allows(package, version))
             and all(
                 constraint.specifier.contains(version, allow_prereleases=True)
                 for constraint in constraints
@@ -352,7 +352,8 @@ class NabProvider:
         matching = [
             version
             for version in versions
-            if version in version_range and self._allows(package, version)
+            if version in version_range
+            and (not version.is_prerelease or self._allows(package, version))
         ]
         control = getattr(self.provider, "release_control", None)
         if not self.allow_prereleases and (
@@ -780,7 +781,7 @@ class NabProvider:
             version
             for version in self._matching_catalog_versions(dependency)
             if (active is None or version in active)
-            and self._allows(child_name, version)
+            and (not version.is_prerelease or self._allows(child_name, version))
             and all(
                 constraint.url is None
                 and constraint.specifier.contains(
