@@ -215,6 +215,40 @@ def test_undecided_parent_dispatches_every_dependency_clause() -> None:
     )
 
 
+def test_unit_propagation_reuses_the_classified_assignment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = resolver()
+    excluded = Range.singleton(2)
+    cause: Incompatibility[Any, Any] = Incompatibility(
+        [], IncompatibilityCause.DEPENDENCY
+    )
+    candidate.solution.derive("gate", Range.full(), positive=True, cause=cause)
+    candidate.solution.derive("gate", excluded, positive=False, cause=cause)
+    incompatibility = Incompatibility(
+        [
+            Term("target", excluded, positive=True),
+            Term("gate", excluded, positive=False),
+        ],
+        IncompatibilityCause.DEPENDENCY,
+    )
+    incompat_index.add_incompatibility(candidate, incompatibility)
+
+    get_calls: list[str] = []
+    solution_get = candidate.solution.get
+
+    def counting_get(package: str) -> Range | None:
+        get_calls.append(package)
+        return solution_get(package)
+
+    monkeypatch.setattr(candidate.solution, "get", counting_get)
+
+    assert propagate.unit_propagation(candidate, "gate") is None
+    assert solution_get("target") == ~excluded
+    assert candidate.stats.derivations == 1
+    assert get_calls == ["target", "gate", "target", "target", "target"]
+
+
 def test_widened_merge_promotes_exact_clause_to_fallback() -> None:
     candidate = resolver()
     dependency_range = Range.at_least(1)

@@ -150,6 +150,7 @@ def _unit_propagation_core(
             incompatibility = incompatibilities[incompatibility_index]
 
             undetermined_term = None
+            undetermined_assignment: RangeProtocol[Any] | None = None
             conflict = True
             for term in incompatibility.terms:
                 assignment = solution_get(term.package)
@@ -225,6 +226,7 @@ def _unit_propagation_core(
                     undetermined_term = None
                     break
                 undetermined_term = term
+                undetermined_assignment = assignment
 
             if undetermined_term is None:
                 if conflict:
@@ -233,7 +235,7 @@ def _unit_propagation_core(
 
             negated_package = undetermined_term.package
             negated_positive = not undetermined_term._positive  # noqa: SLF001
-            range_before = solution_get(negated_package)
+            range_before = undetermined_assignment
             derive(
                 negated_package,
                 undetermined_term.constraint,
