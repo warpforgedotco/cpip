@@ -123,21 +123,53 @@ def _unit_propagation_core(
             initial_groups = ()
         else:
             groups = _related_incompatibility_groups(resolver, package)
-        nonempty = tuple(group for group in groups if group)
-        if not nonempty:
-            continue
-        if len(nonempty) == 1:
-            related_indices = nonempty[0]
-        elif len(nonempty) == 2:
-            left, right = nonempty
-            if left[-1] < right[0]:
-                related_indices = chain(left, right)
-            elif right[-1] < left[0]:
-                related_indices = chain(right, left)
+        # Production dispatch returns two or three groups.  Keep that path
+        # allocation-free while retaining arbitrary arity for private callers.
+        group_count = len(groups)
+        if group_count not in (2, 3):
+            nonempty = tuple(group for group in groups if group)
+            if not nonempty:
+                continue
+            if len(nonempty) == 1:
+                related_indices = nonempty[0]
+            elif len(nonempty) == 2:
+                left = nonempty[0]
+                right = nonempty[1]
+                if left[-1] < right[0]:
+                    related_indices = chain(left, right)
+                elif right[-1] < left[0]:
+                    related_indices = chain(right, left)
+                else:
+                    related_indices = merge(left, right)
             else:
-                related_indices = merge(left, right)
+                related_indices = merge(*nonempty)
         else:
-            related_indices = merge(*nonempty)
+            first = groups[0]
+            second = groups[1]
+            third: Sequence[int] = groups[2] if group_count == 3 else ()
+            if first and second and third:
+                related_indices = merge(first, second, third)
+            else:
+                if first:
+                    left = first
+                    right = second if second else third
+                elif second:
+                    left = second
+                    right = third
+                else:
+                    left = third
+                    right = ()
+
+                if not left:
+                    continue
+                if not right:
+                    related_indices = left
+                elif left[-1] < right[0]:
+                    related_indices = chain(left, right)
+                elif right[-1] < left[0]:
+                    related_indices = chain(right, left)
+                else:
+                    related_indices = merge(left, right)
 
         previous_index = -1
         for incompatibility_index in related_indices:

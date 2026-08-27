@@ -237,6 +237,67 @@ def test_undecided_parent_dispatches_every_dependency_clause() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "groups, expected",
+    [
+        (((), ()), ()),
+        (((0, 2), ()), (0, 2)),
+        (((), (1, 3)), (1, 3)),
+        (((0, 1), (2, 3)), (0, 1, 2, 3)),
+        (((2, 3), (0, 1)), (0, 1, 2, 3)),
+        (((0, 2, 4), (1, 2, 3)), (0, 1, 2, 3, 4)),
+        (((), (), ()), ()),
+        (((0, 2), (), ()), (0, 2)),
+        (((), (1, 3), ()), (1, 3)),
+        (((), (), (2, 4)), (2, 4)),
+        (((0, 2), (1, 3), ()), (0, 1, 2, 3)),
+        (((0, 2), (), (1, 3)), (0, 1, 2, 3)),
+        (((), (0, 2), (1, 3)), (0, 1, 2, 3)),
+        (((0, 3), (1, 3), (2, 3, 4)), (0, 1, 2, 3, 4)),
+        (((0, 4), (1, 4), (), (2, 3, 4)), (0, 1, 2, 3, 4)),
+    ],
+)
+def test_unit_propagation_merges_clause_groups_in_sorted_unique_order(
+    groups: tuple[tuple[int, ...], ...],
+    expected: tuple[int, ...],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = resolver()
+    constraint = Range.singleton(1)
+    for index in range(5):
+        incompat_index.add_incompatibility(
+            candidate,
+            Incompatibility(
+                [
+                    Term((index, "first"), constraint, positive=True),
+                    Term((index, "second"), constraint, positive=True),
+                ],
+                IncompatibilityCause.NO_VERSIONS,
+            ),
+        )
+
+    visited: list[tuple[int, str]] = []
+
+    def record_get(package: tuple[int, str]) -> None:
+        visited.append(package)
+        return None
+
+    monkeypatch.setattr(candidate.solution, "get", record_get)
+
+    assert (
+        propagate._unit_propagation_core(  # noqa: SLF001
+            candidate,
+            "changed",
+            groups,
+            candidate.solution.contradiction_epoch,
+        )
+        is None
+    )
+    assert visited == [
+        (index, position) for index in expected for position in ("first", "second")
+    ]
+
+
 def test_unit_propagation_reuses_the_classified_assignment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
