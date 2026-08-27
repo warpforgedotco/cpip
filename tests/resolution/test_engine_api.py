@@ -9,6 +9,7 @@ from cpip.core.errors import ResolutionError
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
 from cpip.resolution.api import ResolutionConfig, ResolutionEngine
+from cpip.resolution.nab_provider import NabProvider
 
 from .test_nab_provider import FakeProvider
 
@@ -39,6 +40,42 @@ def test_resolution_snapshots_installed_state_once(
 
     assert len(result.candidates) == 2
     assert snapshot_calls == 1
+
+
+def test_resolution_reuses_the_solvers_dependency_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cpip._vendor.nab_resolver.resolver import Resolver
+
+    dependency_calls = 0
+    calls_when_solved = None
+    get_dependencies = NabProvider.get_dependencies
+    solve = Resolver.solve
+
+    def counting_get_dependencies(adapter, package, version):
+        nonlocal dependency_calls
+        dependency_calls += 1
+        return get_dependencies(adapter, package, version)
+
+    def solve_and_snapshot_calls(resolver, requirements, constraints=None):
+        nonlocal calls_when_solved
+        solution = solve(resolver, requirements, constraints)
+        calls_when_solved = dependency_calls
+        return solution
+
+    monkeypatch.setattr(NabProvider, "get_dependencies", counting_get_dependencies)
+    monkeypatch.setattr(Resolver, "solve", solve_and_snapshot_calls)
+
+    result = ResolutionEngine(
+        provider=FakeProvider(),
+        ignore_installed=True,
+    ).resolve(["app"])
+
+    assert dependency_calls == calls_when_solved
+    assert result.graph == {
+        "app": frozenset({"dep"}),
+        "dep": frozenset(),
+    }
 
 
 def test_late_dependency_extras_revisit_an_existing_decision() -> None:
@@ -80,6 +117,12 @@ def test_late_dependency_extras_revisit_an_existing_decision() -> None:
         "addon",
         "app",
         "zzz-consumer",
+    }
+    assert result.graph == {
+        "aaa-feature": frozenset({"addon"}),
+        "addon": frozenset(),
+        "app": frozenset({"aaa-feature", "zzz-consumer"}),
+        "zzz-consumer": frozenset({"aaa-feature"}),
     }
 
 
@@ -197,6 +240,10 @@ def test_self_dependency_extras_rebuild_selected_dependencies() -> None:
         "addon",
         "self-feature",
     }
+    assert result.graph == {
+        "addon": frozenset(),
+        "self-feature": frozenset({"addon", "self-feature"}),
+    }
 
 
 def test_self_dependency_rejects_an_incompatible_selected_version() -> None:
@@ -255,6 +302,7 @@ def test_rejected_self_dependency_does_not_leak_its_extras() -> None:
     assert {
         (candidate.canonical_name, candidate.version) for candidate in result.candidates
     } == {("app", Version("2"))}
+    assert result.graph == {"app": frozenset()}
 
 
 def test_root_dependency_extras_rebuild_an_installed_candidate(
