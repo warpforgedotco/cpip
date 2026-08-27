@@ -127,6 +127,32 @@ def test_decision_passes_explicit_parent_dispatch(
     assert widened.incompatibilities[0].terms[0].constraint == broad
 
 
+def test_decision_reuses_its_exact_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = resolver()
+    singleton = Range.singleton
+    calls = 0
+
+    def singleton_once(cls: type[Range[int]], version: int) -> Range[int]:
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise AssertionError("a decision must construct one exact range")
+        return singleton(version)
+
+    monkeypatch.setattr(Range, "singleton", classmethod(singleton_once))
+
+    assert candidate._decide_next("parent") == "parent"
+
+    assignment = candidate.solution.assignments_for("parent")[-1]
+    assert calls == 1
+    assert (
+        candidate.incompatibilities[0].terms[0].constraint
+        is assignment.accumulated_range
+    )
+
+
 def test_dependency_clause_is_reused_when_parent_range_is_covered() -> None:
     candidate = resolver()
     dependency_range = Range.at_least(1)
