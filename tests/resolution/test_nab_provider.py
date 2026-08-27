@@ -146,6 +146,27 @@ def test_constraints_apply_to_transitive_dependencies() -> None:
     assert not adapter.has_satisfying_version("dep", dependencies["dep"])
 
 
+def test_dependency_constraints_are_looked_up_once_per_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = NabProvider(FakeProvider(), ResolutionConfig(ignore_installed=True))
+    root, root_range = adapter.add_root(parse_requirement("app"))
+    adapter.choose_version(root, root_range)
+    monkeypatch.setattr(adapter, "_prefetch_available_versions", lambda _: None)
+    lookups = []
+    constraint_for = adapter._constraint_for
+
+    def count_lookup(package: str):
+        lookups.append(package)
+        return constraint_for(package)
+
+    monkeypatch.setattr(adapter, "_constraint_for", count_lookup)
+
+    adapter.get_dependencies(root, Version("1"))
+
+    assert lookups == ["dep"]
+
+
 def test_exact_transitive_dependency_skips_catalog_enumeration() -> None:
     provider = FakeProvider()
     provider.candidates[("app", Version("1"))].dependencies = (

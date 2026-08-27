@@ -1429,7 +1429,7 @@ class NabProvider:
                 if dependency.specifier.contains(candidate, allow_prereleases=True)
                 and all(
                     constraint.specifier.contains(candidate, allow_prereleases=True)
-                    for constraint in self._constraint_for(dependency_key)
+                    for constraint in dependency_constraints
                 )
             ]
             dependency_range = self._finite_range(selected)
