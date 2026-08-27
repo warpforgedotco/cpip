@@ -598,3 +598,37 @@ def test_install_falls_back_when_the_cache_has_no_bytecode(tmp_path: Path) -> No
     target, _ = _install_one(tmp_path, wheel, "oldpkg")
 
     assert list((target / "oldpkg" / "__pycache__").glob("mod.*.pyc"))
+
+
+def test_a_cold_install_never_compiles_in_the_stage(tmp_path: Path) -> None:
+    """Compilation moved out of extraction into a pass that runs afterwards.
+    If that pass ran too late, the install would find no bytecode, compile in
+    the stage, and the cache would compile the same modules again -- strictly
+    worse than doing it inline. This pins the ordering.
+    """
+    from cpip.install import wheel_archive_installer as installer_module
+
+    wheel = _make_wheel_with_members(
+        tmp_path,
+        "orderpkg",
+        {f"orderpkg/mod_{index}.py": f"V = {index}\n" for index in range(6)},
+    )
+
+    fell_back: list[tuple[str, tuple[str, ...]]] = []
+    real = installer_module._compile_uncached
+
+    def recording(stage, members):  # noqa: ANN001, ANN202
+        fell_back.extend(members)
+        return real(stage, members)
+
+    installer_module._compile_uncached = recording
+    try:
+        target, _ = _install_one(tmp_path, wheel, "orderpkg")
+    finally:
+        installer_module._compile_uncached = real
+
+    assert list((target / "orderpkg" / "__pycache__").glob("mod_0.*.pyc"))
+    assert not fell_back, (
+        f"{len(fell_back)} modules were compiled in the stage, so the cache "
+        "had no bytecode ready when the install ran"
+    )
