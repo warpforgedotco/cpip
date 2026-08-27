@@ -1330,13 +1330,14 @@ class NabProvider:
             record = self.records[(package, version)]
             record_dependencies = record.dependencies
         cache_key = (package, version, self.requirements[package].extras)
-        self._prefetch_available_versions(
-            tuple(
+        prefetch_dependencies = dependencies_records
+        if self_dependencies:
+            prefetch_dependencies = tuple(
                 dependency
                 for dependency in dependencies_records
                 if _key(dependency) != package
             )
-        )
+        self._prefetch_available_versions(prefetch_dependencies)
         dependencies: dict[str, Range[Version]] = {}
         for dependency in dependencies_records:
             if dependency.url is None and dependency.name.startswith(

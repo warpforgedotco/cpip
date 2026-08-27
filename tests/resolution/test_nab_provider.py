@@ -446,6 +446,76 @@ def test_equivalent_direct_url_roots_remain_satisfiable() -> None:
     assert not roots["dep"].is_empty
 
 
+def test_dependency_prefetch_reuses_non_self_dependency_tuple(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FakeProvider()
+    dependencies = (parse_requirement("dep<2"), parse_requirement("other"))
+    provider.candidates[("app", Version("1"))].dependencies = dependencies
+    adapter = NabProvider(provider, ResolutionConfig())
+    root, root_range = adapter.add_root(parse_requirement("app"))
+    adapter.choose_version(root, root_range)
+    monkeypatch.setattr(adapter, "_versions", lambda _package: (Version("1"),))
+
+    key_calls: list[object] = []
+    calls_at_prefetch: list[tuple[object, ...]] = []
+    prefetched: list[tuple[object, ...]] = []
+    dependency_key = cpip.resolution.nab_provider._key
+
+    def counting_key(requirement):
+        key_calls.append(requirement)
+        return dependency_key(requirement)
+
+    def capture_prefetch(requirements):
+        calls_at_prefetch.append(tuple(key_calls))
+        prefetched.append(requirements)
+
+    monkeypatch.setattr(cpip.resolution.nab_provider, "_key", counting_key)
+    monkeypatch.setattr(adapter, "_prefetch_available_versions", capture_prefetch)
+
+    adapter.get_dependencies(root, Version("1"))
+
+    assert len(calls_at_prefetch) == 1
+    assert len(calls_at_prefetch[0]) == len(dependencies)
+    assert all(
+        actual is expected
+        for actual, expected in zip(calls_at_prefetch[0], dependencies, strict=True)
+    )
+    assert type(prefetched[0]) is tuple
+    assert all(
+        actual is expected
+        for actual, expected in zip(prefetched[0], dependencies, strict=True)
+    )
+
+
+def test_dependency_prefetch_still_filters_self_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FakeProvider()
+    cross_first = parse_requirement("dep<2")
+    self_dependency = parse_requirement("app")
+    cross_last = parse_requirement("other")
+    provider.candidates[("app", Version("1"))].dependencies = (
+        cross_first,
+        self_dependency,
+        cross_last,
+    )
+    adapter = NabProvider(provider, ResolutionConfig())
+    root, root_range = adapter.add_root(parse_requirement("app"))
+    adapter.choose_version(root, root_range)
+    monkeypatch.setattr(adapter, "_versions", lambda _package: (Version("1"),))
+
+    prefetched: list[tuple[object, ...]] = []
+    monkeypatch.setattr(adapter, "_prefetch_available_versions", prefetched.append)
+
+    adapter.get_dependencies(root, Version("1"))
+
+    assert len(prefetched) == 1
+    assert len(prefetched[0]) == 2
+    assert prefetched[0][0] is cross_first
+    assert prefetched[0][1] is cross_last
+
+
 def test_dependency_prefetch_filters_unusable_catalog_requests(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
