@@ -46,12 +46,28 @@ class CacheManager:
             if os.path.isdir(path)
         )
 
+    def wheel_dirs(self) -> builtins.list[str]:
+        """Every version of the built-wheel store, not only this cpip's.
+
+        Stores carry their own format version, so a cpip that has moved on
+        leaves the previous one sitting there. ``purge`` reaps it because it
+        works on whole ``v*`` roots, but ``list`` and ``remove`` work on
+        stores -- and a wheel they cannot see is one the user cannot remove.
+        """
+        stem = WHEEL_CACHE_BUCKET.rsplit("-v", 1)[0]
+
+        return sorted(
+            path
+            for path in glob.glob(
+                os.path.join(glob.escape(self.cache_dir), f"{glob.escape(stem)}-v*"),
+            )
+            if os.path.isdir(path)
+        )
+
     def wheel_files(self) -> builtins.list[str]:
-        wheel_dir = self.wheel_dir
-        if not os.path.isdir(wheel_dir):
-            return []
         return sorted(
             os.path.join(current, name)
+            for wheel_dir in self.wheel_dirs()
             for current, _, files in os.walk(wheel_dir, followlinks=False)
             for name in files
             if name.endswith(".whl")

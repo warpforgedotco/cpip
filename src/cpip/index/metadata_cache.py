@@ -3,6 +3,8 @@ headers and its SHA-256, both keyed by the file's path, size and mtime."""
 
 from __future__ import annotations
 
+from cpip.core.utils import versioned_bucket
+
 import marshal
 import os
 import sqlite3
@@ -22,7 +24,7 @@ def _valid_sha256(value: object) -> bool:
     return isinstance(value, str) and len(value) == 64 and not value.strip(_HEX_DIGITS)
 
 
-NAME = "metadata.sqlite"
+NAME = f"{versioned_bucket('metadata', 1)}.sqlite"
 _MAX_ENTRIES = 8_192
 _CACHE_INSTANCES: dict[str, WheelMetadataCache] = {}
 

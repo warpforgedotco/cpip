@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from cpip.core.utils import versioned_bucket
+
 import hashlib
 import marshal
 import os
@@ -22,7 +24,7 @@ if TYPE_CHECKING:
         def hexdigest(self) -> str: ...
 
 
-ARTIFACT_CACHE_BUCKET = "artifacts"
+ARTIFACT_CACHE_BUCKET = versioned_bucket("artifacts", 1)
 
 
 class CachedArtifact:

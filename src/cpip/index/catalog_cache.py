@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from cpip.core.utils import versioned_bucket
+
 import hashlib
 import marshal
 import posixpath
@@ -19,11 +21,11 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from typing import Any
 
-PREFIX = "cpip-index-catalog:"
-SUMMARY_PREFIX = "cpip-index-summary:"
-CHOICE_PREFIX = "cpip-index-choice:"
-SUMMARY_HEADER = b"cpip-index-summary\0"
-CHOICE_HEADER = b"cpip-index-choice\0"
+PREFIX = f"{versioned_bucket('cpip-index-catalog', 1)}:"
+SUMMARY_PREFIX = f"{versioned_bucket('cpip-index-summary', 1)}:"
+CHOICE_PREFIX = f"{versioned_bucket('cpip-index-choice', 1)}:"
+SUMMARY_HEADER = versioned_bucket("cpip-index-summary", 1).encode() + b"\0"
+CHOICE_HEADER = versioned_bucket("cpip-index-choice", 1).encode() + b"\0"
 
 WHEEL_RECORD = 1
 SDIST_RECORD = 2

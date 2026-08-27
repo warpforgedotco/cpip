@@ -18,7 +18,7 @@ from types import MappingProxyType
 
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
-from cpip.core.utils import CACHE_INTERPRETER_TAG
+from cpip.core.utils import versioned_bucket
 from cpip.core.wheel import WheelCandidate
 from cpip.install.wheel_archive_cache import (
     CachedWheelArchive,
@@ -34,9 +34,9 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from cpip.resolution.models import ResolutionResult
 
-RESOLUTION_CACHE_BUCKET = f"resolution-{CACHE_INTERPRETER_TAG}"
+RESOLUTION_CACHE_BUCKET = versioned_bucket("resolution", 1, interpreter=True)
 
-REMOTE_EXACT_CONTEXT = "remote-exact"
+REMOTE_EXACT_CONTEXT = versioned_bucket("remote-exact", 1)
 
 RESOLUTION_CACHE_TTL_SECONDS = 600.0
 

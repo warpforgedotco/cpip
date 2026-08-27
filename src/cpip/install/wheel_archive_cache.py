@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Generator
 
 from cpip.core.errors import InstallationError
-from cpip.core.utils import CACHE_INTERPRETER_TAG, default_worker_count
+from cpip.core.utils import default_worker_count, versioned_bucket
 from cpip.core.wheel import validate_wheel
 from cpip.install.wheel_archive import (
     compiled_parts,
@@ -69,7 +69,7 @@ else:
     WheelRequest = tuple[str, bool, object | None]
 
 
-ARCHIVE_CACHE_BUCKET = f"archive-{CACHE_INTERPRETER_TAG}"
+ARCHIVE_CACHE_BUCKET = versioned_bucket("archive", 1, interpreter=True)
 
 PYC_CACHE_SUBDIR = "pyc"
 """Sibling of ``tree/`` holding the entry's byte-compiled modules.

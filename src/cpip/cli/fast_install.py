@@ -24,16 +24,16 @@ from cpip.cli.fast import consume_option, extend_requirements
 from cpip.core.appdirs import resolve_cache_dir, versioned_cache_dir
 from cpip.core.packaging import EMPTY_FROZENSET
 from cpip.core.versions import Version
-from cpip.core.utils import CACHE_INTERPRETER_TAG, load_snapshot, save_snapshot
+from cpip.core.utils import load_snapshot, save_snapshot, versioned_bucket
 from cpip.core.wheel import PureWheelCandidate, WheelCandidate
 from cpip.core.wheel import parse_wheel_filename
 from cpip.platform.clone import clone_path
 
 
-NAME = f"fast-install-{CACHE_INTERPRETER_TAG}.marshal"
+NAME = f"{versioned_bucket('fast-install', 1, interpreter=True)}.marshal"
 MAX_ENTRIES = 8_192
 MAX_PLANS = 256
-TREE_CACHE_BUCKET = "fast-install-trees"
+TREE_CACHE_BUCKET = versioned_bucket("fast-install-trees", 1, interpreter=True)
 
 Metadata = tuple[tuple[str, ...], bool]
 StoredMetadata = tuple[tuple[str, ...], bool, str | None]
