@@ -477,8 +477,12 @@ def make_failing_source_tree(root: Path) -> Path:
         encoding="utf-8",
     )
     (source / "pyproject.toml").write_text(
+        # Version is dynamic so the static reader must defer: a fully static
+        # [project] table is answerable without the backend, and this tree
+        # exists to reach the backend and fail there.
         "[build-system]\nrequires = []\nbuild-backend = 'backend'\n"
-        "backend-path = ['.']\n\n[project]\nname = 'bench-failing'\nversion = '1.0.0'\n",
+        "backend-path = ['.']\n\n[project]\nname = 'bench-failing'\n"
+        "dynamic = ['version']\n",
         encoding="utf-8",
     )
     return source
