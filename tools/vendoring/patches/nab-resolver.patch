@@ -1268,7 +1268,7 @@ index 568bd5a..38da578 100644
      @override
      def __repr__(self) -> str:
 diff --git a/src/cpip/_vendor/nab_resolver/resolver.py b/src/cpip/_vendor/nab_resolver/resolver.py
-index 2035d02..4bc1600 100644
+index 2035d02..7824bf6 100644
 --- a/src/cpip/_vendor/nab_resolver/resolver.py
 +++ b/src/cpip/_vendor/nab_resolver/resolver.py
 @@ -22,7 +22,6 @@ from __future__ import annotations
@@ -1431,7 +1431,7 @@ index 2035d02..4bc1600 100644
  
          # Per clause, the contradiction epoch in which one of its terms was
          # last seen contradicted; unit propagation skips a clause whose stamp
-@@ -650,44 +720,85 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -650,44 +720,89 @@ class Resolver(Generic[PackageType, VersionType]):
          )
  
          dependencies = self.provider.get_dependencies(next_package, chosen_version)
@@ -1515,9 +1515,13 @@ index 2035d02..4bc1600 100644
 +        if consume is None:
 +            return None
 +
++        invalidations = consume()
++        if not invalidations:
++            return None
++
 +        decisions = self.solution.decisions()
 +        earliest: tuple[int, Any] | None = None
-+        for package in consume():
++        for package in invalidations:
 +            if package not in decisions:
 +                continue
 +            decision = next(
@@ -1545,7 +1549,7 @@ index 2035d02..4bc1600 100644
      def _build_result(self) -> Solution[PackageType, VersionType]:
          """Build the final result, including only reachable packages.
  
-@@ -709,6 +820,10 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -709,6 +824,10 @@ class Resolver(Generic[PackageType, VersionType]):
          """Reset solver state for a new resolution."""
          self.incompatibilities.clear()
          self.package_to_incompatibilities.clear()

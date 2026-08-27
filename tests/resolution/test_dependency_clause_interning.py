@@ -353,6 +353,27 @@ def test_replayed_clause_still_replays_requirement_refinement(monkeypatch: Any) 
     assert absorbed == [candidate.incompatibilities[0]] * 2
 
 
+def test_empty_dependency_invalidations_skip_decision_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = resolver()
+    consumed = 0
+
+    def consume() -> list[Any]:
+        nonlocal consumed
+        consumed += 1
+        return []
+
+    def reject_snapshot() -> None:
+        raise AssertionError("empty invalidations must not snapshot decisions")
+
+    monkeypatch.setattr(candidate.provider, "consume_dependency_invalidations", consume)
+    monkeypatch.setattr(candidate.solution, "decisions", reject_snapshot)
+
+    assert candidate._backtrack_dependency_invalidations() is None
+    assert consumed == 1
+
+
 def test_leaf_skips_widening_but_still_consumes_invalidations(
     monkeypatch: Any,
 ) -> None:

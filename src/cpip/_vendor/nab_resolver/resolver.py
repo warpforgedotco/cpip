@@ -772,9 +772,13 @@ class Resolver(Generic[PackageType, VersionType]):
         if consume is None:
             return None
 
+        invalidations = consume()
+        if not invalidations:
+            return None
+
         decisions = self.solution.decisions()
         earliest: tuple[int, Any] | None = None
-        for package in consume():
+        for package in invalidations:
             if package not in decisions:
                 continue
             decision = next(
