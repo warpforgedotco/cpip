@@ -35,9 +35,13 @@ inside the code object."""
 MAX_WORKERS = 4
 """Worker processes to run.
 
-Measured on the benchmark set: four processes compile it in 629ms against
-1536ms serially, and eight in 694ms. Past four, starting interpreters costs
-more than the parallelism returns.
+Compilation is CPU-bound -- 0.98 CPU seconds per wall second, single
+threaded -- so this is bounded by cores, not by I/O. Four is where the
+benchmark set stops improving: swept against in-process on an eight core
+machine, 2 workers gave 1.18x, 4 gave 1.31x, and 6, 8 and 12 gave 1.29x,
+1.24x and 1.36x, which is noise around the same number. The wheels are
+already extracted across a wider thread pool competing for the same cores,
+so more compile workers mostly take turns.
 """
 
 STARTUP_TIMEOUT = 30.0
