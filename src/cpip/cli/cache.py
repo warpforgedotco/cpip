@@ -169,10 +169,11 @@ class CacheManager:
             print("WARNING: No matching packages", file=sys.stderr)
         return files_removed, bytes_removed, directories_removed
 
-    def info(self) -> tuple[str, str, int]:
+    def info(self) -> tuple[str, builtins.list[str], int]:
+        # Every store the count covers, since wheel_files spans all of them.
         return (
             self.http_dir,
-            self.wheel_dir,
+            self.wheel_dirs() or [self.wheel_dir],
             len(self.wheel_files()),
         )
 
@@ -201,11 +202,12 @@ def run_cache(args: list[str]) -> int:
         if options.pattern:
             raise CommandError("Too many arguments")
 
-        http_dir, wheel_dir, wheel_count = manager.info()
+        http_dir, wheel_dirs, wheel_count = manager.info()
 
         print(f"Package index page cache location: {http_dir}")
 
-        print(f"Locally built wheels location: {wheel_dir}")
+        for wheel_dir in wheel_dirs:
+            print(f"Locally built wheels location: {wheel_dir}")
 
         print(f"Number of locally built wheels: {wheel_count}")
 
