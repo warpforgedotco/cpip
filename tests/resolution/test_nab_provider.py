@@ -284,6 +284,29 @@ def test_add_roots_prefetches_without_materializing_candidates() -> None:
     assert provider.events == [("prefetch", ("app", "dep"))]
 
 
+def test_unique_roots_do_not_intersect_their_ranges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = NabProvider(FakeProvider(), ResolutionConfig())
+
+    def fail_intersection(_left, _right):
+        raise AssertionError("a unique root has no existing range to intersect")
+
+    monkeypatch.setattr(Range, "__and__", fail_intersection)
+
+    roots = adapter.add_roots([parse_requirement("app"), parse_requirement("dep")])
+
+    assert set(roots) == {"app", "dep"}
+
+
+def test_duplicate_root_ranges_are_still_intersected() -> None:
+    adapter = NabProvider(FakeProvider(), ResolutionConfig())
+
+    roots = adapter.add_roots([parse_requirement("dep<2"), parse_requirement("dep>=2")])
+
+    assert roots["dep"].is_empty
+
+
 def test_dependency_prefetch_filters_unusable_catalog_requests(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

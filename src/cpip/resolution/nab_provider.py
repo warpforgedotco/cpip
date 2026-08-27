@@ -1573,7 +1573,10 @@ class NabProvider:
         roots: dict[str, Range[Version]] = {}
         for requirement in merged:
             package, requirement_range = self.add_root(requirement)
-            roots[package] = roots.get(package, requirement_range) & requirement_range
+            existing = roots.get(package)
+            roots[package] = (
+                requirement_range if existing is None else existing & requirement_range
+            )
         self._root_packages = set(roots)
         self._constrained_root_packages = {
             _key(requirement)
