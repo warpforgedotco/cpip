@@ -1540,6 +1540,13 @@ class NabProvider:
             )
         package = _key(requirement)
         previous = self.requirements.get(package)
+        if (
+            previous is not None
+            and previous.url is not None
+            and requirement.url is not None
+            and canonical_url(previous.url) != canonical_url(requirement.url)
+        ):
+            return package, Range.empty()
         if previous is not None and previous.extras != requirement.extras:
             requirement = Requirement(
                 name=requirement.name,

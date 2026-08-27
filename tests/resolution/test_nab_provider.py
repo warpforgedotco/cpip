@@ -307,6 +307,33 @@ def test_duplicate_root_ranges_are_still_intersected() -> None:
     assert roots["dep"].is_empty
 
 
+def test_conflicting_direct_url_roots_are_empty() -> None:
+    adapter = NabProvider(FakeProvider(), ResolutionConfig())
+
+    roots = adapter.add_roots(
+        [
+            parse_requirement("dep @ https://example.invalid/dep.whl"),
+            parse_requirement("dep @ https://mirror.invalid/dep.whl"),
+        ]
+    )
+
+    assert roots["dep"].is_empty
+    assert adapter.requirements["dep"].url == "https://example.invalid/dep.whl"
+
+
+def test_equivalent_direct_url_roots_remain_satisfiable() -> None:
+    adapter = NabProvider(FakeProvider(), ResolutionConfig())
+
+    roots = adapter.add_roots(
+        [
+            parse_requirement("dep @ https://example.invalid/dep.whl?b=2&a=1"),
+            parse_requirement("dep @ https://example.invalid/dep.whl?a=1&b=2"),
+        ]
+    )
+
+    assert not roots["dep"].is_empty
+
+
 def test_dependency_prefetch_filters_unusable_catalog_requests(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
