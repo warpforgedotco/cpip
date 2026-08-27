@@ -125,6 +125,23 @@ def test_constraints_are_indexed_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert marker_calls == 2
 
 
+def test_empty_constraint_lookup_skips_name_normalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = NabProvider(FakeProvider(), ResolutionConfig())
+
+    def fail_normalization(_name: str) -> str:
+        raise AssertionError("empty constraint maps do not need name normalization")
+
+    monkeypatch.setattr(
+        cpip.resolution.nab_provider,
+        "canonicalize_name",
+        fail_normalization,
+    )
+
+    assert adapter._constraint_for("Dep_Pkg[extra]") == ()
+
+
 def test_selected_release_materializes_without_catalog_rescan() -> None:
     provider = IndexedFakeProvider()
     adapter = NabProvider(provider, ResolutionConfig())

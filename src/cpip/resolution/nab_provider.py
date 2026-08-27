@@ -154,6 +154,8 @@ class NabProvider:
         return self._installed_cache[cache_key]
 
     def _constraint_for(self, package: str) -> tuple[Requirement, ...]:
+        if not self.constraints_by_name:
+            return ()
         name = canonicalize_name(package.split("[", 1)[0])
         return self.constraints_by_name.get(name, ())
 
