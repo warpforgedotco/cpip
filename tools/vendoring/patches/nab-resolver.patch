@@ -23,7 +23,7 @@ index 5d0bc55..9223895 100644
      )
  
 diff --git a/src/cpip/_vendor/nab_resolver/incompat_index.py b/src/cpip/_vendor/nab_resolver/incompat_index.py
-index c771106..22c8e81 100644
+index c771106..4d6b3a8 100644
 --- a/src/cpip/_vendor/nab_resolver/incompat_index.py
 +++ b/src/cpip/_vendor/nab_resolver/incompat_index.py
 @@ -11,6 +11,7 @@ per-clause skip stamp.
@@ -34,9 +34,11 @@ index c771106..22c8e81 100644
  from typing import TYPE_CHECKING, Any
  
  from .types import Incompatibility, IncompatibilityCause, Term
-@@ -21,11 +22,14 @@ if TYPE_CHECKING:
+@@ -20,12 +21,16 @@ if TYPE_CHECKING:
+ 
  
  __all__ = [
++    "NO_EXACT_PARENT_VERSION",
      "add_incompatibility",
 +    "add_dependency_incompatibility",
      "dependency_merge_key",
@@ -44,12 +46,12 @@ index c771106..22c8e81 100644
      "maybe_merge_dependency",
  ]
  
-+_MISSING = object()
++NO_EXACT_PARENT_VERSION = object()
 +
  
  # A dependency-style clause is exactly two terms (parent + dep).
  _DEPENDENCY_CLAUSE_TERMS = 2
-@@ -35,19 +39,138 @@ _DEPENDENCY_CLAUSE_TERMS = 2
+@@ -35,19 +40,138 @@ _DEPENDENCY_CLAUSE_TERMS = 2
  _NOT_CONTRADICTED = -1
  
  
@@ -97,7 +99,7 @@ index c771106..22c8e81 100644
 +    resolver: Resolver[Any, Any],
 +    incompatibility: Incompatibility[Any, Any],
 +    *,
-+    exact_parent_version: Any = _MISSING,
++    exact_parent_version: Any = NO_EXACT_PARENT_VERSION,
 +) -> int:
      index = len(resolver.incompatibilities)
      resolver.incompatibilities.append(incompatibility)
@@ -108,7 +110,7 @@ index c771106..22c8e81 100644
 +    parent, dependency = incompatibility.terms
 +    resolver.dependency_parent_incompatibilities[parent.package].append(index)
 +    resolver.package_to_incompatibilities[dependency.package].append(index)
-+    if exact_parent_version is _MISSING:
++    if exact_parent_version is NO_EXACT_PARENT_VERSION:
 +        _register_fallback_parent(resolver, parent.package, index)
 +    else:
 +        _register_exact_parent(
@@ -139,7 +141,7 @@ index c771106..22c8e81 100644
 +    dependency_package: Any,
 +    dependency_range: Any,
 +    *,
-+    exact_parent_version: Any = _MISSING,
++    exact_parent_version: Any = NO_EXACT_PARENT_VERSION,
 +) -> Incompatibility[Any, Any]:
 +    """Intern a cross-package dependency clause before constructing it."""
 +    key = (package, dependency_package, dependency_range, False)
@@ -148,7 +150,7 @@ index c771106..22c8e81 100644
 +        existing = resolver.incompatibilities[existing_index]
 +        existing_package, existing_dependency = existing.terms
 +        if package_range.is_subset(existing_package.constraint):
-+            if exact_parent_version is _MISSING:
++            if exact_parent_version is NO_EXACT_PARENT_VERSION:
 +                _register_fallback_parent(resolver, package, existing_index)
 +            else:
 +                _register_exact_parent(
@@ -169,7 +171,7 @@ index c771106..22c8e81 100644
 +        )
 +        resolver.incompatibilities[existing_index] = merged
 +        resolver.clause_contradicted_at[existing_index] = _NOT_CONTRADICTED
-+        if exact_parent_version is _MISSING:
++        if exact_parent_version is NO_EXACT_PARENT_VERSION:
 +            _register_fallback_parent(resolver, package, existing_index)
 +        else:
 +            _register_exact_parent(
@@ -194,7 +196,7 @@ index c771106..22c8e81 100644
  
  
  def dependency_merge_key(
-@@ -125,4 +242,5 @@ def maybe_merge_dependency(
+@@ -125,4 +249,5 @@ def maybe_merge_dependency(
      resolver.incompatibilities[existing_index] = merged
      # The union widens the package term, which can lift a contradiction.
      resolver.clause_contradicted_at[existing_index] = _NOT_CONTRADICTED
@@ -1343,7 +1345,7 @@ index 568bd5a..38da578 100644
      @override
      def __repr__(self) -> str:
 diff --git a/src/cpip/_vendor/nab_resolver/resolver.py b/src/cpip/_vendor/nab_resolver/resolver.py
-index 2035d02..7824bf6 100644
+index 2035d02..22592fb 100644
 --- a/src/cpip/_vendor/nab_resolver/resolver.py
 +++ b/src/cpip/_vendor/nab_resolver/resolver.py
 @@ -22,7 +22,6 @@ from __future__ import annotations
@@ -1506,7 +1508,7 @@ index 2035d02..7824bf6 100644
  
          # Per clause, the contradiction epoch in which one of its terms was
          # last seen contradicted; unit propagation skips a clause whose stamp
-@@ -650,44 +720,89 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -650,44 +720,90 @@ class Resolver(Generic[PackageType, VersionType]):
          )
  
          dependencies = self.provider.get_dependencies(next_package, chosen_version)
@@ -1520,6 +1522,11 @@ index 2035d02..7824bf6 100644
 +            else None
 +        )
          parent_range = exact_range if widened is None else self.as_term_range(widened)
++        exact_parent_version = (
++            chosen_version
++            if widened is None
++            else incompat_index.NO_EXACT_PARENT_VERSION
++        )
          for dependency_package, supplied_range in dependencies.items():
              dependency_range = self.as_term_range(supplied_range)
 -            cross_package = dependency_package != next_package
@@ -1547,11 +1554,7 @@ index 2035d02..7824bf6 100644
 +                    parent_range,
 +                    dependency_package,
 +                    dependency_range,
-+                    **(
-+                        {"exact_parent_version": chosen_version}
-+                        if widened is None
-+                        else {}
-+                    ),
++                    exact_parent_version=exact_parent_version,
 +                )
 +                decide.absorb_redundant_requirement(
 +                    self, dependency_package, dependency_range, incompatibility
@@ -1624,7 +1627,7 @@ index 2035d02..7824bf6 100644
      def _build_result(self) -> Solution[PackageType, VersionType]:
          """Build the final result, including only reachable packages.
  
-@@ -709,6 +824,10 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -709,6 +825,10 @@ class Resolver(Generic[PackageType, VersionType]):
          """Reset solver state for a new resolution."""
          self.incompatibilities.clear()
          self.package_to_incompatibilities.clear()

@@ -92,6 +92,41 @@ def test_cross_dependency_does_not_construct_discarded_terms(
     ]
 
 
+def test_decision_passes_explicit_parent_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[Any] = []
+    add_dependency = incompat_index.add_dependency_incompatibility
+
+    def record_dispatch(
+        *args: Any, exact_parent_version: Any
+    ) -> Incompatibility[Any, Any]:
+        observed.append(exact_parent_version)
+        return add_dependency(*args, exact_parent_version=exact_parent_version)
+
+    monkeypatch.setattr(
+        incompat_index, "add_dependency_incompatibility", record_dispatch
+    )
+
+    exact = resolver()
+    monkeypatch.setattr(exact.provider, "choose_version", lambda *_args: 0)
+    assert exact._decide_next("parent") == "parent"
+
+    widened = resolver()
+    broad = Range.between(1, 4)
+    monkeypatch.setattr(widened.provider, "widen_decision", lambda *_args: broad)
+    assert widened._decide_next("parent") == "parent"
+
+    assert observed[0] == 0
+    assert exact.dependency_parent_versions["parent"] == {0: [0]}
+    assert not exact.dependency_parent_fallbacks
+
+    assert observed[1] is incompat_index.NO_EXACT_PARENT_VERSION
+    assert not widened.dependency_parent_versions
+    assert widened.dependency_parent_fallbacks == {"parent": [0]}
+    assert widened.incompatibilities[0].terms[0].constraint == broad
+
+
 def test_dependency_clause_is_reused_when_parent_range_is_covered() -> None:
     candidate = resolver()
     dependency_range = Range.at_least(1)
@@ -359,7 +394,9 @@ def test_widened_merge_promotes_exact_clause_to_fallback() -> None:
     )
 
 
-def test_unhashable_parent_version_uses_exhaustive_fallback() -> None:
+def test_unhashable_parent_version_uses_exhaustive_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class Version:
         __hash__ = None
 
@@ -374,15 +411,9 @@ def test_unhashable_parent_version_uses_exhaustive_fallback() -> None:
 
     candidate = resolver()
     version = Version(1)
-    incompat_index.add_dependency_incompatibility(
-        candidate,
-        "parent",
-        Range.singleton(version),
-        "dependency",
-        Range.singleton(1),
-        exact_parent_version=version,
-    )
-    candidate.solution.decide("parent", version)
+    monkeypatch.setattr(candidate.provider, "choose_version", lambda *_args: version)
+
+    assert candidate._decide_next("parent") == "parent"
 
     assert propagate._related_incompatibility_groups(candidate, "parent") == (
         (),

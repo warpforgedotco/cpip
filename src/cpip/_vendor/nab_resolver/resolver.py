@@ -727,6 +727,11 @@ class Resolver(Generic[PackageType, VersionType]):
             else None
         )
         parent_range = exact_range if widened is None else self.as_term_range(widened)
+        exact_parent_version = (
+            chosen_version
+            if widened is None
+            else incompat_index.NO_EXACT_PARENT_VERSION
+        )
         for dependency_package, supplied_range in dependencies.items():
             dependency_range = self.as_term_range(supplied_range)
             if dependency_package != next_package:
@@ -736,11 +741,7 @@ class Resolver(Generic[PackageType, VersionType]):
                     parent_range,
                     dependency_package,
                     dependency_range,
-                    **(
-                        {"exact_parent_version": chosen_version}
-                        if widened is None
-                        else {}
-                    ),
+                    exact_parent_version=exact_parent_version,
                 )
                 decide.absorb_redundant_requirement(
                     self, dependency_package, dependency_range, incompatibility

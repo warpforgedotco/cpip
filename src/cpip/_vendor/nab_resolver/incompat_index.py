@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "NO_EXACT_PARENT_VERSION",
     "add_incompatibility",
     "add_dependency_incompatibility",
     "dependency_merge_key",
@@ -28,7 +29,7 @@ __all__ = [
     "maybe_merge_dependency",
 ]
 
-_MISSING = object()
+NO_EXACT_PARENT_VERSION = object()
 
 
 # A dependency-style clause is exactly two terms (parent + dep).
@@ -80,7 +81,7 @@ def _append_dependency(
     resolver: Resolver[Any, Any],
     incompatibility: Incompatibility[Any, Any],
     *,
-    exact_parent_version: Any = _MISSING,
+    exact_parent_version: Any = NO_EXACT_PARENT_VERSION,
 ) -> int:
     index = len(resolver.incompatibilities)
     resolver.incompatibilities.append(incompatibility)
@@ -88,7 +89,7 @@ def _append_dependency(
     parent, dependency = incompatibility.terms
     resolver.dependency_parent_incompatibilities[parent.package].append(index)
     resolver.package_to_incompatibilities[dependency.package].append(index)
-    if exact_parent_version is _MISSING:
+    if exact_parent_version is NO_EXACT_PARENT_VERSION:
         _register_fallback_parent(resolver, parent.package, index)
     else:
         _register_exact_parent(
@@ -119,7 +120,7 @@ def add_dependency_incompatibility(
     dependency_package: Any,
     dependency_range: Any,
     *,
-    exact_parent_version: Any = _MISSING,
+    exact_parent_version: Any = NO_EXACT_PARENT_VERSION,
 ) -> Incompatibility[Any, Any]:
     """Intern a cross-package dependency clause before constructing it."""
     key = (package, dependency_package, dependency_range, False)
@@ -128,7 +129,7 @@ def add_dependency_incompatibility(
         existing = resolver.incompatibilities[existing_index]
         existing_package, existing_dependency = existing.terms
         if package_range.is_subset(existing_package.constraint):
-            if exact_parent_version is _MISSING:
+            if exact_parent_version is NO_EXACT_PARENT_VERSION:
                 _register_fallback_parent(resolver, package, existing_index)
             else:
                 _register_exact_parent(
@@ -149,7 +150,7 @@ def add_dependency_incompatibility(
         )
         resolver.incompatibilities[existing_index] = merged
         resolver.clause_contradicted_at[existing_index] = _NOT_CONTRADICTED
-        if exact_parent_version is _MISSING:
+        if exact_parent_version is NO_EXACT_PARENT_VERSION:
             _register_fallback_parent(resolver, package, existing_index)
         else:
             _register_exact_parent(
