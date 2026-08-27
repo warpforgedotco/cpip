@@ -236,14 +236,14 @@ def test_dependency_markers_are_filtered_at_adapter_boundary() -> None:
     assert adapter.get_dependencies(root, Version("1")) == {}
 
 
-def test_add_roots_prefetches_before_candidate_scans() -> None:
+def test_add_roots_prefetches_without_materializing_candidates() -> None:
     provider = FakeProvider()
     adapter = NabProvider(provider, ResolutionConfig())
 
     adapter.add_roots([parse_requirement("app"), parse_requirement("dep")])
 
     assert provider.prefetch_calls[0] == ("app", "dep")
-    assert provider.events[0] == ("prefetch", ("app", "dep"))
+    assert provider.events == [("prefetch", ("app", "dep"))]
 
 
 def test_dependency_prefetch_filters_unusable_catalog_requests(

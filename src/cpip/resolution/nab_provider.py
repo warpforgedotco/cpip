@@ -79,7 +79,9 @@ class NabProvider:
         self._priority_memo: dict[
             str, tuple[Requirement, int, tuple[int, int, str]]
         ] = {}
-        self._installed_cache: dict[str, InstalledCandidate | None] = {}
+        self._installed_cache: dict[
+            tuple[str, frozenset[str]], InstalledCandidate | None
+        ] = {}
         self._preflight_cache: dict[tuple[str, Version, tuple[str, ...]], bool] = {}
         self._catalog_candidate_cache: dict[tuple[str, Version], object | None] = {}
         self._catalog_by_version_cache: dict[str, dict[Version, object | None]] = {}
@@ -130,7 +132,9 @@ class NabProvider:
             constraint.url is not None for constraint in self._constraint_for(package)
         ):
             return None
-        if package not in self._installed_cache:
+        extras = frozenset(self.requirements[package].extras)
+        cache_key = (package, extras)
+        if cache_key not in self._installed_cache:
             distribution = (
                 find_installed(package)
                 if self.installed is None
@@ -142,12 +146,12 @@ class NabProvider:
                 try:
                     candidate = InstalledCandidate(
                         distribution,
-                        frozenset(self.requirements[package].extras),
+                        extras,
                     )
                 except ValueError:
                     candidate = None
-            self._installed_cache[package] = candidate
-        return self._installed_cache[package]
+            self._installed_cache[cache_key] = candidate
+        return self._installed_cache[cache_key]
 
     def _constraint_for(self, package: str) -> tuple[Requirement, ...]:
         name = canonicalize_name(package.split("[", 1)[0])
@@ -1241,27 +1245,44 @@ class NabProvider:
             raise RuntimeError(
                 f"NAB requested dependencies for unselected candidate {package}=={version}"
             )
-        normalized_dependencies = []
-        for dependency in record.dependencies:
-            if not marker_applies(
-                dependency.marker,
-                extras=self.requirements[package].extras,
-            ):
-                continue
-            if dependency.name.startswith(("file://", "http://", "https://")):
-                name = urlsplit(dependency.name).path.rstrip("/").rsplit("/", 1)[-1]
-                dependency = Requirement(
-                    name=name or dependency.name,
-                    specifier=dependency.specifier,
-                    extras=dependency.extras,
-                    url=dependency.url or dependency.name,
-                    marker=dependency.marker,
-                    raw=dependency.raw,
+        while True:
+            normalized_dependencies = []
+            for dependency in record.dependencies:
+                if not marker_applies(
+                    dependency.marker,
+                    extras=self.requirements[package].extras,
+                ):
+                    continue
+                if dependency.name.startswith(("file://", "http://", "https://")):
+                    name = urlsplit(dependency.name).path.rstrip("/").rsplit("/", 1)[-1]
+                    dependency = Requirement(
+                        name=name or dependency.name,
+                        specifier=dependency.specifier,
+                        extras=dependency.extras,
+                        url=dependency.url or dependency.name,
+                        marker=dependency.marker,
+                        raw=dependency.raw,
+                    )
+                normalized_dependencies.append(dependency)
+            dependencies_records = tuple(normalized_dependencies)
+            self_dependencies = [
+                dependency
+                for dependency in dependencies_records
+                if _key(dependency) == package
+            ]
+            if not self_dependencies:
+                break
+            if any(
+                dependency.url is None
+                and not dependency.specifier.contains(
+                    version,
+                    allow_prereleases=True,
                 )
-            normalized_dependencies.append(dependency)
-        dependencies_records = tuple(normalized_dependencies)
-        self_dependencies = [d for d in dependencies_records if _key(d) == package]
-        if self_dependencies:
+                for dependency in self_dependencies
+            ):
+                result = {package: Range.empty()}
+                self._dependency_cache[cache_key] = result
+                return result
             merged_extras = frozenset(
                 self.requirements[package].extras
                 | frozenset(
@@ -1271,6 +1292,8 @@ class NabProvider:
                 )
             )
             current = self.requirements[package]
+            if merged_extras == current.extras:
+                break
             self.requirements[package] = Requirement(
                 name=current.name,
                 specifier=current.specifier,
@@ -1279,8 +1302,14 @@ class NabProvider:
                 marker=current.marker,
                 raw=current.raw,
             )
-            self.choose_version(package, Range.singleton(version))
+            selected = self.choose_version(package, Range.singleton(version))
+            if selected != version:
+                result = {package: Range.empty()}
+                cache_key = (package, version, tuple(sorted(merged_extras)))
+                self._dependency_cache[cache_key] = result
+                return result
             record = self.records[(package, version)]
+        cache_key = (package, version, tuple(sorted(self.requirements[package].extras)))
         self._prefetch_available_versions(
             tuple(
                 dependency
@@ -1290,8 +1319,6 @@ class NabProvider:
         )
         dependencies: dict[str, Range[Version]] = {}
         for dependency in dependencies_records:
-            if _key(dependency) == package:
-                continue
             if dependency.url is None and dependency.name.startswith(
                 ("file://", "http://", "https://")
             ):
@@ -1387,7 +1414,13 @@ class NabProvider:
                     self._dependency_invalidations.setdefault(dependency_key, None)
             pinned = dependency.specifier.exact_version
             if pinned is not None:
-                dependencies[dependency_key] = Range.singleton(pinned)
+                dependency_range = Range.singleton(pinned)
+                previous = dependencies.get(dependency_key)
+                dependencies[dependency_key] = (
+                    dependency_range
+                    if previous is None
+                    else previous & dependency_range
+                )
                 continue
             allowed = self._versions(dependency_key)
             selected = [
@@ -1399,7 +1432,11 @@ class NabProvider:
                     for constraint in self._constraint_for(dependency_key)
                 )
             ]
-            dependencies[dependency_key] = self._finite_range(selected)
+            dependency_range = self._finite_range(selected)
+            previous = dependencies.get(dependency_key)
+            dependencies[dependency_key] = (
+                dependency_range if previous is None else previous & dependency_range
+            )
         result = dict(dependencies)
         self._dependency_cache[cache_key] = result
         return result
@@ -1528,37 +1565,9 @@ class NabProvider:
         return package, self._finite_range(versions)
 
     def add_roots(self, requirements: list[Requirement]) -> dict[str, Range[Version]]:
-        """Register roots with extras merged before NAB builds its graph."""
+        """Register roots without speculatively materializing their candidates."""
         self._prefetch_available_versions(tuple(requirements))
-        root_names = {requirement.canonical_name for requirement in requirements}
         merged = list(requirements)
-        for requirement in tuple(merged):
-            candidate = next(
-                iter(self.provider.find_candidates(requirement, allowed_versions=None)),
-                None,
-            )
-            if candidate is None:
-                continue
-            try:
-                dependencies = getattr(candidate, "dependencies", ())
-            except (OSError, ValueError):
-                continue
-            for dependency in dependencies:
-                if dependency.canonical_name not in root_names or not dependency.extras:
-                    continue
-                for index, root in enumerate(merged):
-                    if root.canonical_name != dependency.canonical_name:
-                        continue
-                    extras = frozenset(root.extras | dependency.extras)
-                    if extras != root.extras:
-                        merged[index] = Requirement(
-                            name=root.name,
-                            specifier=root.specifier,
-                            extras=extras,
-                            url=root.url,
-                            marker=root.marker,
-                            raw=root.raw,
-                        )
         roots: dict[str, Range[Version]] = {}
         for requirement in merged:
             package, requirement_range = self.add_root(requirement)
