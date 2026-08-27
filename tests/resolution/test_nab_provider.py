@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import cpip.resolution.nab_provider
+from cpip._vendor.nab_resolver.ranges import Range
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
 from cpip.index.provider import CandidateProvider
@@ -143,6 +144,57 @@ def test_constraints_apply_to_transitive_dependencies() -> None:
     dependencies = adapter.get_dependencies(root, Version("1"))
 
     assert not adapter.has_satisfying_version("dep", dependencies["dep"])
+
+
+def test_exact_transitive_dependency_skips_catalog_enumeration() -> None:
+    provider = FakeProvider()
+    provider.candidates[("app", Version("1"))].dependencies = (
+        parse_requirement("dep==2"),
+    )
+    adapter = NabProvider(provider, ResolutionConfig(constraints=("dep!=2",)))
+    root, root_range = adapter.add_root(parse_requirement("app"))
+    adapter.choose_version(root, root_range)
+    provider.available_calls = 0
+
+    dependencies = adapter.get_dependencies(root, Version("1"))
+
+    assert dependencies["dep"] == Range.singleton(Version("2"))
+    assert provider.available_calls == 0
+    assert adapter.choose_version("dep", dependencies["dep"]) is None
+
+
+def test_missing_exact_dependency_is_validated_when_selected() -> None:
+    provider = FakeProvider()
+    provider.candidates[("app", Version("1"))].dependencies = (
+        parse_requirement("dep==3"),
+    )
+    adapter = NabProvider(provider, ResolutionConfig())
+    root, root_range = adapter.add_root(parse_requirement("app"))
+    adapter.choose_version(root, root_range)
+    provider.available_calls = 0
+
+    dependencies = adapter.get_dependencies(root, Version("1"))
+
+    assert dependencies["dep"] == Range.singleton(Version("3"))
+    assert provider.available_calls == 0
+    assert adapter.choose_version("dep", dependencies["dep"]) is None
+    assert provider.available_calls == 1
+    assert ("dep", Version("3")) not in adapter.records
+
+
+def test_arbitrary_equality_dependency_still_enumerates_catalog() -> None:
+    provider = FakeProvider()
+    provider.candidates[("app", Version("1"))].dependencies = (
+        parse_requirement("dep===2"),
+    )
+    adapter = NabProvider(provider, ResolutionConfig())
+    root, root_range = adapter.add_root(parse_requirement("app"))
+    adapter.choose_version(root, root_range)
+    provider.available_calls = 0
+
+    adapter.get_dependencies(root, Version("1"))
+
+    assert provider.available_calls == 1
 
 
 def test_no_deps_does_not_expand_selected_candidate() -> None:

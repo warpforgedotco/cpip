@@ -1385,6 +1385,10 @@ class NabProvider:
                         Range.singleton(selected_dependency_version),
                     )
                     self._dependency_invalidations.setdefault(dependency_key, None)
+            pinned = dependency.specifier.exact_version
+            if pinned is not None:
+                dependencies[dependency_key] = Range.singleton(pinned)
+                continue
             allowed = self._versions(dependency_key)
             selected = [
                 candidate
@@ -1395,11 +1399,7 @@ class NabProvider:
                     for constraint in self._constraint_for(dependency_key)
                 )
             ]
-            pinned = dependency.specifier.exact_version
-            if pinned is not None:
-                dependencies[dependency_key] = Range.singleton(pinned)
-            else:
-                dependencies[dependency_key] = self._finite_range(selected)
+            dependencies[dependency_key] = self._finite_range(selected)
         result = dict(dependencies)
         self._dependency_cache[cache_key] = result
         return result
