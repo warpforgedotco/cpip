@@ -1,27 +1,3 @@
-"""The guarantees ``--require-hashes`` is supposed to make.
-
-Hash-checking mode is not only "verify a digest if one is supplied". It is a
-mode in which nothing may be installed that could not have been named exactly
-in advance, so that the set of bytes an install can produce is fixed before it
-runs. Four rules follow, and all four have to hold or the mode means nothing:
-
-* nothing from version control, whose contents are not addressed by a digest
-  at all;
-* nothing from a local directory, for the same reason;
-* every requirement pinned with ``==``, since an unpinned requirement lets a
-  later upload change what "the" artifact is;
-* every requirement carrying a hash, since a pin alone does not say which
-  bytes that release consists of.
-
-The mode turns itself on as soon as any requirement carries a hash, which is
-why the errors say so: a user who never typed ``--require-hashes`` can still
-land here by adding one ``--hash`` line.
-
-All failures are collected before any is raised. A requirements file that
-breaks the rules usually breaks them on several lines, and reporting them one
-run at a time turns one fix into five.
-"""
-
 from __future__ import annotations
 
 from cpip.core.errors import (
