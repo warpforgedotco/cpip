@@ -88,6 +88,52 @@ def point_range(values: set[int]) -> Range:
     return Range(tuple((value, True, value, True) for value in sorted(values)))
 
 
+@pytest.mark.parametrize(
+    "lower_inclusive, upper_inclusive",
+    [(False, False), (False, True), (True, False), (True, True)],
+)
+def test_between_preserves_bound_inclusivity(
+    lower_inclusive: bool,
+    upper_inclusive: bool,
+) -> None:
+    result = Range.between(
+        1,
+        2,
+        lower_inclusive=lower_inclusive,
+        upper_inclusive=upper_inclusive,
+    )
+
+    assert result._intervals == ((1, lower_inclusive, 2, upper_inclusive),)
+
+
+@pytest.mark.parametrize(
+    "lower, upper, lower_inclusive, upper_inclusive, expected",
+    [
+        (1, 1, True, True, Range.singleton(1)),
+        (1, 1, True, False, Range.empty()),
+        (1, 1, False, True, Range.empty()),
+        (1, 1, False, False, Range.empty()),
+        (2, 1, True, True, Range.empty()),
+    ],
+)
+def test_between_rejects_empty_bound_combinations(
+    lower: int,
+    upper: int,
+    lower_inclusive: bool,
+    upper_inclusive: bool,
+    expected: Range[int],
+) -> None:
+    assert (
+        Range.between(
+            lower,
+            upper,
+            lower_inclusive=lower_inclusive,
+            upper_inclusive=upper_inclusive,
+        )
+        == expected
+    )
+
+
 @pytest.mark.parametrize("seed", range(12))
 def test_contains_matches_a_linear_scan(seed: int) -> None:
     rng = random.Random(seed)

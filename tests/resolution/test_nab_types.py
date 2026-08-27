@@ -17,13 +17,29 @@ from cpip.core.versions import Version
         (
             ">1,<=2",
             Range.greater_than(Version("1")) & Range.at_most(Version("2")),
-            1,
+            0,
         ),
-        (">=2,<1", Range.empty(), 1),
-        ("==1", Range.singleton(Version("1")), 1),
+        (
+            ">1,<2",
+            Range.greater_than(Version("1")) & Range.less_than(Version("2")),
+            0,
+        ),
+        (
+            ">=1,<=2",
+            Range.at_least(Version("1")) & Range.at_most(Version("2")),
+            0,
+        ),
+        (
+            ">=1,<2",
+            Range.at_least(Version("1")) & Range.less_than(Version("2")),
+            0,
+        ),
+        (">=2,<1", Range.empty(), 0),
+        (">=1,<1", Range.empty(), 0),
+        ("==1", Range.singleton(Version("1")), 0),
     ],
 )
-def test_implied_range_skips_identity_intersections(
+def test_implied_range_avoids_redundant_intersections(
     monkeypatch: pytest.MonkeyPatch,
     specifier: str,
     expected: Range[Version],
