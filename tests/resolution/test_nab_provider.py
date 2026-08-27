@@ -264,6 +264,25 @@ def test_no_deps_does_not_expand_selected_candidate() -> None:
     assert adapter.get_dependencies(root, Version("1")) == {}
 
 
+def test_leaf_dependencies_skip_empty_prefetch_and_are_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = NabProvider(FakeProvider(), ResolutionConfig())
+    package, version_range = adapter.add_root(parse_requirement("dep"))
+    version = adapter.choose_version(package, version_range)
+    assert version == Version("2")
+
+    def fail_prefetch(_requirements) -> None:
+        raise AssertionError("leaf candidates do not need dependency prefetch")
+
+    monkeypatch.setattr(adapter, "_prefetch_available_versions", fail_prefetch)
+
+    dependencies = adapter.get_dependencies(package, version)
+
+    assert dependencies == {}
+    assert adapter.get_dependencies(package, version) is dependencies
+
+
 def test_has_satisfying_version_applies_requirement_and_constraints() -> None:
     adapter = NabProvider(FakeProvider(), ResolutionConfig(constraints=("dep==2",)))
     package, _ = adapter.add_root(parse_requirement("dep<2"))

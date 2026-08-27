@@ -1253,9 +1253,14 @@ class NabProvider:
             raise RuntimeError(
                 f"NAB requested dependencies for unselected candidate {package}=={version}"
             )
+        record_dependencies = record.dependencies
+        if not record_dependencies:
+            result: dict[str, Range[Version]] = {}
+            self._dependency_cache[cache_key] = result
+            return result
         while True:
             normalized_dependencies = []
-            for dependency in record.dependencies:
+            for dependency in record_dependencies:
                 if not marker_applies(
                     dependency.marker,
                     extras=self.requirements[package].extras,
@@ -1317,6 +1322,7 @@ class NabProvider:
                 self._dependency_cache[cache_key] = result
                 return result
             record = self.records[(package, version)]
+            record_dependencies = record.dependencies
         cache_key = (package, version, tuple(sorted(self.requirements[package].extras)))
         self._prefetch_available_versions(
             tuple(
