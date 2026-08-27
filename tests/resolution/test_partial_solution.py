@@ -221,6 +221,60 @@ def test_first_derivations_retain_their_range_objects() -> None:
     assert internals._range_ops == {}
 
 
+def test_derive_returns_the_cached_effective_range() -> None:
+    solution: PartialSolution[str, int] = PartialSolution()
+    allowed = Range.at_least(1)
+    excluded = Range.singleton(4)
+
+    positive = solution.derive("positive", allowed, positive=True, cause=CAUSE)
+    negative = solution.derive("negative", excluded, positive=False, cause=CAUSE)
+    solution.derive("mixed", allowed, positive=True, cause=CAUSE)
+    mixed = solution.derive("mixed", excluded, positive=False, cause=CAUSE)
+
+    assert positive is solution.get("positive")
+    assert positive is allowed
+    assert negative is solution.get("negative")
+    assert 3 in negative
+    assert 4 not in negative
+    assert mixed is solution.get("mixed")
+    assert 3 in mixed
+    assert 4 not in mixed
+
+    epoch_before = solution.contradiction_epoch
+    empty = solution.derive("empty", Range.empty(), positive=True, cause=CAUSE)
+
+    assert empty is solution.get("empty")
+    assert empty.is_empty
+    assert solution.contradiction_epoch == epoch_before + 1
+    assert solution.trail_length == 5
+    empty_assignment = cast(
+        "Assignment[str, int]", solution.assignments_for("empty")[-1]
+    )
+    assert empty_assignment.trail_index == solution.trail_length - 1
+    assert cast("Any", solution)._assignments[-1] is empty_assignment
+
+
+def test_decide_returns_exact_range_after_recording_trails() -> None:
+    solution: PartialSolution[str, int] = PartialSolution()
+    excluded = Range.singleton(2)
+    solution.derive("package", excluded, positive=False, cause=CAUSE)
+
+    exact = solution.decide("package", 2)
+
+    assignment = cast("Assignment[str, int]", solution.assignments_for("package")[-1])
+    internals = cast("Any", solution)
+    assert exact is assignment.accumulated_range
+    assert exact is assignment.cum_positive
+    assert exact is solution.positive_range("package")
+    assert internals._assignments[-1] is assignment
+    assert internals._assignments_by_package["package"][-1] is assignment
+
+    effective = solution.get("package")
+    assert effective is not exact
+    assert effective is not None
+    assert effective.is_empty
+
+
 def test_replayed_derivations_reuse_intersection_and_union_results() -> None:
     """A backtrack replay gets the same memoized range objects for both signs."""
     solution: PartialSolution[str, int] = PartialSolution()

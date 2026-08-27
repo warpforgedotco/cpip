@@ -123,21 +123,53 @@ def _unit_propagation_core(
             initial_groups = ()
         else:
             groups = _related_incompatibility_groups(resolver, package)
-        nonempty = tuple(group for group in groups if group)
-        if not nonempty:
-            continue
-        if len(nonempty) == 1:
-            related_indices = nonempty[0]
-        elif len(nonempty) == 2:
-            left, right = nonempty
-            if left[-1] < right[0]:
-                related_indices = chain(left, right)
-            elif right[-1] < left[0]:
-                related_indices = chain(right, left)
+        # Production dispatch returns two or three groups.  Keep that path
+        # allocation-free while retaining arbitrary arity for private callers.
+        group_count = len(groups)
+        if group_count not in (2, 3):
+            nonempty = tuple(group for group in groups if group)
+            if not nonempty:
+                continue
+            if len(nonempty) == 1:
+                related_indices = nonempty[0]
+            elif len(nonempty) == 2:
+                left = nonempty[0]
+                right = nonempty[1]
+                if left[-1] < right[0]:
+                    related_indices = chain(left, right)
+                elif right[-1] < left[0]:
+                    related_indices = chain(right, left)
+                else:
+                    related_indices = merge(left, right)
             else:
-                related_indices = merge(left, right)
+                related_indices = merge(*nonempty)
         else:
-            related_indices = merge(*nonempty)
+            first = groups[0]
+            second = groups[1]
+            third: Sequence[int] = groups[2] if group_count == 3 else ()
+            if first and second and third:
+                related_indices = merge(first, second, third)
+            else:
+                if first:
+                    left = first
+                    right = second if second else third
+                elif second:
+                    left = second
+                    right = third
+                else:
+                    left = third
+                    right = ()
+
+                if not left:
+                    continue
+                if not right:
+                    related_indices = left
+                elif left[-1] < right[0]:
+                    related_indices = chain(left, right)
+                elif right[-1] < left[0]:
+                    related_indices = chain(right, left)
+                else:
+                    related_indices = merge(left, right)
 
         previous_index = -1
         for incompatibility_index in related_indices:
@@ -150,6 +182,7 @@ def _unit_propagation_core(
             incompatibility = incompatibilities[incompatibility_index]
 
             undetermined_term = None
+            undetermined_assignment: RangeProtocol[Any] | None = None
             conflict = True
             for term in incompatibility.terms:
                 assignment = solution_get(term.package)
@@ -225,6 +258,7 @@ def _unit_propagation_core(
                     undetermined_term = None
                     break
                 undetermined_term = term
+                undetermined_assignment = assignment
 
             if undetermined_term is None:
                 if conflict:
@@ -233,14 +267,13 @@ def _unit_propagation_core(
 
             negated_package = undetermined_term.package
             negated_positive = not undetermined_term._positive  # noqa: SLF001
-            range_before = solution_get(negated_package)
-            derive(
+            range_before = undetermined_assignment
+            range_after = derive(
                 negated_package,
                 undetermined_term.constraint,
                 positive=negated_positive,
                 cause=incompatibility,
             )
-            range_after = solution_get(negated_package)
 
             # A derive that empties a range advances the epoch, which retires
             # stamps taken before it.

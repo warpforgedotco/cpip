@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 import cpip.resolution.nab_provider as nab_provider
 from cpip._vendor.nab_resolver import propagate
+from cpip._vendor.nab_resolver.ranges import Range
 from cpip.core.errors import ResolutionError
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
@@ -209,6 +210,99 @@ def test_impossible_pins_are_skipped_without_conflicts(tmp_path: Path) -> None:
     assert result.metrics["nab_conflicts"] <= 2, result.metrics
 
 
+@pytest.mark.parametrize(
+    "implied_ranges, expected, expected_relations, expected_intersections",
+    [
+        ([Range.empty(), Range.full()], True, 0, 0),
+        (
+            [Range.singleton(Version("1")), Range.singleton(Version("2"))],
+            True,
+            1,
+            0,
+        ),
+        (
+            [Range.singleton(Version("1")), Range.at_least(Version("1"))],
+            False,
+            1,
+            0,
+        ),
+        (
+            [
+                Range.between(Version("1"), Version("3")),
+                Range.between(Version("2"), Version("4")),
+                Range.at_most(Version("1")),
+            ],
+            True,
+            2,
+            1,
+        ),
+    ],
+)
+def test_pin_domain_fold_avoids_redundant_intersections(
+    monkeypatch: pytest.MonkeyPatch,
+    implied_ranges: list[Range[Version]],
+    expected: bool,
+    expected_relations: int,
+    expected_intersections: int,
+) -> None:
+    adapter = NabProvider(
+        CandidateProvider.from_options(no_index=True),
+        ResolutionConfig(ignore_installed=True),
+    )
+    version = Version("1")
+    pins = tuple(
+        parse_requirement(f"child-{index}==1") for index in range(len(implied_ranges))
+    )
+    candidates = {
+        ("parent", version): SimpleNamespace(dependencies=pins),
+        **{
+            (f"child-{index}", version): SimpleNamespace(
+                dependencies=(parse_requirement(f"shared=={index + 1}"),),
+            )
+            for index in range(len(implied_ranges))
+        },
+    }
+    ranges_by_specifier = {
+        f"=={index + 1}": implied for index, implied in enumerate(implied_ranges)
+    }
+    monkeypatch.setattr(
+        adapter,
+        "_catalog_candidate",
+        lambda package, candidate_version: candidates.get(
+            (package, candidate_version),
+        ),
+    )
+    monkeypatch.setattr(
+        nab_provider,
+        "_implied_range",
+        lambda specifier: ranges_by_specifier[specifier.text],
+    )
+
+    relation_calls = 0
+    intersection_calls = 0
+    original_relation = Range.relation
+    original_and = Range.__and__
+
+    def counting_relation(self: Range[Version], other: Range[Version]):
+        nonlocal relation_calls
+        relation_calls += 1
+        return original_relation(self, other)
+
+    def counting_and(self: Range[Version], other: object) -> Range[Version]:
+        nonlocal intersection_calls
+        intersection_calls += 1
+        return original_and(self, other)
+
+    monkeypatch.setattr(Range, "relation", counting_relation)
+    monkeypatch.setattr(Range, "__and__", counting_and)
+
+    assert (
+        adapter._compute_pins_are_impossible("parent", version, frozenset()) is expected
+    )
+    assert relation_calls == expected_relations
+    assert intersection_calls == expected_intersections
+
+
 def test_transitive_conflicts_are_skipped_without_backtracking(tmp_path: Path) -> None:
     """A known root range can disqualify every child of a newer candidate."""
     wheelhouse = tmp_path / "wheelhouse"
@@ -235,6 +329,71 @@ def test_transitive_conflicts_are_skipped_without_backtracking(tmp_path: Path) -
         "fam-shared": "1.1.0",
     }
     assert result.metrics["nab_conflicts"] <= 2, result.metrics
+
+
+@pytest.mark.parametrize(
+    "implied, expected",
+    [
+        (Range.singleton(Version("2")), True),
+        (Range.between(Version("1"), Version("3")), False),
+    ],
+)
+@pytest.mark.parametrize(
+    "method_name",
+    ["_partial_solution_rejects", "_candidate_conflicts_with_active"],
+)
+def test_active_constraint_checks_disjoint_without_intersection(
+    method_name: str,
+    implied: Range[Version],
+    expected: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = NabProvider(
+        CandidateProvider.from_options(no_index=True),
+        ResolutionConfig(ignore_installed=True),
+    )
+    dependency = parse_requirement("shared>=1")
+    candidate = SimpleNamespace(source_kind="wheel", dependencies=(dependency,))
+    adapter.requirements["parent"] = parse_requirement("parent")
+    adapter._root_packages.add("parent")
+    adapter._constrained_root_packages.add("shared")
+    active = Range.singleton(Version("1"))
+    adapter._active_positive_ranges = {"shared": active}
+    monkeypatch.setattr(adapter, "_catalog_candidate", lambda *_args: candidate)
+    monkeypatch.setattr(
+        adapter,
+        "_dependency_domain_is_blocked",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(nab_provider, "_implied_range", lambda _specifier: implied)
+
+    disjoint_calls = 0
+    original_is_disjoint = Range.is_disjoint
+
+    def counting_is_disjoint(
+        self: Range[Version],
+        other: Range[Version],
+    ) -> bool:
+        nonlocal disjoint_calls
+        disjoint_calls += 1
+        return original_is_disjoint(self, other)
+
+    def fail_intersection(self: Range[Version], other: object) -> Range[Version]:
+        raise AssertionError((self, other))
+
+    monkeypatch.setattr(Range, "is_disjoint", counting_is_disjoint)
+    monkeypatch.setattr(Range, "__and__", fail_intersection)
+
+    if method_name == "_partial_solution_rejects":
+        verdict = adapter._partial_solution_rejects("parent", Version("1"))
+    else:
+        verdict = adapter._candidate_conflicts_with_active(
+            candidate,
+            extras=frozenset(),
+        )
+
+    assert verdict is expected
+    assert disjoint_calls == 1
 
 
 def test_selected_dependency_conflicts_are_skipped_before_backtracking(
@@ -461,12 +620,10 @@ def resolve_or_raise(wheelhouse: Path, roots: list[str]) -> None:
     engine.resolve(roots)
 
 
-def test_verdicts_are_not_reused_across_extras(tmp_path: Path) -> None:
-    """Extras gate which dependencies apply, so they must key the memo.
-
-    A verdict reached under narrower extras, reused after they widen, skips a
-    version that the wider set may well allow.
-    """
+def test_verdict_cache_shares_extra_order_but_isolates_membership(
+    tmp_path: Path,
+) -> None:
+    """Extras sets with equal members share; different members never do."""
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
     make_wheel(wheelhouse, "app", "1.0.0")
@@ -476,16 +633,20 @@ def test_verdicts_are_not_reused_across_extras(tmp_path: Path) -> None:
         no_index=True,
     )
     adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
-    adapter.requirements["app"] = parse_requirement("app")
+    adapter.requirements["app"] = parse_requirement("app[a,b]")
 
     adapter._pins_are_impossible("app", Version("1.0.0"))
-    narrow = dict(adapter._preflight_cache)
+    first = dict(adapter._preflight_cache)
 
-    adapter.requirements["app"] = parse_requirement("app[extra]")
+    adapter.requirements["app"] = parse_requirement("app[b,a]")
     adapter._pins_are_impossible("app", Version("1.0.0"))
+    assert adapter._preflight_cache == first
 
-    assert len(adapter._preflight_cache) == len(narrow) + 1, (
-        "widening extras reused the earlier verdict"
+    adapter.requirements["app"] = parse_requirement("app[a,b,c]")
+    adapter._pins_are_impossible("app", Version("1.0.0"))
+    assert len(adapter._preflight_cache) == len(first) + 1
+    assert all(
+        isinstance(cache_key[2], frozenset) for cache_key in adapter._preflight_cache
     )
 
 

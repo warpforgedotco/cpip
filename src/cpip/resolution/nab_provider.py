@@ -79,22 +79,24 @@ class NabProvider:
         self._priority_memo: dict[
             str, tuple[Requirement, int, tuple[int, int, str]]
         ] = {}
-        self._installed_cache: dict[str, InstalledCandidate | None] = {}
-        self._preflight_cache: dict[tuple[str, Version, tuple[str, ...]], bool] = {}
+        self._installed_cache: dict[
+            tuple[str, frozenset[str]], InstalledCandidate | None
+        ] = {}
+        self._preflight_cache: dict[tuple[str, Version, frozenset[str]], bool] = {}
         self._catalog_candidate_cache: dict[tuple[str, Version], object | None] = {}
         self._catalog_by_version_cache: dict[str, dict[Version, object | None]] = {}
         self._dependency_cache: dict[
-            tuple[str, Version, tuple[str, ...]], Mapping[str, Range[Version]]
+            tuple[str, Version, frozenset[str]], Mapping[str, Range[Version]]
         ] = {}
         self._active_decisions: Mapping[str, Version] = {}
         self._active_positive_ranges: Mapping[str, RangeProtocol[Version]] = {}
         self._root_packages: set[str] = set()
         self._constrained_root_packages: set[str] = set()
         self._partial_preflight_cache: dict[
-            tuple[str, Version, tuple[str, ...]], bool
+            tuple[str, Version, frozenset[str]], bool
         ] = {}
         self._active_candidate_conflict_cache: dict[
-            tuple[str, Version, tuple[str, ...]], bool
+            tuple[str, Version, frozenset[str]], bool
         ] = {}
         self._forward_catalog_versions: dict[str, tuple[Version, ...]] = {}
         self._dependency_invalidations: dict[str, None] = {}
@@ -130,7 +132,9 @@ class NabProvider:
             constraint.url is not None for constraint in self._constraint_for(package)
         ):
             return None
-        if package not in self._installed_cache:
+        extras = self.requirements[package].extras
+        cache_key = (package, extras)
+        if cache_key not in self._installed_cache:
             distribution = (
                 find_installed(package)
                 if self.installed is None
@@ -142,14 +146,16 @@ class NabProvider:
                 try:
                     candidate = InstalledCandidate(
                         distribution,
-                        frozenset(self.requirements[package].extras),
+                        extras,
                     )
                 except ValueError:
                     candidate = None
-            self._installed_cache[package] = candidate
-        return self._installed_cache[package]
+            self._installed_cache[cache_key] = candidate
+        return self._installed_cache[cache_key]
 
     def _constraint_for(self, package: str) -> tuple[Requirement, ...]:
+        if not self.constraints_by_name:
+            return ()
         name = canonicalize_name(package.split("[", 1)[0])
         return self.constraints_by_name.get(name, ())
 
@@ -214,7 +220,7 @@ class NabProvider:
         cache_key = (
             package,
             requirement.specifier.text,
-            tuple(sorted(requirement.extras)),
+            requirement.extras,
             requirement.url,
         )
         cached = self._version_cache.get(cache_key)
@@ -272,11 +278,18 @@ class NabProvider:
         requirement = self.requirements[package]
         constraints = self._constraint_for(package)
         versions = self._versions(package)
+        if not constraints:
+            return tuple(
+                version
+                for version in versions
+                if requirement.specifier.contains(version, allow_prereleases=True)
+                and (not version.is_prerelease or self._allows(package, version))
+            )
         return tuple(
             version
             for version in versions
             if requirement.specifier.contains(version, allow_prereleases=True)
-            and self._allows(package, version)
+            and (not version.is_prerelease or self._allows(package, version))
             and all(
                 constraint.specifier.contains(version, allow_prereleases=True)
                 for constraint in constraints
@@ -288,23 +301,28 @@ class NabProvider:
     ) -> Version | None:
         requirement = self.requirements[package]
         constraints = self._constraint_for(package)
-        url_constraints = tuple(
-            constraint for constraint in constraints if constraint.url is not None
-        )
-        constraint_urls = tuple(
-            canonical_url(url)
-            for constraint in url_constraints
-            if (url := constraint.url) is not None
-        )
-        if len(set(constraint_urls)) > 1:
-            return None
-        requirement_url = requirement.url
-        if (
-            requirement_url is not None
-            and constraint_urls
-            and any(canonical_url(requirement_url) != url for url in constraint_urls)
-        ):
-            return None
+        if constraints:
+            url_constraints = tuple(
+                constraint for constraint in constraints if constraint.url is not None
+            )
+            constraint_urls = tuple(
+                canonical_url(url)
+                for constraint in url_constraints
+                if (url := constraint.url) is not None
+            )
+            if len(set(constraint_urls)) > 1:
+                return None
+            requirement_url = requirement.url
+            if (
+                requirement_url is not None
+                and constraint_urls
+                and any(
+                    canonical_url(requirement_url) != url for url in constraint_urls
+                )
+            ):
+                return None
+        else:
+            url_constraints = ()
         candidate_requirement = requirement
         if len(url_constraints) == 1 and requirement.url is None:
             candidate_requirement = url_constraints[0]
@@ -341,7 +359,8 @@ class NabProvider:
         matching = [
             version
             for version in versions
-            if version in version_range and self._allows(package, version)
+            if version in version_range
+            and (not version.is_prerelease or self._allows(package, version))
         ]
         control = getattr(self.provider, "release_control", None)
         if not self.allow_prereleases and (
@@ -354,17 +373,18 @@ class NabProvider:
             matching = [
                 version for version in matching if version in constrained_versions
             ]
-        matching = [
-            version
-            for version in matching
-            if all(
-                constraint.specifier.contains(
-                    version,
-                    allow_prereleases=self.allow_prereleases,
+        if constraints:
+            matching = [
+                version
+                for version in matching
+                if all(
+                    constraint.specifier.contains(
+                        version,
+                        allow_prereleases=self.allow_prereleases,
+                    )
+                    for constraint in constraints
                 )
-                for constraint in constraints
-            )
-        ]
+            ]
         if not matching:
             return None
         installed = self._installed_candidate(package)
@@ -713,7 +733,7 @@ class NabProvider:
         ):
             return False
 
-        extras = tuple(sorted(self.requirements[package].extras))
+        extras = self.requirements[package].extras
         cache_key = (package, version, extras)
         cached = self._partial_preflight_cache.get(cache_key)
         if cached is not None:
@@ -734,9 +754,8 @@ class NabProvider:
 
             dependency_name = _key(dependency)
             active = self._active_constraint_for(dependency_name)
-            if (
-                active is not None
-                and (active & _implied_range(dependency.specifier)).is_empty
+            if active is not None and active.is_disjoint(
+                _implied_range(dependency.specifier)
             ):
                 verdict = True
                 break
@@ -765,24 +784,33 @@ class NabProvider:
         """Whether every selectable child release conflicts with active ranges."""
         child_name = _key(dependency)
         constraints = self._constraint_for(child_name)
-        matching = [
-            version
-            for version in self._matching_catalog_versions(dependency)
-            if (active is None or version in active)
-            and self._allows(child_name, version)
-            and all(
-                constraint.url is None
-                and constraint.specifier.contains(
-                    version,
-                    allow_prereleases=True,
+        catalog_versions = self._matching_catalog_versions(dependency)
+        if constraints:
+            matching = [
+                version
+                for version in catalog_versions
+                if (active is None or version in active)
+                and (not version.is_prerelease or self._allows(child_name, version))
+                and all(
+                    constraint.url is None
+                    and constraint.specifier.contains(
+                        version,
+                        allow_prereleases=True,
+                    )
+                    for constraint in constraints
                 )
-                for constraint in constraints
-            )
-        ]
+            ]
+        else:
+            matching = [
+                version
+                for version in catalog_versions
+                if (active is None or version in active)
+                and (not version.is_prerelease or self._allows(child_name, version))
+            ]
         if not matching:
             return False
 
-        child_extras = tuple(sorted(dependency.extras))
+        child_extras = dependency.extras
         for start in range(0, len(matching), _FORWARD_CHECK_BATCH):
             batch = matching[start : start + _FORWARD_CHECK_BATCH]
             self._prefetch_catalog_candidates(child_name, batch)
@@ -842,7 +870,7 @@ class NabProvider:
         self,
         candidate: object | None,
         *,
-        extras: tuple[str, ...],
+        extras: frozenset[str],
     ) -> bool:
         """Prove that one child candidate contradicts the positive solution."""
         if candidate is None or getattr(candidate, "source_kind", None) != "wheel":
@@ -857,9 +885,8 @@ class NabProvider:
             if dependency.url is not None:
                 continue
             active = self._active_constraint_for(_key(dependency))
-            if (
-                active is not None
-                and (active & _implied_range(dependency.specifier)).is_empty
+            if active is not None and active.is_disjoint(
+                _implied_range(dependency.specifier)
             ):
                 return True
         return False
@@ -872,7 +899,7 @@ class NabProvider:
         provable emptiness -- two pins whose dependency requirements share a
         package but no version -- answers ``True``.
         """
-        extras = tuple(sorted(self.requirements[package].extras))
+        extras = self.requirements[package].extras
         cache_key = (package, version, extras)
         cached = self._preflight_cache.get(cache_key)
         if cached is not None:
@@ -886,7 +913,7 @@ class NabProvider:
         self,
         package: str,
         version: Version,
-        extras: tuple[str, ...],
+        extras: frozenset[str],
     ) -> bool:
         if not isinstance(self.provider, CandidateProvider):
             return False
@@ -933,7 +960,15 @@ class NabProvider:
                 name = _key(grandchild)
                 implied = _implied_range(grandchild.specifier)
                 narrowed = domains.get(name)
-                narrowed = implied if narrowed is None else narrowed & implied
+                if narrowed is None:
+                    narrowed = implied
+                else:
+                    relation = narrowed.relation(implied)
+                    if relation.is_disjoint:
+                        return True
+                    if relation.is_subset:
+                        continue
+                    narrowed = narrowed & implied
                 if narrowed.is_empty:
                     return True
                 domains[name] = narrowed
@@ -1232,7 +1267,7 @@ class NabProvider:
     ) -> Mapping[str, Range[Version]]:
         if self.no_deps:
             return {}
-        cache_key = (package, version, tuple(sorted(self.requirements[package].extras)))
+        cache_key = (package, version, self.requirements[package].extras)
         cached = self._dependency_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -1241,27 +1276,49 @@ class NabProvider:
             raise RuntimeError(
                 f"NAB requested dependencies for unselected candidate {package}=={version}"
             )
-        normalized_dependencies = []
-        for dependency in record.dependencies:
-            if not marker_applies(
-                dependency.marker,
-                extras=self.requirements[package].extras,
-            ):
-                continue
-            if dependency.name.startswith(("file://", "http://", "https://")):
-                name = urlsplit(dependency.name).path.rstrip("/").rsplit("/", 1)[-1]
-                dependency = Requirement(
-                    name=name or dependency.name,
-                    specifier=dependency.specifier,
-                    extras=dependency.extras,
-                    url=dependency.url or dependency.name,
-                    marker=dependency.marker,
-                    raw=dependency.raw,
+        record_dependencies = record.dependencies
+        if not record_dependencies:
+            result: dict[str, Range[Version]] = {}
+            self._dependency_cache[cache_key] = result
+            return result
+        while True:
+            normalized_dependencies = []
+            for dependency in record_dependencies:
+                if not marker_applies(
+                    dependency.marker,
+                    extras=self.requirements[package].extras,
+                ):
+                    continue
+                if dependency.name.startswith(("file://", "http://", "https://")):
+                    name = urlsplit(dependency.name).path.rstrip("/").rsplit("/", 1)[-1]
+                    dependency = Requirement(
+                        name=name or dependency.name,
+                        specifier=dependency.specifier,
+                        extras=dependency.extras,
+                        url=dependency.url or dependency.name,
+                        marker=dependency.marker,
+                        raw=dependency.raw,
+                    )
+                normalized_dependencies.append(dependency)
+            dependencies_records = tuple(normalized_dependencies)
+            self_dependencies = [
+                dependency
+                for dependency in dependencies_records
+                if _key(dependency) == package
+            ]
+            if not self_dependencies:
+                break
+            if any(
+                dependency.url is None
+                and not dependency.specifier.contains(
+                    version,
+                    allow_prereleases=True,
                 )
-            normalized_dependencies.append(dependency)
-        dependencies_records = tuple(normalized_dependencies)
-        self_dependencies = [d for d in dependencies_records if _key(d) == package]
-        if self_dependencies:
+                for dependency in self_dependencies
+            ):
+                result = {package: Range.empty()}
+                self._dependency_cache[cache_key] = result
+                return result
             merged_extras = frozenset(
                 self.requirements[package].extras
                 | frozenset(
@@ -1271,6 +1328,8 @@ class NabProvider:
                 )
             )
             current = self.requirements[package]
+            if merged_extras == current.extras:
+                break
             self.requirements[package] = Requirement(
                 name=current.name,
                 specifier=current.specifier,
@@ -1279,19 +1338,25 @@ class NabProvider:
                 marker=current.marker,
                 raw=current.raw,
             )
-            self.choose_version(package, Range.singleton(version))
+            selected = self.choose_version(package, Range.singleton(version))
+            if selected != version:
+                result = {package: Range.empty()}
+                cache_key = (package, version, merged_extras)
+                self._dependency_cache[cache_key] = result
+                return result
             record = self.records[(package, version)]
-        self._prefetch_available_versions(
-            tuple(
+            record_dependencies = record.dependencies
+        cache_key = (package, version, self.requirements[package].extras)
+        prefetch_dependencies = dependencies_records
+        if self_dependencies:
+            prefetch_dependencies = tuple(
                 dependency
                 for dependency in dependencies_records
                 if _key(dependency) != package
             )
-        )
+        self._prefetch_available_versions(prefetch_dependencies)
         dependencies: dict[str, Range[Version]] = {}
         for dependency in dependencies_records:
-            if _key(dependency) == package:
-                continue
             if dependency.url is None and dependency.name.startswith(
                 ("file://", "http://", "https://")
             ):
@@ -1340,14 +1405,16 @@ class NabProvider:
                     )
                     dependency_key = _key(dependency)
             dependency_constraints = self._constraint_for(dependency_key)
-            dependency_url = next(
-                (
-                    constraint.url
-                    for constraint in dependency_constraints
-                    if constraint.url is not None
-                ),
-                dependency.url,
-            )
+            dependency_url = dependency.url
+            if dependency_constraints:
+                dependency_url = next(
+                    (
+                        constraint.url
+                        for constraint in dependency_constraints
+                        if constraint.url is not None
+                    ),
+                    dependency.url,
+                )
             if dependency_url != dependency.url:
                 dependency = Requirement(
                     name=dependency.name,
@@ -1385,21 +1452,38 @@ class NabProvider:
                         Range.singleton(selected_dependency_version),
                     )
                     self._dependency_invalidations.setdefault(dependency_key, None)
-            allowed = self._versions(dependency_key)
-            selected = [
-                candidate
-                for candidate in allowed
-                if dependency.specifier.contains(candidate, allow_prereleases=True)
-                and all(
-                    constraint.specifier.contains(candidate, allow_prereleases=True)
-                    for constraint in self._constraint_for(dependency_key)
-                )
-            ]
             pinned = dependency.specifier.exact_version
             if pinned is not None:
-                dependencies[dependency_key] = Range.singleton(pinned)
+                dependency_range = Range.singleton(pinned)
+                previous = dependencies.get(dependency_key)
+                dependencies[dependency_key] = (
+                    dependency_range
+                    if previous is None
+                    else previous & dependency_range
+                )
+                continue
+            allowed = self._versions(dependency_key)
+            if dependency_constraints:
+                selected = [
+                    candidate
+                    for candidate in allowed
+                    if dependency.specifier.contains(candidate, allow_prereleases=True)
+                    and all(
+                        constraint.specifier.contains(candidate, allow_prereleases=True)
+                        for constraint in dependency_constraints
+                    )
+                ]
             else:
-                dependencies[dependency_key] = self._finite_range(selected)
+                selected = [
+                    candidate
+                    for candidate in allowed
+                    if dependency.specifier.contains(candidate, allow_prereleases=True)
+                ]
+            dependency_range = self._finite_range(selected)
+            previous = dependencies.get(dependency_key)
+            dependencies[dependency_key] = (
+                dependency_range if previous is None else previous & dependency_range
+            )
         result = dict(dependencies)
         self._dependency_cache[cache_key] = result
         return result
@@ -1501,6 +1585,13 @@ class NabProvider:
             )
         package = _key(requirement)
         previous = self.requirements.get(package)
+        if (
+            previous is not None
+            and previous.url is not None
+            and requirement.url is not None
+            and canonical_url(previous.url) != canonical_url(requirement.url)
+        ):
+            return package, Range.empty()
         if previous is not None and previous.extras != requirement.extras:
             requirement = Requirement(
                 name=requirement.name,
@@ -1528,41 +1619,16 @@ class NabProvider:
         return package, self._finite_range(versions)
 
     def add_roots(self, requirements: list[Requirement]) -> dict[str, Range[Version]]:
-        """Register roots with extras merged before NAB builds its graph."""
+        """Register roots without speculatively materializing their candidates."""
         self._prefetch_available_versions(tuple(requirements))
-        root_names = {requirement.canonical_name for requirement in requirements}
         merged = list(requirements)
-        for requirement in tuple(merged):
-            candidate = next(
-                iter(self.provider.find_candidates(requirement, allowed_versions=None)),
-                None,
-            )
-            if candidate is None:
-                continue
-            try:
-                dependencies = getattr(candidate, "dependencies", ())
-            except (OSError, ValueError):
-                continue
-            for dependency in dependencies:
-                if dependency.canonical_name not in root_names or not dependency.extras:
-                    continue
-                for index, root in enumerate(merged):
-                    if root.canonical_name != dependency.canonical_name:
-                        continue
-                    extras = frozenset(root.extras | dependency.extras)
-                    if extras != root.extras:
-                        merged[index] = Requirement(
-                            name=root.name,
-                            specifier=root.specifier,
-                            extras=extras,
-                            url=root.url,
-                            marker=root.marker,
-                            raw=root.raw,
-                        )
         roots: dict[str, Range[Version]] = {}
         for requirement in merged:
             package, requirement_range = self.add_root(requirement)
-            roots[package] = roots.get(package, requirement_range) & requirement_range
+            existing = roots.get(package)
+            roots[package] = (
+                requirement_range if existing is None else existing & requirement_range
+            )
         self._root_packages = set(roots)
         self._constrained_root_packages = {
             _key(requirement)

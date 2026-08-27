@@ -323,13 +323,23 @@ class Range(Generic[VersionType]):
         return cls(((NEGATIVE_INFINITY, False, version, False),))
 
     @classmethod
-    def between(cls, lower: VersionType, upper: VersionType) -> Range[VersionType]:
-        """Create ``[lower, upper)``, or the empty range if ``lower >= upper``."""
+    def between(
+        cls,
+        lower: VersionType,
+        upper: VersionType,
+        *,
+        lower_inclusive: bool = True,
+        upper_inclusive: bool = False,
+    ) -> Range[VersionType]:
+        """Create one bounded interval, or empty when its bounds exclude all."""
         if _interval_is_empty(
-            lower, lower_inclusive=True, upper=upper, upper_inclusive=False
+            lower,
+            lower_inclusive=lower_inclusive,
+            upper=upper,
+            upper_inclusive=upper_inclusive,
         ):
             return cls(())
-        return cls(((lower, True, upper, False),))
+        return cls(((lower, lower_inclusive, upper, upper_inclusive),))
 
     @property
     def is_empty(self) -> bool:

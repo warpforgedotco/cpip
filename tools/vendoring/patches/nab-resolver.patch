@@ -23,7 +23,7 @@ index 5d0bc55..9223895 100644
      )
  
 diff --git a/src/cpip/_vendor/nab_resolver/incompat_index.py b/src/cpip/_vendor/nab_resolver/incompat_index.py
-index c771106..22c8e81 100644
+index c771106..4d6b3a8 100644
 --- a/src/cpip/_vendor/nab_resolver/incompat_index.py
 +++ b/src/cpip/_vendor/nab_resolver/incompat_index.py
 @@ -11,6 +11,7 @@ per-clause skip stamp.
@@ -34,9 +34,11 @@ index c771106..22c8e81 100644
  from typing import TYPE_CHECKING, Any
  
  from .types import Incompatibility, IncompatibilityCause, Term
-@@ -21,11 +22,14 @@ if TYPE_CHECKING:
+@@ -20,12 +21,16 @@ if TYPE_CHECKING:
+ 
  
  __all__ = [
++    "NO_EXACT_PARENT_VERSION",
      "add_incompatibility",
 +    "add_dependency_incompatibility",
      "dependency_merge_key",
@@ -44,12 +46,12 @@ index c771106..22c8e81 100644
      "maybe_merge_dependency",
  ]
  
-+_MISSING = object()
++NO_EXACT_PARENT_VERSION = object()
 +
  
  # A dependency-style clause is exactly two terms (parent + dep).
  _DEPENDENCY_CLAUSE_TERMS = 2
-@@ -35,19 +39,138 @@ _DEPENDENCY_CLAUSE_TERMS = 2
+@@ -35,19 +40,138 @@ _DEPENDENCY_CLAUSE_TERMS = 2
  _NOT_CONTRADICTED = -1
  
  
@@ -97,7 +99,7 @@ index c771106..22c8e81 100644
 +    resolver: Resolver[Any, Any],
 +    incompatibility: Incompatibility[Any, Any],
 +    *,
-+    exact_parent_version: Any = _MISSING,
++    exact_parent_version: Any = NO_EXACT_PARENT_VERSION,
 +) -> int:
      index = len(resolver.incompatibilities)
      resolver.incompatibilities.append(incompatibility)
@@ -108,7 +110,7 @@ index c771106..22c8e81 100644
 +    parent, dependency = incompatibility.terms
 +    resolver.dependency_parent_incompatibilities[parent.package].append(index)
 +    resolver.package_to_incompatibilities[dependency.package].append(index)
-+    if exact_parent_version is _MISSING:
++    if exact_parent_version is NO_EXACT_PARENT_VERSION:
 +        _register_fallback_parent(resolver, parent.package, index)
 +    else:
 +        _register_exact_parent(
@@ -139,7 +141,7 @@ index c771106..22c8e81 100644
 +    dependency_package: Any,
 +    dependency_range: Any,
 +    *,
-+    exact_parent_version: Any = _MISSING,
++    exact_parent_version: Any = NO_EXACT_PARENT_VERSION,
 +) -> Incompatibility[Any, Any]:
 +    """Intern a cross-package dependency clause before constructing it."""
 +    key = (package, dependency_package, dependency_range, False)
@@ -148,7 +150,7 @@ index c771106..22c8e81 100644
 +        existing = resolver.incompatibilities[existing_index]
 +        existing_package, existing_dependency = existing.terms
 +        if package_range.is_subset(existing_package.constraint):
-+            if exact_parent_version is _MISSING:
++            if exact_parent_version is NO_EXACT_PARENT_VERSION:
 +                _register_fallback_parent(resolver, package, existing_index)
 +            else:
 +                _register_exact_parent(
@@ -169,7 +171,7 @@ index c771106..22c8e81 100644
 +        )
 +        resolver.incompatibilities[existing_index] = merged
 +        resolver.clause_contradicted_at[existing_index] = _NOT_CONTRADICTED
-+        if exact_parent_version is _MISSING:
++        if exact_parent_version is NO_EXACT_PARENT_VERSION:
 +            _register_fallback_parent(resolver, package, existing_index)
 +        else:
 +            _register_exact_parent(
@@ -194,17 +196,17 @@ index c771106..22c8e81 100644
  
  
  def dependency_merge_key(
-@@ -125,4 +242,5 @@ def maybe_merge_dependency(
+@@ -125,4 +249,5 @@ def maybe_merge_dependency(
      resolver.incompatibilities[existing_index] = merged
      # The union widens the package term, which can lift a contradiction.
      resolver.clause_contradicted_at[existing_index] = _NOT_CONTRADICTED
 +    _register_fallback_parent(resolver, existing_pkg.package, existing_index)
      return True
 diff --git a/src/cpip/_vendor/nab_resolver/partial_solution.py b/src/cpip/_vendor/nab_resolver/partial_solution.py
-index 66212e0..f2c1b01 100644
+index 66212e0..f15c9d2 100644
 --- a/src/cpip/_vendor/nab_resolver/partial_solution.py
 +++ b/src/cpip/_vendor/nab_resolver/partial_solution.py
-@@ -17,7 +17,6 @@
+@@ -17,7 +17,6 @@ from __future__ import annotations
  import operator
  from collections import defaultdict
  from collections.abc import Mapping
@@ -212,7 +214,7 @@ index 66212e0..f2c1b01 100644
  from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast, overload
  from weakref import ref
  
-@@ -149,7 +148,16 @@
+@@ -149,6 +148,15 @@ class _Snapshot(Mapping[PackageType, _ValueType]):
      def __len__(self) -> int:
          return sum(1 for _ in self)
  
@@ -224,12 +226,11 @@ index 66212e0..f2c1b01 100644
 +        if any(value is not _ABSENT for value in shadow.values()):
 +            return True
 +        return any(package not in shadow for package in self._live)
- 
 +
+ 
  def _take_snapshot(
      live: dict[PackageType, _ValueType],
-     holders: list[ref[_Snapshot[PackageType, _ValueType]]],
-@@ -174,10 +182,24 @@
+@@ -174,10 +182,24 @@ def _detach_snapshots(
              snapshot.detach()
  
  
@@ -255,7 +256,7 @@ index 66212e0..f2c1b01 100644
      package: PackageType
      """Which package this assignment constrains."""
  
-@@ -190,25 +212,100 @@
+@@ -190,24 +212,99 @@ class Assignment(Generic[PackageType, VersionType]):
      is_decision: bool
      """True if this is a version choice; False if derived by propagation."""
  
@@ -285,7 +286,7 @@ index 66212e0..f2c1b01 100644
  
 +    cum_decision: VersionType | None
 +    """The package's decided version as of this entry, if it had one."""
- 
++
 +    _effective: RangeProtocol[VersionType] | None
 +    """Lazily cached ``cum_positive - cum_negative`` for conflict probes."""
 +
@@ -358,11 +359,10 @@ index 66212e0..f2c1b01 100644
 +        )
 +        return f"Assignment({values})"
 +
-+
+ 
  class PartialSolution(Generic[PackageType, VersionType]):
      """Tracks the resolver's current partial solution as a decision trail.
- 
-@@ -335,7 +432,9 @@
+@@ -335,7 +432,9 @@ class PartialSolution(Generic[PackageType, VersionType]):
          """
          cached = self._effective_range_cache.get(package, _UNSET)
          if cached is not _UNSET:
@@ -373,7 +373,33 @@ index 66212e0..f2c1b01 100644
  
          positive = self._positive_ranges.get(package)
          negative = self._negative_ranges.get(package)
-@@ -386,6 +485,7 @@
+@@ -355,7 +454,9 @@ class PartialSolution(Generic[PackageType, VersionType]):
+         self._effective_range_cache[package] = result
+         return result
+ 
+-    def _refresh_effective_range(self, package: PackageType) -> None:
++    def _refresh_effective_range(
++        self, package: PackageType
++    ) -> RangeProtocol[VersionType]:
+         """Recompute the package's range, advancing the epoch if it emptied."""
+         self._effective_range_cache.pop(package, None)
+         self._changed.add(package)
+@@ -363,9 +464,12 @@ class PartialSolution(Generic[PackageType, VersionType]):
+         assert effective is not None
+         if effective.is_empty:
+             self._contradiction_epoch += 1
++        return effective
+ 
+-    def decide(self, package: PackageType, version: VersionType) -> None:
+-        """Record a decision: pick a specific version for a package."""
++    def decide(
++        self, package: PackageType, version: VersionType
++    ) -> RangeProtocol[VersionType]:
++        """Record a decision and return its stored exact version range."""
+         self._decision_level += 1
+         exact_range = self._range_type.singleton(version)
+ 
+@@ -386,9 +490,11 @@ class PartialSolution(Generic[PackageType, VersionType]):
              positive=True,
              cum_positive=exact_range,
              cum_negative=self._negative_ranges.get(package),
@@ -381,7 +407,36 @@ index 66212e0..f2c1b01 100644
          )
          self._assignments.append(assignment)
          self._assignments_by_package[package].append(assignment)
-@@ -439,6 +539,7 @@
++        return exact_range
+ 
+     def derive(
+         self,
+@@ -397,12 +503,14 @@ class PartialSolution(Generic[PackageType, VersionType]):
+         *,
+         positive: bool,
+         cause: Incompatibility[PackageType, VersionType],
+-    ) -> None:
++    ) -> RangeProtocol[VersionType]:
+         """Record a derivation from unit propagation.
+ 
+         A package's first derivation of a sign has nothing to fold into, so it
+         records ``constraint`` itself.
+ 
++        Returns the newly computed effective range for the package.
++
+         See: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation
+         """
+         if positive:
+@@ -427,7 +535,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
+             )
+             self._negative_ranges[package] = new_range
+ 
+-        self._refresh_effective_range(package)
++        effective = self._refresh_effective_range(package)
+ 
+         assignment = Assignment(
+             package=package,
+@@ -439,9 +547,11 @@ class PartialSolution(Generic[PackageType, VersionType]):
              positive=positive,
              cum_positive=self._positive_ranges.get(package),
              cum_negative=self._negative_ranges.get(package),
@@ -389,7 +444,11 @@ index 66212e0..f2c1b01 100644
          )
          self._assignments.append(assignment)
          self._assignments_by_package[package].append(assignment)
-@@ -459,20 +560,22 @@
++        return effective
+ 
+     def backtrack(self, target_level: int) -> None:
+         """Remove all assignments above target_level.
+@@ -459,20 +569,22 @@ class PartialSolution(Generic[PackageType, VersionType]):
          # Trail levels never decrease, so this pops exactly the assignments above
          # target_level; every other package keeps the positive and negative ranges
          # its cached effective range was derived from.
@@ -415,7 +474,7 @@ index 66212e0..f2c1b01 100644
                  self._positive_ranges.pop(package, None)
                  self._negative_ranges.pop(package, None)
                  self._decided_versions.pop(package, None)
-@@ -480,9 +583,6 @@
+@@ -480,9 +592,6 @@ class PartialSolution(Generic[PackageType, VersionType]):
              else:
                  self._update_package_state_after_backtrack(package, entries)
  
@@ -425,18 +484,14 @@ index 66212e0..f2c1b01 100644
      def _update_package_state_after_backtrack(
          self,
          package: PackageType,
-@@ -495,19 +595,11 @@
+@@ -495,18 +604,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
          never decrease, so popping a decision pops every later entry for the
          same package; a surviving decision is always the current one.
          """
 -        last_pos: RangeProtocol[VersionType] | None = None
 -        last_neg: RangeProtocol[VersionType] | None = None
 -        last_decision_version: VersionType | None = None
-+        last_entry = entries[-1]
-+        last_pos = last_entry.cum_positive
-+        last_neg = last_entry.cum_negative
-+        last_decision_version = last_entry.cum_decision
- 
+-
 -        for assignment in entries:
 -            if assignment.is_decision:
 -                last_pos = assignment.accumulated_range
@@ -445,11 +500,14 @@ index 66212e0..f2c1b01 100644
 -                last_pos = assignment.accumulated_range
 -            else:
 -                last_neg = assignment.accumulated_range
--
++        last_entry = entries[-1]
++        last_pos = last_entry.cum_positive
++        last_neg = last_entry.cum_negative
++        last_decision_version = last_entry.cum_decision
+ 
          if last_pos is None:
              self._positive_ranges.pop(package, None)
-         else:
-@@ -535,6 +627,10 @@
+@@ -535,6 +636,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
          """
          return _take_snapshot(self._decided_versions, self._decision_snapshots)
  
@@ -460,7 +518,7 @@ index 66212e0..f2c1b01 100644
      def _freeze_decisions(self, package: PackageType) -> None:
          """Preserve the package's decided version in outstanding snapshots."""
          for holder in self._decision_snapshots:
-@@ -599,15 +695,18 @@
+@@ -599,15 +704,18 @@ class PartialSolution(Generic[PackageType, VersionType]):
          if is_positive and cum_positive is None:
              return False
  
@@ -488,9 +546,8 @@ index 66212e0..f2c1b01 100644
  
          return term.satisfies(effective)
  
-
 diff --git a/src/cpip/_vendor/nab_resolver/propagate.py b/src/cpip/_vendor/nab_resolver/propagate.py
-index c6cf101..95b728e 100644
+index c6cf101..4bb6eae 100644
 --- a/src/cpip/_vendor/nab_resolver/propagate.py
 +++ b/src/cpip/_vendor/nab_resolver/propagate.py
 @@ -11,6 +11,9 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propa
@@ -527,7 +584,7 @@ index c6cf101..95b728e 100644
  def unit_propagation(
      resolver: Resolver[Any, Any], changed_package: Any
  ) -> Incompatibility[Any, Any] | None:
-@@ -57,58 +77,185 @@ def unit_propagation(
+@@ -57,58 +77,218 @@ def unit_propagation(
      contradiction epoch.  Each clause records the epoch it was last settled in,
      and is skipped while that stamp is current.
  
@@ -580,21 +637,53 @@ index c6cf101..95b728e 100644
 +            initial_groups = ()
 +        else:
 +            groups = _related_incompatibility_groups(resolver, package)
-+        nonempty = tuple(group for group in groups if group)
-+        if not nonempty:
-+            continue
-+        if len(nonempty) == 1:
-+            related_indices = nonempty[0]
-+        elif len(nonempty) == 2:
-+            left, right = nonempty
-+            if left[-1] < right[0]:
-+                related_indices = chain(left, right)
-+            elif right[-1] < left[0]:
-+                related_indices = chain(right, left)
++        # Production dispatch returns two or three groups.  Keep that path
++        # allocation-free while retaining arbitrary arity for private callers.
++        group_count = len(groups)
++        if group_count not in (2, 3):
++            nonempty = tuple(group for group in groups if group)
++            if not nonempty:
++                continue
++            if len(nonempty) == 1:
++                related_indices = nonempty[0]
++            elif len(nonempty) == 2:
++                left = nonempty[0]
++                right = nonempty[1]
++                if left[-1] < right[0]:
++                    related_indices = chain(left, right)
++                elif right[-1] < left[0]:
++                    related_indices = chain(right, left)
++                else:
++                    related_indices = merge(left, right)
 +            else:
-+                related_indices = merge(left, right)
++                related_indices = merge(*nonempty)
 +        else:
-+            related_indices = merge(*nonempty)
++            first = groups[0]
++            second = groups[1]
++            third: Sequence[int] = groups[2] if group_count == 3 else ()
++            if first and second and third:
++                related_indices = merge(first, second, third)
++            else:
++                if first:
++                    left = first
++                    right = second if second else third
++                elif second:
++                    left = second
++                    right = third
++                else:
++                    left = third
++                    right = ()
++
++                if not left:
++                    continue
++                if not right:
++                    related_indices = left
++                elif left[-1] < right[0]:
++                    related_indices = chain(left, right)
++                elif right[-1] < left[0]:
++                    related_indices = chain(right, left)
++                else:
++                    related_indices = merge(left, right)
 +
 +        previous_index = -1
          for incompatibility_index in related_indices:
@@ -612,6 +701,7 @@ index c6cf101..95b728e 100644
 +            incompatibility = incompatibilities[incompatibility_index]
 +
 +            undetermined_term = None
++            undetermined_assignment: RangeProtocol[Any] | None = None
 +            conflict = True
 +            for term in incompatibility.terms:
 +                assignment = solution_get(term.package)
@@ -687,6 +777,7 @@ index c6cf101..95b728e 100644
 +                    undetermined_term = None
 +                    break
 +                undetermined_term = term
++                undetermined_assignment = assignment
 +
 +            if undetermined_term is None:
 +                if conflict:
@@ -705,14 +796,13 @@ index c6cf101..95b728e 100644
 -                    positive=negated_term.is_positive(),
 +            negated_package = undetermined_term.package
 +            negated_positive = not undetermined_term._positive  # noqa: SLF001
-+            range_before = solution_get(negated_package)
-+            derive(
++            range_before = undetermined_assignment
++            range_after = derive(
 +                negated_package,
 +                undetermined_term.constraint,
 +                positive=negated_positive,
 +                cause=incompatibility,
 +            )
-+            range_after = solution_get(negated_package)
 +
 +            # A derive that empties a range advances the epoch, which retires
 +            # stamps taken before it.
@@ -747,7 +837,7 @@ index c6cf101..95b728e 100644
  
      return None
  
-@@ -152,6 +299,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
+@@ -152,6 +332,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
      tokens = resolver.range_tokens
      token = tokens.get(range_)
      if token is None:
@@ -757,7 +847,7 @@ index c6cf101..95b728e 100644
          resolver.next_range_token = token + 1
          tokens[range_] = token
 diff --git a/src/cpip/_vendor/nab_resolver/ranges.py b/src/cpip/_vendor/nab_resolver/ranges.py
-index 568bd5a..df69fa8 100644
+index 568bd5a..38da578 100644
 --- a/src/cpip/_vendor/nab_resolver/ranges.py
 +++ b/src/cpip/_vendor/nab_resolver/ranges.py
 @@ -27,6 +27,8 @@ _EMPTY_REL = RangeRelation.EMPTY
@@ -869,7 +959,35 @@ index 568bd5a..df69fa8 100644
  
      @classmethod
      def at_least(cls, version: VersionType) -> Range[VersionType]:
-@@ -284,23 +337,56 @@ class Range(Generic[VersionType]):
+@@ -270,13 +323,23 @@ class Range(Generic[VersionType]):
+         return cls(((NEGATIVE_INFINITY, False, version, False),))
+ 
+     @classmethod
+-    def between(cls, lower: VersionType, upper: VersionType) -> Range[VersionType]:
+-        """Create ``[lower, upper)``, or the empty range if ``lower >= upper``."""
++    def between(
++        cls,
++        lower: VersionType,
++        upper: VersionType,
++        *,
++        lower_inclusive: bool = True,
++        upper_inclusive: bool = False,
++    ) -> Range[VersionType]:
++        """Create one bounded interval, or empty when its bounds exclude all."""
+         if _interval_is_empty(
+-            lower, lower_inclusive=True, upper=upper, upper_inclusive=False
++            lower,
++            lower_inclusive=lower_inclusive,
++            upper=upper,
++            upper_inclusive=upper_inclusive,
+         ):
+             return cls(())
+-        return cls(((lower, True, upper, False),))
++        return cls(((lower, lower_inclusive, upper, upper_inclusive),))
+ 
+     @property
+     def is_empty(self) -> bool:
+@@ -284,23 +347,56 @@ class Range(Generic[VersionType]):
          return len(self._intervals) == 0
  
      def __contains__(self, version: object) -> bool:
@@ -937,7 +1055,7 @@ index 568bd5a..df69fa8 100644
          result: list[Interval] = []
          left_index = right_index = 0
          while left_index < len(self._intervals) and right_index < len(other._intervals):
-@@ -327,7 +413,7 @@ class Range(Generic[VersionType]):
+@@ -327,7 +423,7 @@ class Range(Generic[VersionType]):
              # Advance the side with the smaller upper bound
              left_upper = left_interval[2]
              right_upper = right_interval[2]
@@ -946,7 +1064,7 @@ index 568bd5a..df69fa8 100644
                  left_index += 1
                  right_index += 1
              elif left_upper is POSITIVE_INFINITY or (
-@@ -343,6 +429,14 @@ class Range(Generic[VersionType]):
+@@ -343,6 +439,14 @@ class Range(Generic[VersionType]):
          """Union of two ranges (versions in either)."""
          if not isinstance(other, Range):
              return NotImplemented
@@ -961,7 +1079,7 @@ index 568bd5a..df69fa8 100644
          all_intervals = list(self._intervals) + list(other._intervals)
          return Range(_normalize_intervals(all_intervals))
  
-@@ -405,66 +499,94 @@ class Range(Generic[VersionType]):
+@@ -405,66 +509,94 @@ class Range(Generic[VersionType]):
          if not isinstance(other, Range):
              return NotImplemented
  
@@ -1083,7 +1201,7 @@ index 568bd5a..df69fa8 100644
              ):
                  result.append((lower, lower_inclusive, upper, upper_inclusive))
  
-@@ -478,14 +600,32 @@ class Range(Generic[VersionType]):
+@@ -478,14 +610,32 @@ class Range(Generic[VersionType]):
          ``other`` always leave a gap, so an interval of self is covered only
          when a single interval of other holds all of it.
          """
@@ -1120,7 +1238,7 @@ index 568bd5a..df69fa8 100644
                  right_index += 1
  
              if right_index >= right_count:
-@@ -495,7 +635,12 @@ class Range(Generic[VersionType]):
+@@ -495,7 +645,12 @@ class Range(Generic[VersionType]):
              lower, lower_inclusive = _max_lower_bound(left, right)
              upper, upper_inclusive = _min_upper_bound(left, right)
  
@@ -1134,7 +1252,7 @@ index 568bd5a..df69fa8 100644
                  return False
  
          return True
-@@ -510,6 +655,15 @@ class Range(Generic[VersionType]):
+@@ -510,6 +665,15 @@ class Range(Generic[VersionType]):
          Stops at the first shared version rather than building the whole
          intersection.
          """
@@ -1150,7 +1268,7 @@ index 568bd5a..df69fa8 100644
          left_intervals = self._intervals
          right_intervals = other._intervals
          left_count = len(left_intervals)
-@@ -539,16 +693,71 @@ class Range(Generic[VersionType]):
+@@ -539,16 +703,71 @@ class Range(Generic[VersionType]):
          return True
  
      def relation(self, other: Range[VersionType]) -> RangeRelation:
@@ -1229,7 +1347,7 @@ index 568bd5a..df69fa8 100644
              return _DISJOINT_REL
          return _OVERLAPPING_REL
  
-@@ -588,6 +797,7 @@ class Range(Generic[VersionType]):
+@@ -588,6 +807,7 @@ class Range(Generic[VersionType]):
          """Restore from :meth:`__getstate__`, leaving the hash to be recomputed."""
          (self._intervals,) = state
          self._hash = 0
@@ -1238,7 +1356,7 @@ index 568bd5a..df69fa8 100644
      @override
      def __repr__(self) -> str:
 diff --git a/src/cpip/_vendor/nab_resolver/resolver.py b/src/cpip/_vendor/nab_resolver/resolver.py
-index 2035d02..9728321 100644
+index 2035d02..913f806 100644
 --- a/src/cpip/_vendor/nab_resolver/resolver.py
 +++ b/src/cpip/_vendor/nab_resolver/resolver.py
 @@ -22,7 +22,6 @@ from __future__ import annotations
@@ -1298,7 +1416,7 @@ index 2035d02..9728321 100644
  
  class ResolverProvider(Protocol[PackageType, VersionType]):
      """Interface for supplying version and dependency information.
-@@ -159,6 +188,14 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
+@@ -159,6 +191,14 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
          """
          ...
  
@@ -1313,7 +1431,7 @@ index 2035d02..9728321 100644
      def receive_partial_solution_hint(
          self,
          positive_ranges: Mapping[PackageType, RangeProtocol[VersionType]],
-@@ -262,6 +299,10 @@ class BaseProvider(Generic[PackageType, VersionType]):
+@@ -262,6 +302,10 @@ class BaseProvider(Generic[PackageType, VersionType]):
          del package
          return True
  
@@ -1324,7 +1442,7 @@ index 2035d02..9728321 100644
      def receive_partial_solution_hint(
          self,
          positive_ranges: Mapping[PackageType, RangeProtocol[VersionType]],
-@@ -292,7 +333,6 @@ class BaseProvider(Generic[PackageType, VersionType]):
+@@ -292,7 +336,6 @@ class BaseProvider(Generic[PackageType, VersionType]):
          return constraint
  
  
@@ -1332,7 +1450,7 @@ index 2035d02..9728321 100644
  class ResolverStats(Generic[PackageType]):
      """Running statistics for resolution observability.
  
-@@ -301,20 +341,37 @@ class ResolverStats(Generic[PackageType]):
+@@ -301,20 +344,37 @@ class ResolverStats(Generic[PackageType]):
      See: https://minisat.se/MiniSat.html
      """
  
@@ -1384,7 +1502,7 @@ index 2035d02..9728321 100644
  
  
  class ResolverObserver(Generic[PackageType, VersionType]):
-@@ -462,6 +519,16 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -462,6 +522,16 @@ class Resolver(Generic[PackageType, VersionType]):
          self.package_to_incompatibilities: defaultdict[Any, list[int]] = defaultdict(
              list
          )
@@ -1401,13 +1519,21 @@ index 2035d02..9728321 100644
  
          # Per clause, the contradiction epoch in which one of its terms was
          # last seen contradicted; unit propagation skips a clause whose stamp
-@@ -650,10 +717,12 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -643,51 +713,96 @@ class Resolver(Generic[PackageType, VersionType]):
+             decide.record_no_versions(self, next_package, had_pending=had_pending)
+             return next_package
+ 
+-        self.solution.decide(next_package, chosen_version)
++        exact_range = self.solution.decide(next_package, chosen_version)
+         self.stats.decisions += 1
+         self.observer.on_decision(
+             next_package, chosen_version, self.solution.decision_level
          )
  
          dependencies = self.provider.get_dependencies(next_package, chosen_version)
 -        if not dependencies:
 -            return next_package
-         exact_range = self.range_type.singleton(chosen_version)
+-        exact_range = self.range_type.singleton(chosen_version)
 -        widened = self.provider.widen_decision(next_package, chosen_version)
 +        widened = (
 +            self.provider.widen_decision(next_package, chosen_version)
@@ -1415,42 +1541,66 @@ index 2035d02..9728321 100644
 +            else None
 +        )
          parent_range = exact_range if widened is None else self.as_term_range(widened)
++        exact_parent_version = (
++            chosen_version
++            if widened is None
++            else incompat_index.NO_EXACT_PARENT_VERSION
++        )
          for dependency_package, supplied_range in dependencies.items():
              dependency_range = self.as_term_range(supplied_range)
-@@ -675,19 +744,67 @@ class Resolver(Generic[PackageType, VersionType]):
- 
-             # The merged term drops the required range, so the clause carries
-             # it for the report.
--            incompatibility = Incompatibility(
--                terms,
--                cause=IncompatibilityCause.DEPENDENCY,
--                dependency_range=None if cross_package else dependency_range,
--            )
--            incompat_index.add_incompatibility(self, incompatibility)
+-            cross_package = dependency_package != next_package
+-            if not cross_package:
+-                # An incompatibility holds at most one term per package,
+-                # so self-dependency terms merge to {v} & ~range: empty
+-                # (a vacuous clause) when the range contains the chosen
+-                # version, else exactly {v}.  The exact singleton is kept:
+-                # widening a single-term clause only degrades error text.
+-                if chosen_version in dependency_range:
+-                    continue
+-                terms = [Term(next_package, exact_range, positive=True)]
+-            else:
+-                terms = [
+-                    Term(next_package, parent_range, positive=True),
+-                    Term(dependency_package, dependency_range, positive=False),
+-                ]
 -
-             if cross_package:
+-            # The merged term drops the required range, so the clause carries
+-            # it for the report.
++            if dependency_package != next_package:
 +                incompatibility = incompat_index.add_dependency_incompatibility(
 +                    self,
 +                    next_package,
 +                    parent_range,
 +                    dependency_package,
 +                    dependency_range,
-+                    **(
-+                        {"exact_parent_version": chosen_version}
-+                        if widened is None
-+                        else {}
-+                    ),
++                    exact_parent_version=exact_parent_version,
 +                )
-                 decide.absorb_redundant_requirement(
-                     self, dependency_package, dependency_range, incompatibility
-                 )
-+            else:
-+                incompatibility = Incompatibility(
-+                    terms,
-+                    cause=IncompatibilityCause.DEPENDENCY,
-+                    dependency_range=dependency_range,
++                decide.absorb_redundant_requirement(
++                    self, dependency_package, dependency_range, incompatibility
 +                )
-+                incompat_index.add_incompatibility(self, incompatibility)
++                continue
++
++            # An incompatibility holds at most one term per package, so
++            # self-dependency terms merge to {v} & ~range: empty (a vacuous
++            # clause) when the range contains the chosen version, else exactly
++            # {v}.  The exact singleton is kept: widening a single-term clause
++            # only degrades error text.  The merged term drops the required
++            # range, so the clause carries it for the report.
++            if chosen_version in dependency_range:
++                continue
+             incompatibility = Incompatibility(
+-                terms,
++                [Term(next_package, exact_range, positive=True)],
+                 cause=IncompatibilityCause.DEPENDENCY,
+-                dependency_range=None if cross_package else dependency_range,
++                dependency_range=dependency_range,
+             )
+             incompat_index.add_incompatibility(self, incompatibility)
+-
+-            if cross_package:
+-                decide.absorb_redundant_requirement(
+-                    self, dependency_package, dependency_range, incompatibility
+-                )
 +        invalidated = self._backtrack_dependency_invalidations()
 +        if invalidated is not None:
 +            return invalidated
@@ -1462,9 +1612,13 @@ index 2035d02..9728321 100644
 +        if consume is None:
 +            return None
 +
++        invalidations = consume()
++        if not invalidations:
++            return None
++
 +        decisions = self.solution.decisions()
 +        earliest: tuple[int, Any] | None = None
-+        for package in consume():
++        for package in invalidations:
 +            if package not in decisions:
 +                continue
 +            decision = next(
@@ -1492,7 +1646,7 @@ index 2035d02..9728321 100644
      def _build_result(self) -> Solution[PackageType, VersionType]:
          """Build the final result, including only reachable packages.
  
-@@ -709,6 +826,10 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -709,6 +824,10 @@ class Resolver(Generic[PackageType, VersionType]):
          """Reset solver state for a new resolution."""
          self.incompatibilities.clear()
          self.package_to_incompatibilities.clear()

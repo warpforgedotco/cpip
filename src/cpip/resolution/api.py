@@ -109,7 +109,7 @@ class ResolutionEngine:
         roots = adapter.add_roots(requirements)
         resolver = Resolver(adapter, root_version=ZERO_VERSION)
         try:
-            selected = resolver.resolve(roots)
+            solution = resolver.solve(roots)
         except Exception as error:
             from cpip._vendor.nab_resolver.errors import ResolutionError
             from cpip._vendor.nab_resolver.report import format_error
@@ -140,13 +140,18 @@ class ResolutionEngine:
                 )
                 raise errors.ResolutionError(message) from error
             raise
+        selected = solution.pins
         selected_records = tuple(
             (package, adapter.records[(package, version)])
             for package, version in selected.items()
         )
-        graph: dict[str, frozenset[str]] = {}
-        for package, version in selected.items():
-            graph[package] = frozenset(adapter.get_dependencies(package, version))
+        graph_children: dict[str, set[str]] = {package: set() for package in selected}
+        for package, dependency in solution.edges:
+            graph_children[package].add(dependency)
+        graph = {
+            package: frozenset(dependencies)
+            for package, dependencies in graph_children.items()
+        }
         satisfied = tuple(
             ResolvedRequirement(adapter.requirements[package], record.distribution)
             for package, record in selected_records

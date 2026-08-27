@@ -77,21 +77,27 @@ def _implied_range(specifier: SpecifierSet) -> Range[Version]:
     yanked-only release cannot turn a possible fan-out into a rejected one.
     """
     lower, upper = specifier.bounds
-    result: Range[Version] = Range.full()
-
-    if lower is not None:
-        version, inclusive = lower
-        result = result & (
-            Range.at_least(version) if inclusive else Range.greater_than(version)
-        )
-
-    if upper is not None:
+    if lower is None:
+        if upper is None:
+            return Range.full()
         version, inclusive = upper
-        result = result & (
-            Range.at_most(version) if inclusive else Range.less_than(version)
+        return Range.at_most(version) if inclusive else Range.less_than(version)
+
+    lower_version, lower_inclusive = lower
+    if upper is None:
+        return (
+            Range.at_least(lower_version)
+            if lower_inclusive
+            else Range.greater_than(lower_version)
         )
 
-    return result
+    upper_version, upper_inclusive = upper
+    return Range.between(
+        lower_version,
+        upper_version,
+        lower_inclusive=lower_inclusive,
+        upper_inclusive=upper_inclusive,
+    )
 
 
 def _key(requirement: Requirement) -> str:
