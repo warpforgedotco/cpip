@@ -296,7 +296,9 @@ def test_pin_domain_fold_avoids_redundant_intersections(
     monkeypatch.setattr(Range, "relation", counting_relation)
     monkeypatch.setattr(Range, "__and__", counting_and)
 
-    assert adapter._compute_pins_are_impossible("parent", version, ()) is expected
+    assert (
+        adapter._compute_pins_are_impossible("parent", version, frozenset()) is expected
+    )
     assert relation_calls == expected_relations
     assert intersection_calls == expected_intersections
 
@@ -553,12 +555,10 @@ def resolve_or_raise(wheelhouse: Path, roots: list[str]) -> None:
     engine.resolve(roots)
 
 
-def test_verdicts_are_not_reused_across_extras(tmp_path: Path) -> None:
-    """Extras gate which dependencies apply, so they must key the memo.
-
-    A verdict reached under narrower extras, reused after they widen, skips a
-    version that the wider set may well allow.
-    """
+def test_verdict_cache_shares_extra_order_but_isolates_membership(
+    tmp_path: Path,
+) -> None:
+    """Extras sets with equal members share; different members never do."""
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
     make_wheel(wheelhouse, "app", "1.0.0")
@@ -568,16 +568,20 @@ def test_verdicts_are_not_reused_across_extras(tmp_path: Path) -> None:
         no_index=True,
     )
     adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
-    adapter.requirements["app"] = parse_requirement("app")
+    adapter.requirements["app"] = parse_requirement("app[a,b]")
 
     adapter._pins_are_impossible("app", Version("1.0.0"))
-    narrow = dict(adapter._preflight_cache)
+    first = dict(adapter._preflight_cache)
 
-    adapter.requirements["app"] = parse_requirement("app[extra]")
+    adapter.requirements["app"] = parse_requirement("app[b,a]")
     adapter._pins_are_impossible("app", Version("1.0.0"))
+    assert adapter._preflight_cache == first
 
-    assert len(adapter._preflight_cache) == len(narrow) + 1, (
-        "widening extras reused the earlier verdict"
+    adapter.requirements["app"] = parse_requirement("app[a,b,c]")
+    adapter._pins_are_impossible("app", Version("1.0.0"))
+    assert len(adapter._preflight_cache) == len(first) + 1
+    assert all(
+        isinstance(cache_key[2], frozenset) for cache_key in adapter._preflight_cache
     )
 
 

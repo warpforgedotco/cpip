@@ -82,21 +82,21 @@ class NabProvider:
         self._installed_cache: dict[
             tuple[str, frozenset[str]], InstalledCandidate | None
         ] = {}
-        self._preflight_cache: dict[tuple[str, Version, tuple[str, ...]], bool] = {}
+        self._preflight_cache: dict[tuple[str, Version, frozenset[str]], bool] = {}
         self._catalog_candidate_cache: dict[tuple[str, Version], object | None] = {}
         self._catalog_by_version_cache: dict[str, dict[Version, object | None]] = {}
         self._dependency_cache: dict[
-            tuple[str, Version, tuple[str, ...]], Mapping[str, Range[Version]]
+            tuple[str, Version, frozenset[str]], Mapping[str, Range[Version]]
         ] = {}
         self._active_decisions: Mapping[str, Version] = {}
         self._active_positive_ranges: Mapping[str, RangeProtocol[Version]] = {}
         self._root_packages: set[str] = set()
         self._constrained_root_packages: set[str] = set()
         self._partial_preflight_cache: dict[
-            tuple[str, Version, tuple[str, ...]], bool
+            tuple[str, Version, frozenset[str]], bool
         ] = {}
         self._active_candidate_conflict_cache: dict[
-            tuple[str, Version, tuple[str, ...]], bool
+            tuple[str, Version, frozenset[str]], bool
         ] = {}
         self._forward_catalog_versions: dict[str, tuple[Version, ...]] = {}
         self._dependency_invalidations: dict[str, None] = {}
@@ -132,7 +132,7 @@ class NabProvider:
             constraint.url is not None for constraint in self._constraint_for(package)
         ):
             return None
-        extras = frozenset(self.requirements[package].extras)
+        extras = self.requirements[package].extras
         cache_key = (package, extras)
         if cache_key not in self._installed_cache:
             distribution = (
@@ -220,7 +220,7 @@ class NabProvider:
         cache_key = (
             package,
             requirement.specifier.text,
-            tuple(sorted(requirement.extras)),
+            requirement.extras,
             requirement.url,
         )
         cached = self._version_cache.get(cache_key)
@@ -725,7 +725,7 @@ class NabProvider:
         ):
             return False
 
-        extras = tuple(sorted(self.requirements[package].extras))
+        extras = self.requirements[package].extras
         cache_key = (package, version, extras)
         cached = self._partial_preflight_cache.get(cache_key)
         if cached is not None:
@@ -794,7 +794,7 @@ class NabProvider:
         if not matching:
             return False
 
-        child_extras = tuple(sorted(dependency.extras))
+        child_extras = dependency.extras
         for start in range(0, len(matching), _FORWARD_CHECK_BATCH):
             batch = matching[start : start + _FORWARD_CHECK_BATCH]
             self._prefetch_catalog_candidates(child_name, batch)
@@ -854,7 +854,7 @@ class NabProvider:
         self,
         candidate: object | None,
         *,
-        extras: tuple[str, ...],
+        extras: frozenset[str],
     ) -> bool:
         """Prove that one child candidate contradicts the positive solution."""
         if candidate is None or getattr(candidate, "source_kind", None) != "wheel":
@@ -884,7 +884,7 @@ class NabProvider:
         provable emptiness -- two pins whose dependency requirements share a
         package but no version -- answers ``True``.
         """
-        extras = tuple(sorted(self.requirements[package].extras))
+        extras = self.requirements[package].extras
         cache_key = (package, version, extras)
         cached = self._preflight_cache.get(cache_key)
         if cached is not None:
@@ -898,7 +898,7 @@ class NabProvider:
         self,
         package: str,
         version: Version,
-        extras: tuple[str, ...],
+        extras: frozenset[str],
     ) -> bool:
         if not isinstance(self.provider, CandidateProvider):
             return False
@@ -1252,7 +1252,7 @@ class NabProvider:
     ) -> Mapping[str, Range[Version]]:
         if self.no_deps:
             return {}
-        cache_key = (package, version, tuple(sorted(self.requirements[package].extras)))
+        cache_key = (package, version, self.requirements[package].extras)
         cached = self._dependency_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -1326,12 +1326,12 @@ class NabProvider:
             selected = self.choose_version(package, Range.singleton(version))
             if selected != version:
                 result = {package: Range.empty()}
-                cache_key = (package, version, tuple(sorted(merged_extras)))
+                cache_key = (package, version, merged_extras)
                 self._dependency_cache[cache_key] = result
                 return result
             record = self.records[(package, version)]
             record_dependencies = record.dependencies
-        cache_key = (package, version, tuple(sorted(self.requirements[package].extras)))
+        cache_key = (package, version, self.requirements[package].extras)
         self._prefetch_available_versions(
             tuple(
                 dependency

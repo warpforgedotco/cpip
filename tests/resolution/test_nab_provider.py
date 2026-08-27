@@ -283,6 +283,78 @@ def test_leaf_dependencies_skip_empty_prefetch_and_are_cached(
     assert adapter.get_dependencies(package, version) is dependencies
 
 
+def test_dependency_cache_shares_extra_order_but_isolates_membership() -> None:
+    adapter = NabProvider(FakeProvider(), ResolutionConfig())
+    package, version_range = adapter.add_root(parse_requirement("dep[a,b]"))
+    version = adapter.choose_version(package, version_range)
+    assert version == Version("2")
+
+    first = adapter.get_dependencies(package, version)
+    assert len(adapter._dependency_cache) == 1
+
+    adapter.requirements[package] = parse_requirement("dep[b,a]")
+    assert adapter.get_dependencies(package, version) is first
+    assert len(adapter._dependency_cache) == 1
+
+    adapter.requirements[package] = parse_requirement("dep[a]")
+    second = adapter.get_dependencies(package, version)
+    assert second == first
+    assert second is not first
+    assert len(adapter._dependency_cache) == 2
+    assert all(
+        isinstance(cache_key[2], frozenset) for cache_key in adapter._dependency_cache
+    )
+
+
+def test_cache_keys_do_not_renormalize_frozen_extras(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = NabProvider(
+        FakeProvider(),
+        ResolutionConfig(),
+        installed={},
+    )
+    package, version_range = adapter.add_root(parse_requirement("dep[a,b]"))
+    version = adapter.choose_version(package, version_range)
+    assert version == Version("2")
+    requirement = adapter.requirements[package]
+    monkeypatch.setattr(
+        adapter,
+        "_compute_pins_are_impossible",
+        lambda *_args: False,
+    )
+
+    def fail_normalization(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("frozen extras are already valid cache keys")
+
+    monkeypatch.setattr(
+        cpip.resolution.nab_provider,
+        "sorted",
+        fail_normalization,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cpip.resolution.nab_provider,
+        "frozenset",
+        fail_normalization,
+        raising=False,
+    )
+
+    assert adapter._versions_uncached(package, requirement)
+    assert not adapter._pins_are_impossible(package, version)
+    assert adapter.get_dependencies(package, version) == {}
+    assert adapter._installed_candidate(package) is None
+    assert all(
+        isinstance(cache_key[1], frozenset) for cache_key in adapter._installed_cache
+    )
+    assert all(
+        isinstance(cache_key[2], frozenset) for cache_key in adapter._preflight_cache
+    )
+    assert all(
+        isinstance(cache_key[2], frozenset) for cache_key in adapter._dependency_cache
+    )
+
+
 def test_has_satisfying_version_applies_requirement_and_constraints() -> None:
     adapter = NabProvider(FakeProvider(), ResolutionConfig(constraints=("dep==2",)))
     package, _ = adapter.add_root(parse_requirement("dep<2"))
