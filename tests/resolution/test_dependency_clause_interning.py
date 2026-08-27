@@ -329,7 +329,7 @@ def test_unit_propagation_reuses_the_classified_assignment(
     assert propagate.unit_propagation(candidate, "gate") is None
     assert solution_get("target") == ~excluded
     assert candidate.stats.derivations == 1
-    assert get_calls == ["target", "gate", "target", "target", "target"]
+    assert get_calls == ["target", "gate", "target", "target"]
 
 
 def test_widened_merge_promotes_exact_clause_to_fallback() -> None:

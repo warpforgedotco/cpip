@@ -454,7 +454,9 @@ class PartialSolution(Generic[PackageType, VersionType]):
         self._effective_range_cache[package] = result
         return result
 
-    def _refresh_effective_range(self, package: PackageType) -> None:
+    def _refresh_effective_range(
+        self, package: PackageType
+    ) -> RangeProtocol[VersionType]:
         """Recompute the package's range, advancing the epoch if it emptied."""
         self._effective_range_cache.pop(package, None)
         self._changed.add(package)
@@ -462,6 +464,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
         assert effective is not None
         if effective.is_empty:
             self._contradiction_epoch += 1
+        return effective
 
     def decide(self, package: PackageType, version: VersionType) -> None:
         """Record a decision: pick a specific version for a package."""
@@ -497,11 +500,13 @@ class PartialSolution(Generic[PackageType, VersionType]):
         *,
         positive: bool,
         cause: Incompatibility[PackageType, VersionType],
-    ) -> None:
+    ) -> RangeProtocol[VersionType]:
         """Record a derivation from unit propagation.
 
         A package's first derivation of a sign has nothing to fold into, so it
         records ``constraint`` itself.
+
+        Returns the newly computed effective range for the package.
 
         See: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation
         """
@@ -527,7 +532,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             )
             self._negative_ranges[package] = new_range
 
-        self._refresh_effective_range(package)
+        effective = self._refresh_effective_range(package)
 
         assignment = Assignment(
             package=package,
@@ -543,6 +548,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
         )
         self._assignments.append(assignment)
         self._assignments_by_package[package].append(assignment)
+        return effective
 
     def backtrack(self, target_level: int) -> None:
         """Remove all assignments above target_level.

@@ -268,13 +268,12 @@ def _unit_propagation_core(
             negated_package = undetermined_term.package
             negated_positive = not undetermined_term._positive  # noqa: SLF001
             range_before = undetermined_assignment
-            derive(
+            range_after = derive(
                 negated_package,
                 undetermined_term.constraint,
                 positive=negated_positive,
                 cause=incompatibility,
             )
-            range_after = solution_get(negated_package)
 
             # A derive that empties a range advances the epoch, which retires
             # stamps taken before it.
