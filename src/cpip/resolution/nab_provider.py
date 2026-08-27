@@ -746,9 +746,8 @@ class NabProvider:
 
             dependency_name = _key(dependency)
             active = self._active_constraint_for(dependency_name)
-            if (
-                active is not None
-                and (active & _implied_range(dependency.specifier)).is_empty
+            if active is not None and active.is_disjoint(
+                _implied_range(dependency.specifier)
             ):
                 verdict = True
                 break
@@ -869,9 +868,8 @@ class NabProvider:
             if dependency.url is not None:
                 continue
             active = self._active_constraint_for(_key(dependency))
-            if (
-                active is not None
-                and (active & _implied_range(dependency.specifier)).is_empty
+            if active is not None and active.is_disjoint(
+                _implied_range(dependency.specifier)
             ):
                 return True
         return False

@@ -331,6 +331,71 @@ def test_transitive_conflicts_are_skipped_without_backtracking(tmp_path: Path) -
     assert result.metrics["nab_conflicts"] <= 2, result.metrics
 
 
+@pytest.mark.parametrize(
+    "implied, expected",
+    [
+        (Range.singleton(Version("2")), True),
+        (Range.between(Version("1"), Version("3")), False),
+    ],
+)
+@pytest.mark.parametrize(
+    "method_name",
+    ["_partial_solution_rejects", "_candidate_conflicts_with_active"],
+)
+def test_active_constraint_checks_disjoint_without_intersection(
+    method_name: str,
+    implied: Range[Version],
+    expected: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = NabProvider(
+        CandidateProvider.from_options(no_index=True),
+        ResolutionConfig(ignore_installed=True),
+    )
+    dependency = parse_requirement("shared>=1")
+    candidate = SimpleNamespace(source_kind="wheel", dependencies=(dependency,))
+    adapter.requirements["parent"] = parse_requirement("parent")
+    adapter._root_packages.add("parent")
+    adapter._constrained_root_packages.add("shared")
+    active = Range.singleton(Version("1"))
+    adapter._active_positive_ranges = {"shared": active}
+    monkeypatch.setattr(adapter, "_catalog_candidate", lambda *_args: candidate)
+    monkeypatch.setattr(
+        adapter,
+        "_dependency_domain_is_blocked",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(nab_provider, "_implied_range", lambda _specifier: implied)
+
+    disjoint_calls = 0
+    original_is_disjoint = Range.is_disjoint
+
+    def counting_is_disjoint(
+        self: Range[Version],
+        other: Range[Version],
+    ) -> bool:
+        nonlocal disjoint_calls
+        disjoint_calls += 1
+        return original_is_disjoint(self, other)
+
+    def fail_intersection(self: Range[Version], other: object) -> Range[Version]:
+        raise AssertionError((self, other))
+
+    monkeypatch.setattr(Range, "is_disjoint", counting_is_disjoint)
+    monkeypatch.setattr(Range, "__and__", fail_intersection)
+
+    if method_name == "_partial_solution_rejects":
+        verdict = adapter._partial_solution_rejects("parent", Version("1"))
+    else:
+        verdict = adapter._candidate_conflicts_with_active(
+            candidate,
+            extras=frozenset(),
+        )
+
+    assert verdict is expected
+    assert disjoint_calls == 1
+
+
 def test_selected_dependency_conflicts_are_skipped_before_backtracking(
     tmp_path: Path,
 ) -> None:
