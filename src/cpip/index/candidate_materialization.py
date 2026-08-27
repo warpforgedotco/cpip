@@ -1174,16 +1174,19 @@ class CandidateMaterializer:
         try:
             text = reader(candidate.link.url_without_fragment, candidate.name)
 
+            if not text:
+                return None
+
+            # Parsing is inside the handler too: a wheel whose Requires-Dist
+            # will not parse should cost a full download, not the whole
+            # metadata load.
+            return self.metadata_from_headers(
+                parse_metadata_headers(text),
+                requested_extras,
+            )
+
         except (KeyError, OSError, TypeError, ValueError):
             return None
-
-        if not text:
-            return None
-
-        return self.metadata_from_headers(
-            parse_metadata_headers(text),
-            requested_extras,
-        )
 
     def metadata_from_headers(
         self,

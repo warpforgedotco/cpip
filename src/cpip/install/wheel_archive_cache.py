@@ -480,10 +480,6 @@ def _compile_archive_pyc(
     Runs at fill time so that installing is a clone plus a path rewrite
     rather than a compile. Returns how many modules were compiled.
 
-    Compiling holds the GIL, so this is the one part of extraction threads
-    cannot overlap; it goes to worker processes instead
-    (:mod:`cpip.install.bytecode`), with anything they decline compiled here.
-
     A module that will not compile -- vendored Python 2 in a wheel, say -- is
     skipped, not fatal: the installer falls back to compiling that one in the
     stage, exactly as it did before this cache existed.
@@ -517,19 +513,14 @@ def _compile_archive_pyc(
             ),
         )
 
-    if not jobs:
-        return 0
-
-    from cpip.install.bytecode import compile_jobs
-
-    for source, output, display in compile_jobs(jobs):
+    for source, output, display in jobs:
         _compile_one(source, output, display)
 
     return sum(1 for _, output, _ in jobs if os.path.exists(output))
 
 
 def _compile_one(source: str, output: str, display: str) -> None:
-    """Compile one module in this process, for whatever the workers declined."""
+    """Compile one module."""
     import py_compile
 
     try:

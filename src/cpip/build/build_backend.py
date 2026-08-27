@@ -1001,7 +1001,18 @@ class ProjectMetadataReader:
             ):
                 return None
 
-        Version(version)
+            try:
+                Version(version)
+
+            # A version this cannot parse is one the backend may still
+            # normalize, so under require_static it means "cannot answer" and
+            # the backend decides. Raising here would escape prepare_metadata,
+            # where callers are waiting for BuildError to fall back on.
+            except InvalidVersion:
+                return None
+
+        else:
+            Version(version)
 
         dependencies = project.get("dependencies", [])
 

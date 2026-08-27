@@ -453,3 +453,17 @@ class TestRangedWheelMetadata:
 
         assert materializer.ranged_wheel_metadata(record, frozenset()) is None
         assert session.calls == []
+
+
+def test_unparsable_metadata_falls_back_instead_of_propagating() -> None:
+    """A wheel whose Requires-Dist will not parse should cost a full download,
+    not abort the whole metadata load."""
+    session = _RangeSession(
+        text="Metadata-Version: 2.1\nName: demo\nVersion: 1.0\nRequires-Dist: ==\n",
+    )
+    materializer = CandidateMaterializer(session=session)
+
+    assert (
+        materializer.ranged_wheel_metadata(_remote_wheel_record(), frozenset()) is None
+    )
+    assert session.calls, "the range read was never attempted"

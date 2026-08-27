@@ -434,10 +434,35 @@ def test_a_dynamic_project_field_falls_through_to_the_backend(
     """Declaring a field dynamic hands it to the backend, so the table's
     answer for it -- including saying nothing at all -- is not the wheel's."""
     project = _unbuildable_project(tmp_path, f"dyn-{dynamic}-pkg")
+
+    # PEP 621 forbids specifying a field statically *and* listing it in
+    # dynamic, so the version case has to omit it -- writing both would model
+    # a project no backend would accept and prove nothing.
+    static_version = "" if dynamic == "version" else "version = '1.0'\n"
+
     project.joinpath("pyproject.toml").write_text(
         "[build-system]\nrequires = ['setuptools']\n"
         "build-backend = 'missing_backend'\n"
-        f"[project]\nname = 'dyn-pkg'\nversion = '1.0'\ndynamic = ['{dynamic}']\n",
+        f"[project]\nname = 'dyn-pkg'\n{static_version}"
+        f"dynamic = ['{dynamic}']\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BuildError):
+        prepare_project_metadata(project)
+
+
+def test_an_unparsable_static_version_falls_through_to_the_backend(
+    tmp_path: Path,
+) -> None:
+    """A version [project] declares but PEP 440 rejects is one the backend may
+    still normalize, so it means "cannot answer" -- not an exception escaping
+    prepare_metadata, where callers are waiting on BuildError to fall back."""
+    project = _unbuildable_project(tmp_path, "badversion-pkg")
+    project.joinpath("pyproject.toml").write_text(
+        "[build-system]\nrequires = ['setuptools']\n"
+        "build-backend = 'missing_backend'\n"
+        "[project]\nname = 'badversion-pkg'\nversion = 'not a version'\n",
         encoding="utf-8",
     )
 
