@@ -729,25 +729,7 @@ class Resolver(Generic[PackageType, VersionType]):
         parent_range = exact_range if widened is None else self.as_term_range(widened)
         for dependency_package, supplied_range in dependencies.items():
             dependency_range = self.as_term_range(supplied_range)
-            cross_package = dependency_package != next_package
-            if not cross_package:
-                # An incompatibility holds at most one term per package,
-                # so self-dependency terms merge to {v} & ~range: empty
-                # (a vacuous clause) when the range contains the chosen
-                # version, else exactly {v}.  The exact singleton is kept:
-                # widening a single-term clause only degrades error text.
-                if chosen_version in dependency_range:
-                    continue
-                terms = [Term(next_package, exact_range, positive=True)]
-            else:
-                terms = [
-                    Term(next_package, parent_range, positive=True),
-                    Term(dependency_package, dependency_range, positive=False),
-                ]
-
-            # The merged term drops the required range, so the clause carries
-            # it for the report.
-            if cross_package:
+            if dependency_package != next_package:
                 incompatibility = incompat_index.add_dependency_incompatibility(
                     self,
                     next_package,
@@ -763,13 +745,22 @@ class Resolver(Generic[PackageType, VersionType]):
                 decide.absorb_redundant_requirement(
                     self, dependency_package, dependency_range, incompatibility
                 )
-            else:
-                incompatibility = Incompatibility(
-                    terms,
-                    cause=IncompatibilityCause.DEPENDENCY,
-                    dependency_range=dependency_range,
-                )
-                incompat_index.add_incompatibility(self, incompatibility)
+                continue
+
+            # An incompatibility holds at most one term per package, so
+            # self-dependency terms merge to {v} & ~range: empty (a vacuous
+            # clause) when the range contains the chosen version, else exactly
+            # {v}.  The exact singleton is kept: widening a single-term clause
+            # only degrades error text.  The merged term drops the required
+            # range, so the clause carries it for the report.
+            if chosen_version in dependency_range:
+                continue
+            incompatibility = Incompatibility(
+                [Term(next_package, exact_range, positive=True)],
+                cause=IncompatibilityCause.DEPENDENCY,
+                dependency_range=dependency_range,
+            )
+            incompat_index.add_incompatibility(self, incompatibility)
         invalidated = self._backtrack_dependency_invalidations()
         if invalidated is not None:
             return invalidated

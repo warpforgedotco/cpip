@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+import cpip._vendor.nab_resolver.resolver as resolver_module
 from cpip._vendor.nab_resolver import decide, incompat_index, propagate
 from cpip._vendor.nab_resolver.ranges import Range
 from cpip._vendor.nab_resolver.resolver import Resolver, Solution
@@ -68,6 +69,27 @@ def test_range_token_memo_is_bounded() -> None:
 
     assert len(candidate.range_tokens) == 1
     assert candidate.next_range_token == propagate.RANGE_ID_MEMO_MAX + 1
+
+
+def test_cross_dependency_does_not_construct_discarded_terms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = resolver()
+
+    def reject_discarded_term(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("cross dependencies must use the indexed clause terms")
+
+    monkeypatch.setattr(resolver_module, "Term", reject_discarded_term)
+
+    assert candidate._decide_next("parent") == "parent"
+    [incompatibility] = candidate.incompatibilities
+    assert [
+        (term.package, term.constraint, term.is_positive())
+        for term in incompatibility.terms
+    ] == [
+        ("parent", Range.singleton(2), True),
+        ("dependency", Range.at_least(1), False),
+    ]
 
 
 def test_dependency_clause_is_reused_when_parent_range_is_covered() -> None:
