@@ -945,7 +945,15 @@ class NabProvider:
                 name = _key(grandchild)
                 implied = _implied_range(grandchild.specifier)
                 narrowed = domains.get(name)
-                narrowed = implied if narrowed is None else narrowed & implied
+                if narrowed is None:
+                    narrowed = implied
+                else:
+                    relation = narrowed.relation(implied)
+                    if relation.is_disjoint:
+                        return True
+                    if relation.is_subset:
+                        continue
+                    narrowed = narrowed & implied
                 if narrowed.is_empty:
                     return True
                 domains[name] = narrowed

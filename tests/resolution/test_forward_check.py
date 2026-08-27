@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 import cpip.resolution.nab_provider as nab_provider
 from cpip._vendor.nab_resolver import propagate
+from cpip._vendor.nab_resolver.ranges import Range
 from cpip.core.errors import ResolutionError
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
@@ -207,6 +208,97 @@ def test_impossible_pins_are_skipped_without_conflicts(tmp_path: Path) -> None:
         "fam-shared": "1.1.0",
     }
     assert result.metrics["nab_conflicts"] <= 2, result.metrics
+
+
+@pytest.mark.parametrize(
+    "implied_ranges, expected, expected_relations, expected_intersections",
+    [
+        ([Range.empty(), Range.full()], True, 0, 0),
+        (
+            [Range.singleton(Version("1")), Range.singleton(Version("2"))],
+            True,
+            1,
+            0,
+        ),
+        (
+            [Range.singleton(Version("1")), Range.at_least(Version("1"))],
+            False,
+            1,
+            0,
+        ),
+        (
+            [
+                Range.between(Version("1"), Version("3")),
+                Range.between(Version("2"), Version("4")),
+                Range.at_most(Version("1")),
+            ],
+            True,
+            2,
+            1,
+        ),
+    ],
+)
+def test_pin_domain_fold_avoids_redundant_intersections(
+    monkeypatch: pytest.MonkeyPatch,
+    implied_ranges: list[Range[Version]],
+    expected: bool,
+    expected_relations: int,
+    expected_intersections: int,
+) -> None:
+    adapter = NabProvider(
+        CandidateProvider.from_options(no_index=True),
+        ResolutionConfig(ignore_installed=True),
+    )
+    version = Version("1")
+    pins = tuple(
+        parse_requirement(f"child-{index}==1") for index in range(len(implied_ranges))
+    )
+    candidates = {
+        ("parent", version): SimpleNamespace(dependencies=pins),
+        **{
+            (f"child-{index}", version): SimpleNamespace(
+                dependencies=(parse_requirement(f"shared=={index + 1}"),),
+            )
+            for index in range(len(implied_ranges))
+        },
+    }
+    ranges_by_specifier = {
+        f"=={index + 1}": implied for index, implied in enumerate(implied_ranges)
+    }
+    monkeypatch.setattr(
+        adapter,
+        "_catalog_candidate",
+        lambda package, candidate_version: candidates.get(
+            (package, candidate_version),
+        ),
+    )
+    monkeypatch.setattr(
+        nab_provider,
+        "_implied_range",
+        lambda specifier: ranges_by_specifier[specifier.text],
+    )
+
+    relation_calls = 0
+    intersection_calls = 0
+    original_relation = Range.relation
+    original_and = Range.__and__
+
+    def counting_relation(self: Range[Version], other: Range[Version]):
+        nonlocal relation_calls
+        relation_calls += 1
+        return original_relation(self, other)
+
+    def counting_and(self: Range[Version], other: object) -> Range[Version]:
+        nonlocal intersection_calls
+        intersection_calls += 1
+        return original_and(self, other)
+
+    monkeypatch.setattr(Range, "relation", counting_relation)
+    monkeypatch.setattr(Range, "__and__", counting_and)
+
+    assert adapter._compute_pins_are_impossible("parent", version, ()) is expected
+    assert relation_calls == expected_relations
+    assert intersection_calls == expected_intersections
 
 
 def test_transitive_conflicts_are_skipped_without_backtracking(tmp_path: Path) -> None:
