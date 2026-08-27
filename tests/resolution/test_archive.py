@@ -8,7 +8,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
+from cpip.core.archive import WheelArchive, WheelhouseUnavailable
 
 
 def _write_zip(

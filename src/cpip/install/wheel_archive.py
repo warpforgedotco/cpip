@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import os
 import stat
@@ -37,6 +38,76 @@ def validate_member_parts(name: str) -> tuple[str, ...]:
             f"wheel member is outside the install destination: {name!r}",
         )
     return parts
+
+
+@functools.lru_cache(maxsize=65536)
+def mapped_parts(relative: str) -> tuple[str, ...]:
+    """Where a wheel member lands in the target, as path parts.
+
+    A pure function of the member path, memoized: the same members recur
+    across the plan, the staged tree and the RECORD of every install.
+
+    Shared by the archive cache (which byte-compiles at fill time) and the
+    installer (which reserves destinations and materializes ``.pyc`` files),
+    so both agree on exactly one mapping.
+    """
+    parts = validate_member_parts(relative)
+
+    if not parts:
+        raise InstallationError(f"wheel member has an empty path: {relative!r}")
+
+    if not parts[0].endswith(".data"):
+        return parts
+
+    if len(parts) < 3 or parts[1] not in {
+        "purelib",
+        "platlib",
+        "scripts",
+        "data",
+        "headers",
+    }:
+        raise InstallationError(f"invalid wheel data path: {relative}")
+
+    if parts[1] == "scripts":
+        return ("Scripts" if os.name == "nt" else "bin", *parts[2:])
+
+    return parts[2:]
+
+
+def compiled_parts(mapped: tuple[str, ...]) -> tuple[str, ...] | None:
+    """Where byte-compiling ``mapped`` lands its ``.pyc``, as path parts, or
+    ``None`` when the member is not byte-compiled.
+
+    Uses the interpreter's own ``cache_from_source`` so the path reserved in
+    the collision trie, the path preflighted against the target, the path the
+    archive cache writes at fill time and the path the installer materializes
+    are all the same one. Scripts under ``bin``/``Scripts`` are not modules
+    and are left alone.
+
+    Only the *file name* comes from ``cache_from_source``; the directory is
+    rebuilt from ``mapped``. Two reasons. On Windows it joins with a
+    backslash, so splitting its result on ``/`` yields one part with
+    separators buried in it -- a wrong collision-trie key and a RECORD row
+    that violates the wheel spec. And under ``sys.pycache_prefix`` it answers
+    with a path somewhere else entirely, which an installer must ignore: the
+    bytecode belongs beside the module it was built from.
+
+    The name is taken after the last separator of either kind rather than
+    with ``os.path.basename``, which only recognizes the separators of the
+    platform it is running on. A member name cannot contain a backslash --
+    :func:`validate_member_parts` rejects those -- so any backslash here came
+    from the interpreter, whichever one answered.
+    """
+    if not mapped[-1].endswith(".py") or mapped[0] in {"bin", "Scripts"}:
+        return None
+
+    import importlib.util
+
+    compiled = importlib.util.cache_from_source("/".join(mapped))
+
+    name = compiled.replace("\\", "/").rpartition("/")[2]
+
+    return (*mapped[:-1], "__pycache__", name)
 
 
 def destination_internal_parts_text(

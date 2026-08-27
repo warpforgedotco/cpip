@@ -215,6 +215,37 @@ def test_cache_info(
 
 
 @pytest.mark.usefixtures("populate_wheel_cache")
+def test_cache_info_names_every_store_it_counts(
+    script: CpipTestEnvironment,
+    wheel_cache_dir: str,
+) -> None:
+    """A wheel counted in a store cpip has moved past is still findable."""
+    stem, _, version = wheel_cache_dir.rpartition("-v")
+    older = f"{stem}-v{int(version) - 1}"
+    os.makedirs(os.path.join(older, "aa", "bb"), exist_ok=True)
+    with open(os.path.join(older, "aa", "bb", "old-9.9.9-py3-none-any.whl"), "wb"):
+        pass
+
+    result = script.cpip("cache", "info")
+
+    assert f"Locally built wheels location: {wheel_cache_dir}" in result.stdout
+    assert f"Locally built wheels location: {older}" in result.stdout
+
+    counted = next(
+        line
+        for line in result.stdout.splitlines()
+        if line.startswith("Number of locally built wheels:")
+    )
+    listed = sum(
+        1
+        for line in result.stdout.splitlines()
+        if line.startswith("Locally built wheels location:")
+    )
+    assert listed == 2
+    assert int(counted.rsplit(":", 1)[1]) >= 1
+
+
+@pytest.mark.usefixtures("populate_wheel_cache")
 def test_cache_list(script: CpipTestEnvironment) -> None:
     """Running `cpip cache list` should return exactly what the
     populate_wheel_cache fixture adds.

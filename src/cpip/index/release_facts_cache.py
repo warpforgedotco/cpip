@@ -6,9 +6,9 @@ import atexit
 import os
 from typing import cast
 
-from cpip.core.utils import load_snapshot, save_snapshot
+from cpip.core.utils import load_snapshot, save_snapshot, versioned_bucket
 
-NAME = "release-facts.marshal"
+NAME = f"{versioned_bucket('release-facts', 1, interpreter=True)}.marshal"
 MAX_ENTRIES = 32_768
 INSTANCES: dict[str, ReleaseFactsCache] = {}
 FactKey = tuple[str, str, str]

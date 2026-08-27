@@ -54,14 +54,73 @@ CURRENT_PYTHON_FULL_TAG = f"py{CURRENT_PYTHON_VERSION_DIGITS}"
 
 CACHE_INTERPRETER_TAG = f"{sys.implementation.name}-{CURRENT_PYTHON_VERSION_DIGITS}"
 
-CACHE_VERSION = 0
-"""Version of cpip's on-disk cache formats as a whole. Every persisted cache
-lives under the ``v<CACHE_VERSION>`` directory of the cache root (see
-``core/appdirs.py:versioned_cache_dir``), so bumping it makes every older
-cache a miss without any cache carrying a version of its own. There is no
-migration code: a cache of another version is simply never read."""
+CACHE_VERSION = 1
+"""Version of the cache *layout*, not of any store's format.
+
+Every persisted cache lives under the ``v<CACHE_VERSION>`` directory of the
+cache root (``core/appdirs.py:versioned_cache_dir``). Bumping it retires the
+whole tree at once, which is what ``cpip cache purge`` keys on -- it removes
+every ``v*`` directory without knowing the stores -- and is the escape hatch
+for a change that crosses all of them.
+
+Individual stores carry their own version inside that directory (see
+:func:`versioned_bucket`), so a format change to one does not discard the
+others. There is no migration code either way: a store of another version is
+simply never read."""
 
 CACHE_VERSION_TAG = f"v{CACHE_VERSION}"
+
+
+def versioned_bucket(name: str, version: int, *, interpreter: bool = False) -> str:
+    """A cache store's on-disk name, carrying its own format version.
+
+    Stores are versioned one at a time because they cost wildly different
+    amounts to refill. Re-parsing an index page is one request; re-extracting
+    every wheel, or rebuilding one from source, is not. Sharing a single
+    version would make the cheap ones dictate when the expensive ones are
+    thrown away -- uv's index cache has been bumped 24 times while its
+    unpacked-wheel cache has never moved.
+
+    Bumping one is the entire migration: the new name is a store this cpip
+    has never written, and the old one is inert until ``cpip cache purge``.
+
+    ``interpreter`` appends the interpreter tag for stores whose payload is
+    not portable across interpreters -- ``marshal`` data, byte-compiled
+    modules -- so those are scoped per interpreter as well as per version.
+    """
+    tag = f"-{CACHE_INTERPRETER_TAG}" if interpreter else ""
+
+    return f"{name}-v{version}{tag}"
+
+
+def default_worker_count() -> int:
+    """How many threads a machine-sized pool should use.
+
+    Install work is filesystem- and decompression-bound rather than pure
+    Python, so a small multiple of the available cores beats a fixed number
+    on a large machine and avoids oversubscribing a small one. Callers still
+    cap this by how much work they actually have.
+
+    ``CPIP_CONCURRENCY`` overrides it; a value that is not a positive integer
+    is ignored rather than fatal.
+    """
+    override = os.environ.get("CPIP_CONCURRENCY")
+
+    if override:
+        try:
+            requested = int(override)
+
+        except ValueError:
+            requested = 0
+
+        if requested > 0:
+            return requested
+
+    available = getattr(os, "process_cpu_count", None)
+
+    cores = available() if available is not None else os.cpu_count()
+
+    return min(32, (cores or 1) + 4)
 
 
 def ensure_dir(path: str) -> None:

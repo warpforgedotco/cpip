@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 
-from cpip.core.utils import CACHE_VERSION_TAG
+from cpip.core.utils import CACHE_VERSION_TAG, versioned_bucket
 
 
 def user_cache_dir(appname: str) -> str:
@@ -21,8 +21,8 @@ def user_cache_dir(appname: str) -> str:
     return os.path.join(home, ".cache", appname)
 
 
-HTTP_CACHE_BUCKET = "http"
-WHEEL_CACHE_BUCKET = "wheels"
+HTTP_CACHE_BUCKET = versioned_bucket("http", 1)
+WHEEL_CACHE_BUCKET = versioned_bucket("wheels", 1)
 
 
 def http_cache_path(cache_dir: str) -> str:
@@ -40,9 +40,10 @@ def versioned_cache_dir(root: str) -> str:
     """The directory under ``root`` that holds this cpip's cache formats.
 
     Every persisted cache lives under one ``v<N>`` directory named by
-    ``CACHE_VERSION``; bumping the version moves everything at once and a
-    purge removes every ``v*`` directory, so no cache needs a version of its
-    own.
+    ``CACHE_VERSION``; bumping it retires the whole tree at once, and a purge
+    removes every ``v*`` directory. Individual stores version themselves
+    inside it (``core/utils.py:versioned_bucket``) so that one changing format
+    does not discard the rest.
     """
 
     return os.path.join(root, CACHE_VERSION_TAG)

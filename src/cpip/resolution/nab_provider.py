@@ -33,6 +33,11 @@ from cpip.resolution.nab_types import (
 
 _MISSING = object()
 _FORWARD_CHECK_BATCH = 32
+
+# Releases to start metadata for below the one just chosen. The forward-check
+# batch above cannot fire on a descent: _newest_viable accepts the newest
+# survivor at index 0 and returns first, leaving the walk serial.
+_DESCENT_PREFETCH_WINDOW = 32
 _SELECTED_FORWARD_CHECK_MIN_VERSIONS = 16
 # Two-hop metadata scans only repay their cost on genuinely large root domains.
 _TRANSITIVE_FORWARD_CHECK_MIN_VERSIONS = 256
@@ -57,6 +62,11 @@ class NabProvider:
         self.no_deps = self.context.no_deps
         self.constraints = self.context.constraints
         self.ignore_requires_python = self.context.ignore_requires_python
+        self._descent_prefetched: set[tuple[str, Version]] = set()
+        self._descent_attempts: dict[str, int] = {}
+        self._descent_order: dict[
+            str, tuple[tuple[Version, ...], tuple[Version, ...], dict[Version, int]]
+        ] = {}
         self.python_version = self.context.python_version
         self.records: dict[
             tuple[str, Version], WheelCandidate | InstalledCandidate
@@ -511,6 +521,8 @@ class NabProvider:
         conservative check.
         """
         if len(matching) == 1:
+            # An exact pin lands here every time, so half a descent is these.
+            self._prefetch_descent_window(package, matching, 0)
             return matching[0]
 
         newest_first = sorted(matching, reverse=True)
@@ -546,9 +558,106 @@ class NabProvider:
                 and not pins_are_impossible
                 and not partial_solution_rejects
             ):
+                self._prefetch_descent_window(package, newest_first, index)
                 return version
             rejected_any = True
         return newest_first[0]
+
+    def _catalog_window_below(
+        self,
+        package: str,
+        chosen: Version,
+        size: int,
+    ) -> tuple[Version, ...]:
+        """The next releases below ``chosen`` in the package's own catalog."""
+        versions = self._versions(package)
+        cached = self._descent_order.get(package)
+
+        if cached is None or cached[0] is not versions:
+            ordered = tuple(sorted(versions, reverse=True))
+            cached = (versions, ordered, {v: i for i, v in enumerate(ordered)})
+            self._descent_order[package] = cached
+
+        _, ordered, positions = cached
+        position = positions.get(chosen)
+
+        if position is None:
+            return ()
+
+        return ordered[position + 1 : position + 1 + size]
+
+    def _prefetch_descent_window(
+        self,
+        package: str,
+        newest_first: list[Version],
+        index: int,
+    ) -> None:
+        """Start metadata for the releases a backtrack would try next.
+
+        Only a package decided repeatedly is descending; speculating on a
+        first decision that stands is pure cost.
+        """
+        if _DESCENT_PREFETCH_WINDOW <= 0 or not isinstance(
+            self.provider, CandidateProvider
+        ):
+            return
+
+        attempts = self._descent_attempts.get(package, 0) + 1
+        self._descent_attempts[package] = attempts
+
+        if attempts < 2:
+            return
+
+        size = min(_DESCENT_PREFETCH_WINDOW, 1 << min(attempts - 1, 5))
+
+        try:
+            self._start_descent_window(package, newest_first, index, size)
+
+        except Exception:  # noqa: BLE001 - lookahead must not fail a resolve
+            # Nothing here is needed for correctness: whatever it would have
+            # warmed is fetched on demand by the step that reaches it.
+            pass
+
+    def _start_descent_window(
+        self,
+        package: str,
+        newest_first: list[Version],
+        index: int,
+        size: int,
+    ) -> None:
+        window = newest_first[index + 1 : index + 1 + size]
+
+        if not window:
+            window = self._catalog_window_below(package, newest_first[index], size)
+
+        if not window:
+            return
+
+        requirement = parse_requirement(package)
+
+        # Not _prefetch_catalog_candidates: it drops releases with ambiguous
+        # artifacts, which for a project shipping a wheel and an sdist is all
+        # of them. Starting metadata needs no such choice.
+        records: list[CandidateRecord] = []
+
+        for version in window:
+            key = (package, version)
+
+            if key in self._descent_prefetched:
+                continue
+
+            self._descent_prefetched.add(key)
+
+            found = self.provider.release_candidates(requirement, version)
+
+            if found:
+                records.extend(found)
+
+        if records:
+            self.provider.get_materializer_internal().prefetch_metadata(
+                tuple(records),
+                requirement=requirement,
+            )
 
     def _selected_dependency_rejects(
         self,

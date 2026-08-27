@@ -14,16 +14,19 @@ import io
 import marshal
 import os
 import shutil
+import threading
 import time
 from collections.abc import Iterable
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Generator
 
 from cpip.core.errors import InstallationError
-from cpip.core.utils import CACHE_INTERPRETER_TAG
+from cpip.core.utils import default_worker_count, versioned_bucket
 from cpip.core.wheel import validate_wheel
 from cpip.install.wheel_archive import (
+    compiled_parts,
     copy_member_with_metadata,
+    mapped_parts,
     validate_member_parts,
     zip_mode,
 )
@@ -66,16 +69,60 @@ else:
     WheelRequest = tuple[str, bool, object | None]
 
 
-ARCHIVE_CACHE_BUCKET = f"archive-{CACHE_INTERPRETER_TAG}"
+ARCHIVE_CACHE_BUCKET = versioned_bucket("archive", 1, interpreter=True)
+
+PYC_CACHE_SUBDIR = "pyc"
+"""Sibling of ``tree/`` holding the entry's byte-compiled modules.
+
+Kept outside ``tree/`` on purpose: ``tree/`` is described by the manifest's
+``entries`` tuple, which two independent readers decode as a list of wheel
+members (``wheel_install_plan_cache`` from its own receipt, and
+``wheel_archive_runtime.CachedWheelTreeArchive``). Synthetic ``__pycache__``
+rows would corrupt both. A sibling directory leaves the manifest untouched
+and makes ``--no-compile`` a matter of simply not reading it.
+
+Laid out by *mapped* (post-relocation) path, so it matches
+:func:`cpip.install.wheel_archive.compiled_parts` exactly. Absent for entries
+written before this cache learned to compile; the installer falls back to
+compiling in the stage, so a missing directory is a miss, never an error.
+"""
 
 _LOCK_WAIT_SECONDS = 30.0
 
 _STALE_LOCK_SECONDS = 300.0
 
-INSTALL_WORKERS = 4
+INSTALL_WORKERS = default_worker_count()
+"""Size of the install-side thread pools.
+
+Sized to the machine rather than fixed: cloning, extraction and hashing are
+filesystem- and decompression-bound, and a four-thread cap left most of a
+large machine idle. See :func:`cpip.core.utils.default_worker_count`.
+"""
+
+PARALLEL_THRESHOLD = 4
+"""How much work has to be waiting before a thread pool earns its overhead.
+
+Deliberately *not* ``INSTALL_WORKERS``: the pool's size and the point at
+which spinning one up pays for itself are unrelated, and tying them together
+sends every batch smaller than the machine's core count down the serial path.
+"""
+
+PARALLEL_EXTRACT_MEMBERS = 64
+"""Members a wheel needs before extracting it across threads is worth it."""
+
+_EXTRACT_PERMITS = threading.BoundedSemaphore(max(1, INSTALL_WORKERS - 1))
+"""Extraction threads this process may hand out *inside* a single wheel.
+
+Wheels are already extracted concurrently with one another, so within-wheel
+parallelism must not multiply with that. Permits are taken without blocking:
+a batch that already saturates the pool extracts each wheel serially, and a
+lone large wheel -- the case that actually needs it -- finds them all free.
+"""
 
 
 ArchiveEntry = tuple[str, str, str, int]
+
+_MemberWork = tuple["zipfile.ZipInfo", str, str, "tuple[str, str] | None"]
 
 
 _HEX_DIGITS = "0123456789abcdefABCDEF"
@@ -339,6 +386,162 @@ def _record_metadata(
     return result
 
 
+def _borrow_extract_workers(wanted: int) -> int:
+    """Take up to ``wanted`` extraction threads, or as many as are spare."""
+    taken = 0
+
+    while taken < wanted and _EXTRACT_PERMITS.acquire(blocking=False):
+        taken += 1
+
+    return taken
+
+
+def _return_extract_workers(count: int) -> None:
+    for _ in range(count):
+        _EXTRACT_PERMITS.release()
+
+
+def _extract_member(
+    archive: zipfile.ZipFile,
+    item: _MemberWork,
+) -> ArchiveEntry:
+    member, relative, destination, hint = item
+
+    metadata = copy_member_with_metadata(archive, member, destination, metadata=hint)
+
+    mode = zip_mode(member)
+
+    if mode is not None:
+        os.chmod(destination, mode)
+
+    return (relative, metadata[0], metadata[1], mode or 0)
+
+
+def _extract_members_threaded(
+    path: str,
+    work: list[_MemberWork],
+    workers: int,
+) -> list[ArchiveEntry]:
+    """Extract ``work`` across ``workers`` threads, preserving order.
+
+    Each thread opens the wheel itself: a :class:`zipfile.ZipFile` serializes
+    reads on its own lock, so sharing one would give back exactly the
+    concurrency this is trying to buy. The ``ZipInfo`` records are shared --
+    they describe offsets into a file both handles have open, not state of
+    the handle that produced them. Decompression drops the GIL, so the
+    threads do overlap.
+    """
+    import zipfile
+    from concurrent.futures import ThreadPoolExecutor
+
+    local = threading.local()
+
+    opened: list[zipfile.ZipFile] = []
+
+    lock = threading.Lock()
+
+    def extract(item: _MemberWork) -> ArchiveEntry:
+        archive = getattr(local, "archive", None)
+
+        if archive is None:
+            archive = zipfile.ZipFile(path)
+
+            local.archive = archive
+
+            with lock:
+                opened.append(archive)
+
+        return _extract_member(archive, item)
+
+    try:
+        with ThreadPoolExecutor(
+            max_workers=workers,
+            thread_name_prefix="cpip-unzip",
+        ) as pool:
+            return list(pool.map(extract, work))
+
+    finally:
+        for archive in opened:
+            archive.close()
+
+
+def pyc_root(entry_root: str) -> str:
+    """The entry's byte-compiled tree, a sibling of ``tree/``."""
+    return os.path.join(entry_root, PYC_CACHE_SUBDIR)
+
+
+def _compile_archive_pyc(
+    tree: str,
+    destination: str,
+    entries: Iterable[ArchiveEntry],
+) -> int:
+    """Byte-compile the entry's modules once, into ``destination``.
+
+    Runs at fill time so that installing is a clone plus a path rewrite
+    rather than a compile. Returns how many modules were compiled.
+
+    Compiling holds the GIL, so it is the one part of extraction that threads
+    cannot overlap; batches go to worker processes
+    (:mod:`cpip.install.bytecode`), with anything they decline compiled here.
+
+    A module that will not compile -- vendored Python 2 in a wheel, say -- is
+    skipped, not fatal: the installer falls back to compiling that one in the
+    stage, exactly as it did before this cache existed.
+    """
+    jobs: list[tuple[str, str, str]] = []
+
+    created: set[str] = set()
+
+    for entry in entries:
+        mapped = mapped_parts(entry[0])
+
+        target = compiled_parts(mapped)
+
+        if target is None:
+            continue
+
+        output = os.path.join(destination, *target)
+
+        parent = os.path.dirname(output)
+
+        if parent not in created:
+            os.makedirs(parent, exist_ok=True)
+
+            created.add(parent)
+
+        jobs.append(
+            (
+                os.path.join(tree, *entry[0].split("/")),
+                output,
+                "/".join(mapped),
+            ),
+        )
+
+    from cpip.install.bytecode import compile_jobs
+
+    for source, output, display in compile_jobs(jobs):
+        _compile_one(source, output, display)
+
+    return sum(1 for _, output, _ in jobs if os.path.exists(output))
+
+
+def _compile_one(source: str, output: str, display: str) -> None:
+    """Compile one module in this process, for whatever a worker declined."""
+    import py_compile
+
+    try:
+        py_compile.compile(
+            source,
+            cfile=output,
+            dfile=display,
+            doraise=False,
+            quiet=2,
+        )
+
+    except (OSError, ValueError, RecursionError, MemoryError):
+        pass
+
+
 def _extract_archive(
     candidate: WheelInstallCandidate,
     digest: str,
@@ -371,9 +574,15 @@ def _extract_archive(
 
             wheel_metadata = _record_metadata(archive, dist_info)
 
-            entries: list[ArchiveEntry] = []
+            # Validate and lay out the tree first, then write. Splitting the
+            # passes keeps every directory creation on one thread -- so the
+            # write pass can be threaded without racing on mkdir -- and lets
+            # a directory be created once instead of once per member it holds.
+            work: list[_MemberWork] = []
 
             seen: set[str] = set()
+
+            created: set[str] = {tree}
 
             for member in archive.infolist():
                 if member.is_dir():
@@ -397,33 +606,46 @@ def _extract_archive(
 
                 destination = os.path.join(tree, *parts)
 
-                os.makedirs(os.path.dirname(destination), exist_ok=True)
+                parent = os.path.dirname(destination)
+
+                if parent not in created:
+                    os.makedirs(parent, exist_ok=True)
+
+                    created.add(parent)
 
                 metadata = wheel_metadata.get(relative)
 
                 if metadata is not None and metadata[1] != str(member.file_size):
                     metadata = None
 
-                metadata = copy_member_with_metadata(
-                    archive,
-                    member,
-                    destination,
-                    metadata=metadata,
+                work.append((member, relative, destination, metadata))
+
+            workers = (
+                _borrow_extract_workers(INSTALL_WORKERS - 1)
+                if len(work) >= PARALLEL_EXTRACT_MEMBERS
+                else 0
+            )
+
+            try:
+                entries: list[ArchiveEntry] = (
+                    _extract_members_threaded(candidate.path, work, workers + 1)
+                    if workers
+                    else [_extract_member(archive, item) for item in work]
                 )
 
-                mode = zip_mode(member)
-
-                if mode is not None:
-                    os.chmod(destination, mode)
-
-                entries.append(
-                    (relative, metadata[0], metadata[1], mode or 0),
-                )
+            finally:
+                _return_extract_workers(workers)
 
         if f"{dist_info}/RECORD" not in seen:
             raise InstallationError(
                 f"Wheel {candidate.path} has no valid dist-info metadata",
             )
+
+        _compile_archive_pyc(
+            tree,
+            os.path.join(temporary, PYC_CACHE_SUBDIR),
+            entries,
+        )
 
         manifest = (
             digest,
@@ -508,7 +730,7 @@ def prepare_cached_wheels(
     if len(cached_archives) == len(candidates):
         return tuple(cached_archives)
 
-    if len(candidates) < INSTALL_WORKERS:
+    if len(candidates) < PARALLEL_THRESHOLD:
         return tuple(
             prepare_cached_wheel(candidate, cache_dir) for candidate in candidates
         )

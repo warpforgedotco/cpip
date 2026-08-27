@@ -153,29 +153,42 @@ resumable/progress downloader for the preparer path, not this route.
 ## Caches
 
 Every persisted cache lives under `<cache root>/v<CACHE_VERSION>/`
-(`core/appdirs.py:versioned_cache_dir`, currently `v0/`), which
-`resolve_cache_dir`/`configured_cache_dir` hand to every writer. That directory
-is the only version the cache system has: no cache carries one in its name or
-payload, bumping `core/utils.py:CACHE_VERSION` invalidates everything at once,
-there is no migration code, and `cpip cache purge` removes every `v*`
-directory without knowing the stores.
+(`core/appdirs.py:versioned_cache_dir`, currently `v1/`), which
+`resolve_cache_dir`/`configured_cache_dir` hand to every writer.
 
-| Owner | Under `v0/` | Contents |
+The cache is versioned at two levels, for two different jobs. The `v<N>` root
+retires the whole tree at once; it is the escape hatch for a change that
+crosses every store, and it is what `cpip cache purge` keys on, since that
+removes every `v*` directory without knowing the stores. Each store then
+carries its own version in its name (`core/utils.py:versioned_bucket`), so a
+format change to one does not discard the others. Stores cost wildly
+different amounts to refill -- re-parsing an index page is one request,
+re-extracting every wheel is not -- and a shared version lets the cheapest
+one decide when the most expensive is thrown away. There is no migration code
+at either level: a store of another version is simply never read.
+
+Bumping one store is the whole migration. The new name is a store this cpip
+has never written; the old one is inert until a purge.
+
+| Owner | Under `v1/` | Contents |
 | --- | --- | --- |
-| `network/cache.py` | `http/` | HTTP metadata/body pairs; a partial pair is a miss |
-| `index/catalog_cache.py` | entries in `http/` | parsed Simple API catalogs, release summaries (`Version.to_wire()`), target choices; checksum-validated, recompiled from the catalog on any failure |
-| `index/artifact_cache.py` | `artifacts/` | bodies by SHA-256 plus URL receipts |
-| `index/candidate_cache.py` | `wheels/` | wheels built from source |
-| `index/metadata_cache.py` | `metadata.sqlite` | parsed headers of local wheel files and of installed `METADATA` files, and SHA-256 of local wheels, by path, size, mtime |
-| `index/candidate_metadata_cache.py` | `candidate-metadata.sqlite` | dependency metadata reused during resolution |
-| `index/release_facts_cache.py` | `release-facts.marshal` | deterministic release rejection reasons |
-| `cli/fast.py` | `fast-lock-plan/` | rendered lock output |
-| `cli/fast_install.py` | `fast-install-<interp>.marshal`, `fast-install-trees/` | fast-path plans, metadata, cloneable completed targets |
-| `install/wheel_archive_cache.py` | `archive-<interp>/` | validated unpacked wheel trees by digest |
-| `install/wheel_install_plan_cache.py` | `resolution-<interp>/` | short-lived exact-pin receipts over archive entries |
+| `network/cache.py` | `http-v1/` | HTTP metadata/body pairs; a partial pair is a miss |
+| `index/catalog_cache.py` | entries in `http-v1/` | parsed Simple API catalogs, release summaries (`Version.to_wire()`), target choices; key prefixes and payload headers carry their own versions; checksum-validated, recompiled from the catalog on any failure |
+| `index/artifact_cache.py` | `artifacts-v1/` | bodies by SHA-256 plus URL receipts |
+| `index/candidate_cache.py` | `wheels-v1/` | wheels built from source |
+| `index/metadata_cache.py` | `metadata-v1.sqlite` | parsed headers of local wheel files and of installed `METADATA` files, and SHA-256 of local wheels, by path, size, mtime |
+| `index/candidate_metadata_cache.py` | `candidate-metadata-v1.sqlite` | dependency metadata reused during resolution |
+| `index/release_facts_cache.py` | `release-facts-v1-<interp>.marshal` | deterministic release rejection reasons |
+| `cli/fast.py` | `fast-lock-plan-v1/` | rendered lock output |
+| `cli/fast_install.py` | `fast-install-v1-<interp>.marshal`, `fast-install-trees-v1-<interp>/` | fast-path plans, metadata, cloneable completed targets |
+| `install/wheel_archive_cache.py` | `archive-v1-<interp>/` | validated unpacked wheel trees by digest, and their byte-compiled `pyc/` sibling |
+| `install/wheel_install_plan_cache.py` | `resolution-v1-<interp>/` | short-lived exact-pin receipts over archive entries |
 
-`<interp>` is `core/utils.py:CACHE_INTERPRETER_TAG`: marshal data is not
-portable across interpreters, so those buckets are scoped per interpreter.
+`<interp>` is `core/utils.py:CACHE_INTERPRETER_TAG`, applied by
+`versioned_bucket(..., interpreter=True)`. `marshal` payloads are not portable
+across interpreters, and neither are installed trees or the bytecode in them,
+so those stores are scoped to the interpreter that wrote them as well as
+versioned.
 
 Invariants:
 
@@ -192,8 +205,8 @@ Invariants:
 
 | Package | Owns | Must not own |
 | --- | --- | --- |
-| `core` | value types, packaging rules, hashes, URLs, wheels, cache primitives | command policy |
-| `platform` | config locations, install schemes, cloning, secure archive extraction, host behavior | selection policy |
+| `core` | value types, packaging rules, hashes, URLs, wheels, archive reading, cache primitives | command policy |
+| `platform` | config locations, install schemes, cloning, secure archive extraction, host behavior | archive reading, selection policy |
 | `build` | backend hooks, metadata generation, build isolation | resolver decisions |
 | `index` | sources, links, catalogs, discovery, artifact localization, materialization | backtracking, installation |
 | `network` | sessions, auth, HTTP transport, HTTP cache | resolver state |

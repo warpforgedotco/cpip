@@ -74,7 +74,7 @@ def test_layout_open_does_not_read_the_central_directory(
     wheel: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cpip.platform import archive
+    from cpip.core import archive
 
     candidate = wheel_candidate_from_path(os.fspath(wheel))
 

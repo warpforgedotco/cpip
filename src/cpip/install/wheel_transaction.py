@@ -38,7 +38,7 @@ from cpip.install.wheel_archive import (
     validate_member_parts,
     zip_mode,
 )
-from cpip.install.wheel_archive_cache import CachedWheelArchive
+from cpip.install.wheel_archive_cache import INSTALL_WORKERS, CachedWheelArchive
 from cpip.install.wheel_archive_installer import install_wheels_from_archive_cache
 from cpip.install.wheel_archive_runtime import CachedWheelInfo, open_wheel_archive
 from cpip.install.wheel_scripts import (
@@ -886,7 +886,7 @@ def install_wheels_transactionally(
                     staged_results = []
                     try:
                         with ThreadPoolExecutor(
-                            max_workers=min(4, len(requests)),
+                            max_workers=min(INSTALL_WORKERS, len(requests)),
                         ) as pool:
                             futures = [
                                 pool.submit(install_one, index, request, candidate)

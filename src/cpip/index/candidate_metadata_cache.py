@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from cpip.core.utils import versioned_bucket
+
 import json
 import marshal
 import os
@@ -13,7 +15,7 @@ from cpip.core.versions import Version
 from cpip.index.source_models import CandidateMetadata
 from cpip.index.sqlite_cache import SqliteBackedCache
 
-NAME = "candidate-metadata.sqlite"
+NAME = f"{versioned_bucket('candidate-metadata', 1)}.sqlite"
 MAX_ENTRIES = 16_384
 INSTANCES: dict[str, CandidateMetadataCache] = {}
 CacheKey = tuple[str, str, tuple[str, ...], str]

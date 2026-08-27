@@ -46,12 +46,28 @@ class CacheManager:
             if os.path.isdir(path)
         )
 
+    def wheel_dirs(self) -> builtins.list[str]:
+        """Every version of the built-wheel store, not only this cpip's.
+
+        Stores carry their own format version, so a cpip that has moved on
+        leaves the previous one sitting there. ``purge`` reaps it because it
+        works on whole ``v*`` roots, but ``list`` and ``remove`` work on
+        stores -- and a wheel they cannot see is one the user cannot remove.
+        """
+        stem = WHEEL_CACHE_BUCKET.rsplit("-v", 1)[0]
+
+        return sorted(
+            path
+            for path in glob.glob(
+                os.path.join(glob.escape(self.cache_dir), f"{glob.escape(stem)}-v*"),
+            )
+            if os.path.isdir(path)
+        )
+
     def wheel_files(self) -> builtins.list[str]:
-        wheel_dir = self.wheel_dir
-        if not os.path.isdir(wheel_dir):
-            return []
         return sorted(
             os.path.join(current, name)
+            for wheel_dir in self.wheel_dirs()
             for current, _, files in os.walk(wheel_dir, followlinks=False)
             for name in files
             if name.endswith(".whl")
@@ -153,10 +169,11 @@ class CacheManager:
             print("WARNING: No matching packages", file=sys.stderr)
         return files_removed, bytes_removed, directories_removed
 
-    def info(self) -> tuple[str, str, int]:
+    def info(self) -> tuple[str, builtins.list[str], int]:
+        # Every store the count covers, since wheel_files spans all of them.
         return (
             self.http_dir,
-            self.wheel_dir,
+            self.wheel_dirs() or [self.wheel_dir],
             len(self.wheel_files()),
         )
 
@@ -185,11 +202,12 @@ def run_cache(args: list[str]) -> int:
         if options.pattern:
             raise CommandError("Too many arguments")
 
-        http_dir, wheel_dir, wheel_count = manager.info()
+        http_dir, wheel_dirs, wheel_count = manager.info()
 
         print(f"Package index page cache location: {http_dir}")
 
-        print(f"Locally built wheels location: {wheel_dir}")
+        for wheel_dir in wheel_dirs:
+            print(f"Locally built wheels location: {wheel_dir}")
 
         print(f"Number of locally built wheels: {wheel_count}")
 

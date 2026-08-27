@@ -58,12 +58,19 @@ from cpip.index.source_models import (
 )
 from cpip.index.vcs import git_revision, is_immutable_vcs_link
 from cpip.index.vcs import vcs_scheme
-from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
+from cpip.core.archive import WheelArchive, WheelhouseUnavailable
 
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Iterable, Iterator
+    from collections.abc import (
+        Callable,
+        Generator,
+        Iterable,
+        Iterator,
+        Mapping,
+        Sequence,
+    )
     from typing import Any
 
     from cpip.core.http import HttpSession
@@ -975,6 +982,20 @@ class CandidateMaterializer:
 
                     return metadata
 
+            if candidate.link.kind is ArtifactKind.WHEEL:
+                metadata = self.ranged_wheel_metadata(candidate, requested_extras)
+
+                if metadata is not None:
+                    self.metadata_cache[key] = metadata
+
+                    if self.persistent_candidate_metadata_cache is not None:
+                        self.persistent_candidate_metadata_cache.put(
+                            persistent_key,
+                            metadata,
+                        )
+
+                    return metadata
+
             local_path = self.local_path_for(candidate)
 
             path_text = self.ensure_local_text(candidate, local_path=local_path)
@@ -1116,32 +1137,82 @@ class CandidateMaterializer:
 
             response.raise_for_status()
 
-            headers = parse_metadata_headers(response.text)
-
-            name = headers.get("name", (None,))[0]
-
-            version = headers.get("version", (None,))[0]
-
-            if name is None or version is None:
-                return None
-
-            dependencies = tuple(
-                requirement
-                for value in headers.get("requires-dist", ())
-                if (requirement := parse_requirement(value)) is not None
-                if marker_applies(requirement.marker, extras=requested_extras)
-            )
-
-            return CandidateMetadata(
-                name=name,
-                version=Version(version),
-                dependencies=dependencies,
-                provided_extras=frozenset(headers.get("provides-extra", ())),
-                requires_python=(headers.get("requires-python") or [None])[0],
+            return self.metadata_from_headers(
+                parse_metadata_headers(response.text),
+                requested_extras,
             )
 
         except (KeyError, OSError, TypeError, ValueError):
             return None
+
+    def ranged_wheel_metadata(
+        self,
+        candidate: CandidateRecord,
+        requested_extras: frozenset[str],
+    ) -> CandidateMetadata | None:
+        """A wheel's metadata read over HTTP range requests, if that works.
+
+        The tier between a PEP 658 sidecar and downloading the whole wheel.
+        An index that publishes no sidecars would otherwise cost a full wheel
+        per candidate considered, most of which the resolver discards.
+
+        The session is asked duck-typed rather than through the ``HttpSession``
+        protocol: ``index`` may not import ``network``, and this is an extra a
+        transport either offers or does not. Whether a host serves ranges is
+        the transport's to remember, so nothing is memoized here.
+        """
+        session = self.session
+
+        if session is None or candidate.link.is_file:
+            return None
+
+        reader = getattr(session, "wheel_metadata_text", None)
+
+        if reader is None:
+            return None
+
+        try:
+            text = reader(candidate.link.url_without_fragment, candidate.name)
+
+            if not text:
+                return None
+
+            # Parsing is inside the handler too: a wheel whose Requires-Dist
+            # will not parse should cost a full download, not the whole
+            # metadata load.
+            return self.metadata_from_headers(
+                parse_metadata_headers(text),
+                requested_extras,
+            )
+
+        except (KeyError, OSError, TypeError, ValueError):
+            return None
+
+    def metadata_from_headers(
+        self,
+        headers: Mapping[str, Sequence[str]],
+        requested_extras: frozenset[str],
+    ) -> CandidateMetadata | None:
+        """Parsed ``METADATA`` headers as a candidate's metadata."""
+        name = headers.get("name", (None,))[0]
+
+        version = headers.get("version", (None,))[0]
+
+        if name is None or version is None:
+            return None
+
+        return CandidateMetadata(
+            name=name,
+            version=Version(version),
+            dependencies=tuple(
+                requirement
+                for value in headers.get("requires-dist", ())
+                if (requirement := parse_requirement(value)) is not None
+                if marker_applies(requirement.marker, extras=requested_extras)
+            ),
+            provided_extras=frozenset(headers.get("provides-extra", ())),
+            requires_python=(headers.get("requires-python") or [None])[0],
+        )
 
     def pypi_metadata(
         self,

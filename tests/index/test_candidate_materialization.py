@@ -19,7 +19,7 @@ from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
 from cpip.index.source_models import CandidateRecord
 from cpip.resolution.api import ResolutionEngine
-from cpip.platform.archive import WheelArchive
+from cpip.core.archive import WheelArchive
 
 from ..wheel_helpers import make_wheel
 
@@ -244,7 +244,7 @@ def test_materialized_candidate_keeps_the_resolver_layout(tmp_path: Path) -> Non
     candidate: it is what lets the installer open the wheel again without
     another central-directory scan."""
     from cpip.install.wheel_archive_runtime import RawWheelArchive, open_wheel_archive
-    from cpip.platform import archive
+    from cpip.core import archive
 
     wheel = _write_wheel_with_script(tmp_path, "layout-pkg", "1.0")
     provider = CandidateProvider.from_options(find_links=[str(tmp_path)], no_index=True)
@@ -331,3 +331,139 @@ def test_unsupported_member_compression_falls_back_to_zipfile(tmp_path: Path) ->
     assert candidate.name == "odd-pkg"
     assert str(candidate.version) == "1.0"
     assert isinstance(candidate.wheel_layout, tuple)
+
+
+_WHEEL_METADATA = (
+    "Metadata-Version: 2.1\n"
+    "Name: demo\n"
+    "Version: 1.0\n"
+    "Requires-Dist: downstream>=2\n"
+    'Requires-Dist: extradep; extra == "cli"\n'
+    "Provides-Extra: cli\n"
+)
+
+
+def _remote_wheel_record() -> CandidateRecord:
+    return CandidateRecord(
+        name="demo",
+        version=Version("1.0"),
+        link=Link.from_url(
+            "https://example.invalid/demo-1.0-py3-none-any.whl",
+            source_url=None,
+        ),
+    )
+
+
+class _RangeSession:
+    """A transport that can read a wheel's metadata without the wheel."""
+
+    auth = None
+    cache = None
+
+    def __init__(self, text: str | None = _WHEEL_METADATA) -> None:
+        self.text = text
+        self.calls: list[tuple[str, str]] = []
+
+    def get(self, url: str, **kwargs: object) -> object:  # pragma: no cover
+        raise AssertionError(f"the whole artifact was fetched: {url}")
+
+    def head(self, url: str, **kwargs: object) -> object:  # pragma: no cover
+        raise AssertionError(f"unexpected HEAD: {url}")
+
+    def wheel_metadata_text(self, url: str, name: str) -> str | None:
+        self.calls.append((url, name))
+        return self.text
+
+
+class _PlainSession(_RangeSession):
+    """A transport with no range-reading extra at all."""
+
+    wheel_metadata_text = None  # type: ignore[assignment]
+
+
+class TestRangedWheelMetadata:
+    def test_reads_metadata_without_fetching_the_wheel(self) -> None:
+        session = _RangeSession()
+        materializer = CandidateMaterializer(session=session)
+
+        metadata = materializer.ranged_wheel_metadata(
+            _remote_wheel_record(),
+            frozenset(),
+        )
+
+        assert metadata is not None
+        assert metadata.name == "demo"
+        assert metadata.version == Version("1.0")
+        assert [str(dep.name) for dep in metadata.dependencies] == ["downstream"]
+        assert metadata.provided_extras == frozenset({"cli"})
+        assert session.calls == [
+            ("https://example.invalid/demo-1.0-py3-none-any.whl", "demo"),
+        ]
+
+    def test_requested_extras_select_their_dependencies(self) -> None:
+        materializer = CandidateMaterializer(session=_RangeSession())
+
+        metadata = materializer.ranged_wheel_metadata(
+            _remote_wheel_record(),
+            frozenset({"cli"}),
+        )
+
+        assert metadata is not None
+        assert sorted(str(dep.name) for dep in metadata.dependencies) == [
+            "downstream",
+            "extradep",
+        ]
+
+    def test_a_transport_without_the_extra_declines(self) -> None:
+        materializer = CandidateMaterializer(session=_PlainSession())
+
+        assert (
+            materializer.ranged_wheel_metadata(_remote_wheel_record(), frozenset())
+            is None
+        )
+
+    def test_no_session_declines(self) -> None:
+        materializer = CandidateMaterializer(session=None)
+
+        assert (
+            materializer.ranged_wheel_metadata(_remote_wheel_record(), frozenset())
+            is None
+        )
+
+    def test_an_empty_answer_declines(self) -> None:
+        materializer = CandidateMaterializer(session=_RangeSession(text=None))
+
+        assert (
+            materializer.ranged_wheel_metadata(_remote_wheel_record(), frozenset())
+            is None
+        )
+
+    def test_a_local_wheel_is_not_read_over_http(self, tmp_path: Path) -> None:
+        session = _RangeSession()
+        materializer = CandidateMaterializer(session=session)
+
+        record = CandidateRecord(
+            name="demo",
+            version=Version("1.0"),
+            link=Link.from_url(
+                (tmp_path / "demo-1.0-py3-none-any.whl").as_uri(),
+                source_url=None,
+            ),
+        )
+
+        assert materializer.ranged_wheel_metadata(record, frozenset()) is None
+        assert session.calls == []
+
+
+def test_unparsable_metadata_falls_back_instead_of_propagating() -> None:
+    """A wheel whose Requires-Dist will not parse should cost a full download,
+    not abort the whole metadata load."""
+    session = _RangeSession(
+        text="Metadata-Version: 2.1\nName: demo\nVersion: 1.0\nRequires-Dist: ==\n",
+    )
+    materializer = CandidateMaterializer(session=session)
+
+    assert (
+        materializer.ranged_wheel_metadata(_remote_wheel_record(), frozenset()) is None
+    )
+    assert session.calls, "the range read was never attempted"

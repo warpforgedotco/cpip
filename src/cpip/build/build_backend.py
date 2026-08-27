@@ -690,13 +690,27 @@ class ProjectBuilder:
         somewhere a later build can find.
         """
 
-        static_metadata = read_legacy_metadata(self.source_dir)
+        # A backend is available below, so only metadata PEP 643 guarantees
+        # matches the wheel it would build may stand in for running it.
+        static_metadata = read_legacy_metadata(self.source_dir, require_static=True)
 
         if static_metadata is not None and not editable:
             return static_metadata
 
+        reader = ProjectMetadataReader(self.source_dir)
+
+        if not editable:
+            # A fully static [project] table says what the backend would say,
+            # so reading it beats standing up a build environment, installing
+            # the backend's requirements and calling a hook to be told the
+            # same thing -- once per candidate, per backtrack.
+            declared = reader.read_static()
+
+            if declared is not None:
+                return declared
+
         if self.backend_spec is None:
-            return ProjectMetadataReader(self.source_dir).read()
+            return reader.read()
 
         backend_name = self.backend_spec.name
 
@@ -933,117 +947,177 @@ class ProjectMetadataReader:
     def __init__(self, source_dir: str | os.PathLike[str]) -> None:
         self.source_dir = os.fspath(source_dir)
 
+    def _pyproject(self) -> dict | None:
+        try:
+            with open(
+                os.path.join(self.source_dir, "pyproject.toml"),
+                encoding="utf-8",
+            ) as file:
+                return loads(file.read())
+
+        except OSError:
+            return None
+
+    def _read_project_table(
+        self,
+        data: dict,
+        *,
+        require_static: bool,
+    ) -> ProjectMetadata | None:
+        """The ``[project]`` table, or ``None`` if it cannot answer.
+
+        ``require_static`` additionally rejects a table that declares any of
+        the fields read here in ``project.dynamic``: the backend computes
+        those at build time, so what is written here is not what the wheel
+        will say. Callers that can run the backend pass it.
+        """
+        source_dir = self.source_dir
+
+        project = data.get("project")
+
+        if not isinstance(project, dict):
+            return None
+
+        name = project.get("name")
+
+        version = project.get("version")
+
+        if (
+            not isinstance(name, str)
+            or not name
+            or not isinstance(version, str)
+            or not version
+        ):
+            return None
+
+        if require_static:
+            declared = project.get("dynamic", [])
+
+            if not isinstance(declared, list):
+                return None
+
+            if _DYNAMIC_BLOCKS_STATIC.intersection(
+                value.lower() for value in declared if isinstance(value, str)
+            ):
+                return None
+
+            try:
+                Version(version)
+
+            # A version this cannot parse is one the backend may still
+            # normalize, so under require_static it means "cannot answer" and
+            # the backend decides. Raising here would escape prepare_metadata,
+            # where callers are waiting for BuildError to fall back on.
+            except InvalidVersion:
+                return None
+
+        else:
+            Version(version)
+
+        dependencies = project.get("dependencies", [])
+
+        if not isinstance(dependencies, list) or not all(
+            isinstance(item, str) for item in dependencies
+        ):
+            raise BuildError(
+                f"Cannot build {source_dir}: project.dependencies is invalid",
+            )
+
+        scripts = project.get("scripts", {})
+
+        if not isinstance(scripts, dict) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in scripts.items()
+        ):
+            raise BuildError(
+                f"Cannot build {source_dir}: project.scripts is invalid",
+            )
+
+        summary = (
+            project.get("description")
+            if isinstance(project.get("description"), str)
+            else None
+        )
+
+        requires_python = (
+            project.get("requires-python")
+            if isinstance(project.get("requires-python"), str)
+            else None
+        )
+
+        license_expression = (
+            project.get("license") if isinstance(project.get("license"), str) else None
+        )
+
+        license_files_raw = project.get("license-files", [])
+
+        if not isinstance(license_files_raw, list) or not all(
+            isinstance(item, str) for item in license_files_raw
+        ):
+            raise BuildError(
+                f"Cannot build {source_dir}: project.license-files is invalid",
+            )
+
+        optional_dependencies_raw = project.get("optional-dependencies", {})
+
+        if not isinstance(optional_dependencies_raw, dict):
+            raise BuildError(
+                f"Cannot build {source_dir}: project.optional-dependencies is invalid",
+            )
+
+        optional_dependencies: dict[str, tuple[str, ...]] = {}
+
+        for extra, values in optional_dependencies_raw.items():
+            if (
+                not isinstance(extra, str)
+                or not isinstance(values, list)
+                or not all(isinstance(item, str) for item in values)
+            ):
+                raise BuildError(
+                    f"Cannot build {source_dir}: "
+                    "project.optional-dependencies is invalid",
+                )
+
+            optional_dependencies[extra] = tuple(values)
+
+        return ProjectMetadata(
+            name=name,
+            version=version,
+            summary=summary,
+            requires_python=requires_python,
+            dependencies=tuple(dependencies),
+            optional_dependencies=optional_dependencies,
+            scripts=scripts,
+            provided_extras=frozenset(optional_dependencies),
+            license_expression=license_expression,
+            license_files=tuple(license_files_raw),
+        )
+
+    def read_static(self) -> ProjectMetadata | None:
+        """``[project]`` metadata a backend cannot disagree with, if any."""
+        data = self._pyproject()
+
+        return (
+            None
+            if data is None
+            else self._read_project_table(
+                data,
+                require_static=True,
+            )
+        )
+
     def read(self) -> ProjectMetadata:
         source_dir = self.source_dir
 
         source_text = os.fspath(source_dir)
 
-        pyproject_path = os.path.join(source_text, "pyproject.toml")
-
-        try:
-            with open(pyproject_path, encoding="utf-8") as file:
-                data = loads(file.read())
-
-        except OSError:
-            data = None
+        data = self._pyproject()
 
         if data is not None:
-            project = data.get("project")
+            static = self._read_project_table(data, require_static=False)
 
-            if isinstance(project, dict):
-                name = project.get("name")
-
-                version = project.get("version")
-
-                if (
-                    isinstance(name, str)
-                    and name
-                    and isinstance(version, str)
-                    and version
-                ):
-                    Version(version)
-
-                    dependencies = project.get("dependencies", [])
-
-                    if not isinstance(dependencies, list) or not all(
-                        isinstance(item, str) for item in dependencies
-                    ):
-                        raise BuildError(
-                            f"Cannot build {source_dir}: project.dependencies is invalid",
-                        )
-
-                    scripts = project.get("scripts", {})
-
-                    if not isinstance(scripts, dict) or not all(
-                        isinstance(key, str) and isinstance(value, str)
-                        for key, value in scripts.items()
-                    ):
-                        raise BuildError(
-                            f"Cannot build {source_dir}: project.scripts is invalid",
-                        )
-
-                    summary = (
-                        project.get("description")
-                        if isinstance(project.get("description"), str)
-                        else None
-                    )
-
-                    requires_python = (
-                        project.get("requires-python")
-                        if isinstance(project.get("requires-python"), str)
-                        else None
-                    )
-
-                    license_expression = (
-                        project.get("license")
-                        if isinstance(project.get("license"), str)
-                        else None
-                    )
-
-                    license_files_raw = project.get("license-files", [])
-
-                    if not isinstance(license_files_raw, list) or not all(
-                        isinstance(item, str) for item in license_files_raw
-                    ):
-                        raise BuildError(
-                            f"Cannot build {source_dir}: project.license-files is invalid",
-                        )
-
-                    optional_dependencies_raw = project.get("optional-dependencies", {})
-
-                    if not isinstance(optional_dependencies_raw, dict):
-                        raise BuildError(
-                            f"Cannot build {source_dir}: "
-                            "project.optional-dependencies is invalid",
-                        )
-
-                    optional_dependencies: dict[str, tuple[str, ...]] = {}
-
-                    for extra, values in optional_dependencies_raw.items():
-                        if (
-                            not isinstance(extra, str)
-                            or not isinstance(values, list)
-                            or not all(isinstance(item, str) for item in values)
-                        ):
-                            raise BuildError(
-                                f"Cannot build {source_dir}: "
-                                "project.optional-dependencies is invalid",
-                            )
-
-                        optional_dependencies[extra] = tuple(values)
-
-                    return ProjectMetadata(
-                        name=name,
-                        version=version,
-                        summary=summary,
-                        requires_python=requires_python,
-                        dependencies=tuple(dependencies),
-                        optional_dependencies=optional_dependencies,
-                        scripts=scripts,
-                        provided_extras=frozenset(optional_dependencies),
-                        license_expression=license_expression,
-                        license_files=tuple(license_files_raw),
-                    )
+            if static is not None:
+                return static
 
             setup_py_path = os.path.join(source_text, "setup.py")
 
@@ -1063,8 +1137,12 @@ class ProjectMetadataReader:
                 if metadata is not None:
                     return metadata
 
+                project = data.get("project")
+
                 if isinstance(project, dict):
-                    if not isinstance(name, str) or not name:
+                    if not isinstance(project.get("name"), str) or not project.get(
+                        "name",
+                    ):
                         raise BuildError(
                             f"Cannot build {source_dir}: missing project.name",
                         )
@@ -1241,9 +1319,65 @@ def infer_metadata_from_package_dir(
     return None
 
 
+_STATIC_GUARANTEED_FROM = (2, 2)
+"""First core metadata version whose fields are guaranteed static.
+
+PEP 643. Before it, a source distribution's ``PKG-INFO`` recorded whatever
+the author's machine produced and a backend was free to compute something
+else at build time, so it cannot be used to answer what a wheel built from
+that sdist will require.
+"""
+
+_MAY_NOT_BE_DYNAMIC = ("requires-dist", "provides-extra", "requires-python")
+"""Fields this reader reports, and so must find declared static."""
+
+_DYNAMIC_BLOCKS_STATIC = frozenset(
+    {"version", "dependencies", "optional-dependencies", "requires-python"},
+)
+"""``project.dynamic`` entries that make the ``[project]`` table unusable.
+
+Declaring one of these hands the field to the build backend, so what the
+table says about it -- including saying nothing -- is not what the built
+wheel will say."""
+
+
+def _metadata_version(fields: dict[str, list[str]]) -> tuple[int, ...]:
+    raw = fields.get("Metadata-Version", [""])[0]
+
+    try:
+        return tuple(int(part) for part in raw.strip().split("."))
+
+    except ValueError:
+        return ()
+
+
+def _fields_are_static(fields: dict[str, list[str]]) -> bool:
+    """Whether PEP 643 guarantees this metadata matches the built wheel."""
+    if _metadata_version(fields) < _STATIC_GUARANTEED_FROM:
+        return False
+
+    dynamic = {value.strip().lower() for value in fields.get("Dynamic", [])}
+
+    return not dynamic.intersection(_MAY_NOT_BE_DYNAMIC)
+
+
 def read_legacy_metadata(
     source_dir: str | os.PathLike[str],
+    *,
+    require_static: bool = False,
 ) -> ProjectMetadata | None:
+    """Metadata already written into a source tree, without building it.
+
+    ``require_static`` rejects anything PEP 643 does not guarantee: metadata
+    older than 2.2, or declaring one of the fields read here in ``Dynamic``.
+    Callers that can fall back to running the build backend pass it, because
+    a wrong dependency set is worse than a slow one. Callers with no backend
+    to fall back to leave it off and take the best answer available.
+
+    Metadata inside a ``.dist-info`` is exempt: that is a built wheel's own
+    metadata, which describes something already built rather than predicting
+    it.
+    """
     source_text = os.fspath(source_dir)
 
     with os.scandir(source_text) as entries:
@@ -1318,6 +1452,13 @@ def read_legacy_metadata(
 
         Version(version)
 
+        if (
+            require_static
+            and not os.path.basename(os.path.dirname(candidate)).endswith(".dist-info")
+            and not _fields_are_static(fields)
+        ):
+            continue
+
         summary = fields.get("Summary", [None])[0]
 
         requires_python = fields.get("Requires-Python", [None])[0]
@@ -1345,6 +1486,9 @@ def read_legacy_metadata(
             dependencies=tuple(dependencies),
             optional_dependencies={},
             scripts={},
+            provided_extras=frozenset(
+                value for value in fields.get("Provides-Extra", []) if value
+            ),
         )
 
     return None

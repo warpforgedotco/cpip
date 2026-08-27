@@ -12,6 +12,8 @@ heavier CLI dependencies are imported only once their shape matches.
 
 from __future__ import annotations
 
+from cpip.core.utils import versioned_bucket
+
 import marshal
 import os
 import sys
@@ -20,7 +22,7 @@ from cpip.cli.lock_format import render_wheel_lock, write_lock_output
 from cpip.core.appdirs import configured_cache_dir
 from cpip.core.names import canonicalize_name
 
-FAST_LOCK_PLAN_BUCKET = "fast-lock-plan"
+FAST_LOCK_PLAN_BUCKET = versioned_bucket("fast-lock-plan", 1)
 """Directory under the cache directory holding rendered lock plans."""
 
 REMOTE_EXACT_OPTIONS = ("--ignore-installed", "--no-compile", "--target")

@@ -229,9 +229,9 @@ def test_default_and_explicit_scans_are_cached_separately(
     calls: list[object] = []
     real = metadata._iter_raw_distributions
 
-    def recording(paths):  # noqa: ANN001, ANN202
+    def recording(paths, canonical_names=None):  # noqa: ANN001, ANN202
         calls.append("<default>" if paths is None else list(paths))
-        return real(paths)
+        return real(paths, canonical_names)
 
     monkeypatch.setattr(metadata, "_iter_raw_distributions", recording)
     explicit = list(sys.path)
@@ -539,3 +539,169 @@ def test_header_cache_round_trips_through_the_wheel_metadata_store(
     ]
     assert [str(dep) for dep in second[3].dependencies()] == ["pkg0"]
     assert not second_store._pending_puts
+
+
+class TestFilteredScan:
+    """A ``names=`` scan must not read metadata it was never asked about.
+
+    Both scanners filter twice: once on the directory name, before opening
+    anything, and again on the parsed ``Name``. The first pass is an
+    optimization and has to be a strict superset of the second.
+    """
+
+    @staticmethod
+    def _populate(site_packages: Path, count: int) -> None:
+        for index in range(count):
+            _write_dist_info(
+                site_packages,
+                f"pkg_{index:03d}-1.0.dist-info",
+                f"Metadata-Version: 2.1\nName: pkg-{index:03d}\nVersion: 1.0\n",
+            )
+
+    def test_unrelated_metadata_is_never_opened(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        site_packages = tmp_path / "site-packages"
+        self._populate(site_packages, 40)
+
+        from cpip.core import metadata as core_metadata
+
+        opened: list[object] = []
+        read_text = core_metadata._read_text_file
+        read_raw = core_metadata._read_raw_metadata_text
+
+        def recording_text(path: str) -> str | None:
+            opened.append(path)
+            return read_text(path)
+
+        def recording_raw(dist: object) -> str | None:
+            opened.append(getattr(dist, "_path", dist))
+            return read_raw(dist)
+
+        monkeypatch.setattr(core_metadata, "_read_text_file", recording_text)
+        monkeypatch.setattr(core_metadata, "_read_raw_metadata_text", recording_raw)
+
+        found = core_metadata.iter_installed_distributions(
+            [str(site_packages)],
+            names=["pkg-007"],
+        )
+
+        assert [dist.canonical_name for dist in found] == ["pkg-007"]
+
+        unrelated = [
+            target for target in opened if "pkg_007-1.0.dist-info" not in str(target)
+        ]
+
+        assert not unrelated, f"opened metadata for {len(unrelated)} unasked-for names"
+
+    def test_unfiltered_scan_still_sees_everything(self, tmp_path: Path) -> None:
+        site_packages = tmp_path / "site-packages"
+        self._populate(site_packages, 12)
+
+        found = iter_installed_distributions([str(site_packages)])
+
+        assert len(found) == 12
+
+    @pytest.mark.parametrize(
+        "directory",
+        [
+            "Widget_Thing-1.0.dist-info",
+            "widget.thing-1.0.dist-info",
+            "widget_thing-1.0.dist-info",
+            "WIDGET-THING-1.0.dist-info",
+        ],
+    )
+    def test_the_prefilter_survives_name_escaping(
+        self,
+        tmp_path: Path,
+        directory: str,
+    ) -> None:
+        """A directory is named for an *escaped* distribution name, so the
+        separators and case in it need not match what METADATA says."""
+        site_packages = tmp_path / "site-packages"
+        _write_dist_info(
+            site_packages,
+            directory,
+            "Metadata-Version: 2.1\nName: Widget.Thing\nVersion: 1.0\n",
+        )
+
+        found = iter_installed_distributions(
+            [str(site_packages)],
+            names=["widget-thing"],
+        )
+
+        assert [dist.canonical_name for dist in found] == ["widget-thing"]
+
+    def test_a_version_only_directory_name_still_matches(self, tmp_path: Path) -> None:
+        site_packages = tmp_path / "site-packages"
+        _write_dist_info(
+            site_packages,
+            "widget.dist-info",
+            "Metadata-Version: 2.1\nName: widget\nVersion: 1.0\n",
+        )
+
+        found = iter_installed_distributions([str(site_packages)], names=["widget"])
+
+        assert [dist.canonical_name for dist in found] == ["widget"]
+
+    def test_a_directory_named_for_another_distribution_is_skipped(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The trade this optimization makes, pinned.
+
+        The binary distribution format requires ``.dist-info`` to be named
+        ``{escaped name}-{version}``, and both pip and cpip build it that way.
+        A ``names=`` scan trusts that, so metadata whose directory disagrees
+        with its own ``Name`` is not found -- an unfiltered scan still finds
+        it. Reading every ``METADATA`` to cover a spec violation costs ~21x on
+        a two thousand package environment.
+        """
+        site_packages = tmp_path / "site-packages"
+        _write_dist_info(
+            site_packages,
+            "something_else-1.0.dist-info",
+            "Metadata-Version: 2.1\nName: widget\nVersion: 1.0\n",
+        )
+
+        assert (
+            iter_installed_distributions([str(site_packages)], names=["widget"]) == []
+        )
+
+        unfiltered = iter_installed_distributions([str(site_packages)])
+
+        assert [dist.canonical_name for dist in unfiltered] == ["widget"]
+
+
+class TestInstalledNameMightMatch:
+    def test_matches_name_and_name_with_version(self) -> None:
+        from cpip.core.names import installed_name_might_match
+
+        assert installed_name_might_match(
+            "widget-1.0.dist-info", ".dist-info", {"widget"}
+        )
+        assert installed_name_might_match("widget.dist-info", ".dist-info", {"widget"})
+        assert not installed_name_might_match(
+            "gadget-1.0.dist-info", ".dist-info", {"widget"}
+        )
+
+    def test_a_longer_name_is_not_a_prefix_match(self) -> None:
+        """``widget`` must not claim ``widget-extra``'s directory as its own
+        beyond the version boundary, or the parsed-name check does the work."""
+        from cpip.core.names import installed_name_might_match
+
+        assert installed_name_might_match(
+            "widget_extra-1.0.dist-info", ".dist-info", {"widget"}
+        ), "prefix matches are allowed -- the parsed name filters them out"
+        assert not installed_name_might_match(
+            "widget_extra-1.0.dist-info", ".dist-info", {"gadget"}
+        )
+
+    def test_leading_and_trailing_separators_are_dropped(self) -> None:
+        from cpip.core.names import canonicalize_installed_name
+
+        assert canonicalize_installed_name("_widget_") == "widget"
+        assert canonicalize_installed_name("Foo__Bar") == "foo-bar"
+        assert canonicalize_installed_name("foo.bar-1.0") == "foo-bar-1-0"

@@ -1,5 +1,14 @@
-"""The cache system is versioned once, by the ``v<N>`` directory every cache
-lives under; no storage name or payload carries a version of its own."""
+"""Every cache store carries its own format version, inside a versioned root.
+
+Two levels, for two different jobs. The ``v<N>`` root retires the whole tree
+at once and is what ``cpip cache purge`` keys on. Each store then versions
+itself, so a format change to one does not throw away the others -- stores
+cost wildly different amounts to refill, and sharing a version lets the
+cheapest one decide when the most expensive is discarded.
+
+These tests pin both: that no store escapes the root, and that none of them
+forgets to version itself.
+"""
 
 from __future__ import annotations
 
@@ -47,25 +56,63 @@ STORAGE_NAMES = (
 )
 
 
-def test_the_cache_system_is_version_zero() -> None:
-    assert CACHE_VERSION == 0
-    assert CACHE_VERSION_TAG == "v0"
+def test_the_cache_layout_carries_a_root_version() -> None:
+    assert CACHE_VERSION >= 1
+    assert CACHE_VERSION_TAG == f"v{CACHE_VERSION}"
 
 
 def test_every_writer_lands_under_the_versioned_directory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert versioned_cache_dir("/root") == os.path.join("/root", "v0")
-    assert resolve_cache_dir("/explicit") == os.path.join("/explicit", "v0")
+    assert versioned_cache_dir("/root") == os.path.join("/root", CACHE_VERSION_TAG)
+    assert resolve_cache_dir("/explicit") == os.path.join(
+        "/explicit",
+        CACHE_VERSION_TAG,
+    )
     monkeypatch.setenv("CPIP_CACHE_DIR", "/configured")
     assert cache_root() == "/configured"
-    assert resolve_cache_dir() == os.path.join("/configured", "v0")
-    assert configured_cache_dir() == os.path.join("/configured", "v0")
+    assert resolve_cache_dir() == os.path.join("/configured", CACHE_VERSION_TAG)
+    assert configured_cache_dir() == os.path.join("/configured", CACHE_VERSION_TAG)
     monkeypatch.delenv("CPIP_CACHE_DIR")
     assert configured_cache_dir() is None
     assert resolve_cache_dir() == versioned_cache_dir(cache_root())
 
 
 @pytest.mark.parametrize("name", STORAGE_NAMES)
-def test_no_storage_name_carries_its_own_version(name: str) -> None:
-    assert not re.search(r"v\d", name.replace(CACHE_INTERPRETER_TAG, ""))
+def test_every_storage_name_carries_its_own_version(name: str) -> None:
+    """A store that forgets its version shares the root's, which means a
+    format change to it can only be released by discarding everything."""
+    assert re.search(r"-v\d+(\b|_)", name), f"{name!r} carries no store version"
+
+
+_MARSHAL_STORES = (
+    release_facts_cache.NAME,
+    fast_install.NAME,
+    fast_install.TREE_CACHE_BUCKET,
+    wheel_archive_cache.ARCHIVE_CACHE_BUCKET,
+    wheel_install_plan_cache.RESOLUTION_CACHE_BUCKET,
+)
+
+
+@pytest.mark.parametrize("name", _MARSHAL_STORES)
+def test_interpreter_bound_stores_are_scoped_to_one(name: str) -> None:
+    """``marshal`` payloads and installed trees are not portable across
+    interpreters, so their stores have to be scoped to the one that wrote
+    them as well as versioned."""
+    assert CACHE_INTERPRETER_TAG in name
+
+
+def test_store_names_are_distinct() -> None:
+    """Two stores sharing a name share a directory, and each would read the
+    other's payloads as its own."""
+    assert len(set(STORAGE_NAMES)) == len(STORAGE_NAMES)
+
+
+def test_bumping_one_store_leaves_the_others_alone() -> None:
+    from cpip.core.utils import versioned_bucket
+
+    assert versioned_bucket("simple", 1) != versioned_bucket("simple", 2)
+    assert versioned_bucket("simple", 2) != versioned_bucket("archive", 2)
+    assert versioned_bucket("archive", 1, interpreter=True).endswith(
+        CACHE_INTERPRETER_TAG,
+    )

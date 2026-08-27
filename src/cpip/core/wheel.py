@@ -1075,7 +1075,7 @@ def read_core_metadata_headers(
 def read_metadata_message(path: str):
     import zipfile
 
-    from cpip.platform.archive import WheelArchive, WheelhouseUnavailable
+    from cpip.core.archive import WheelArchive, WheelhouseUnavailable
 
     try:
         with open(path, "rb", buffering=0) as file:
