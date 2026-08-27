@@ -152,6 +152,27 @@ def test_selected_release_materializes_without_catalog_rescan() -> None:
     assert provider.release_calls == 1
 
 
+def test_choose_version_does_not_iterate_empty_constraints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class EmptyConstraints(tuple):
+        def __iter__(self):
+            raise AssertionError("empty constraints do not need filtering")
+
+    adapter = NabProvider(
+        FakeProvider(),
+        ResolutionConfig(ignore_installed=True),
+    )
+    package, version_range = adapter.add_root(parse_requirement("app"))
+    monkeypatch.setattr(
+        adapter,
+        "_constraint_for",
+        lambda _package: EmptyConstraints(),
+    )
+
+    assert adapter.choose_version(package, version_range) == Version("1")
+
+
 def test_constraints_apply_to_transitive_dependencies() -> None:
     adapter = NabProvider(FakeProvider(), ResolutionConfig(constraints=("dep==2",)))
     root, root_range = adapter.add_root(parse_requirement("app"))

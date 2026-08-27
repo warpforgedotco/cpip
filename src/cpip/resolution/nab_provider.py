@@ -294,23 +294,28 @@ class NabProvider:
     ) -> Version | None:
         requirement = self.requirements[package]
         constraints = self._constraint_for(package)
-        url_constraints = tuple(
-            constraint for constraint in constraints if constraint.url is not None
-        )
-        constraint_urls = tuple(
-            canonical_url(url)
-            for constraint in url_constraints
-            if (url := constraint.url) is not None
-        )
-        if len(set(constraint_urls)) > 1:
-            return None
-        requirement_url = requirement.url
-        if (
-            requirement_url is not None
-            and constraint_urls
-            and any(canonical_url(requirement_url) != url for url in constraint_urls)
-        ):
-            return None
+        if constraints:
+            url_constraints = tuple(
+                constraint for constraint in constraints if constraint.url is not None
+            )
+            constraint_urls = tuple(
+                canonical_url(url)
+                for constraint in url_constraints
+                if (url := constraint.url) is not None
+            )
+            if len(set(constraint_urls)) > 1:
+                return None
+            requirement_url = requirement.url
+            if (
+                requirement_url is not None
+                and constraint_urls
+                and any(
+                    canonical_url(requirement_url) != url for url in constraint_urls
+                )
+            ):
+                return None
+        else:
+            url_constraints = ()
         candidate_requirement = requirement
         if len(url_constraints) == 1 and requirement.url is None:
             candidate_requirement = url_constraints[0]
@@ -360,17 +365,18 @@ class NabProvider:
             matching = [
                 version for version in matching if version in constrained_versions
             ]
-        matching = [
-            version
-            for version in matching
-            if all(
-                constraint.specifier.contains(
-                    version,
-                    allow_prereleases=self.allow_prereleases,
+        if constraints:
+            matching = [
+                version
+                for version in matching
+                if all(
+                    constraint.specifier.contains(
+                        version,
+                        allow_prereleases=self.allow_prereleases,
+                    )
+                    for constraint in constraints
                 )
-                for constraint in constraints
-            )
-        ]
+            ]
         if not matching:
             return None
         installed = self._installed_candidate(package)
