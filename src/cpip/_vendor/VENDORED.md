@@ -10,7 +10,7 @@ uv run --group vendoring vendoring sync -v
 ```
 
 `nab-resolver` is built from commit
-`fff87ab94138b10c9192bc675f665e3b863ec32a` in the `nab-resolver`
+`9d07d894d5675aa71705c46272ae8322dcab61a8` in the `nab-resolver`
 subdirectory of <https://github.com/notatallshaw/nab>. The direct Git reference
 is supported by `vendoring sync`, but not by the tool's `update` or SBOM
 parsers; update that commit manually and keep this document as its provenance
@@ -23,7 +23,7 @@ record until a published release can be pinned with `==`.
 | certifi | 2026.7.22 | MPL-2.0 |
 | charset-normalizer | 3.4.9 | MIT |
 | idna | 3.18 | BSD-3-Clause |
-| nab-resolver | 0.0.15.dev0 at `fff87ab9` | MIT |
+| nab-resolver | 0.0.15.dev0 at `9d07d894` | MIT |
 | typing_extensions | 4.16.0 | PSF-2.0 |
 | tomli | 2.4.1 | MIT |
 

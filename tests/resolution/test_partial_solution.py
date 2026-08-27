@@ -16,12 +16,17 @@ import random
 from typing import Any, cast
 
 import pytest
+from cpip._vendor.nab_resolver import partial_solution
 from cpip._vendor.nab_resolver.partial_solution import (
     Assignment,
     PartialSolution,
 )
 from cpip._vendor.nab_resolver.ranges import Range
-from cpip._vendor.nab_resolver.types import Incompatibility, IncompatibilityCause
+from cpip._vendor.nab_resolver.types import (
+    Incompatibility,
+    IncompatibilityCause,
+    Term,
+)
 
 PACKAGES = ("alpha", "beta", "gamma", "delta")
 VERSIONS = tuple(range(1, 9))
@@ -199,3 +204,102 @@ def test_snapshot_truthiness_stays_pinned() -> None:
     assert not empty_decisions
     assert active_decisions
     assert not solution.decisions()
+
+
+def test_first_derivations_retain_their_range_objects() -> None:
+    """The first range of either sign needs no identity fold or memo entry."""
+    solution: PartialSolution[str, int] = PartialSolution()
+    allowed = Range.at_least(1)
+    excluded = Range.singleton(4)
+
+    solution.derive("allowed", allowed, positive=True, cause=CAUSE)
+    solution.derive("excluded", excluded, positive=False, cause=CAUSE)
+
+    internals = cast("Any", solution)
+    assert solution.positive_range("allowed") is allowed
+    assert internals._negative_ranges["excluded"] is excluded
+    assert internals._range_ops == {}
+
+
+def test_replayed_derivations_reuse_intersection_and_union_results() -> None:
+    """A backtrack replay gets the same memoized range objects for both signs."""
+    solution: PartialSolution[str, int] = PartialSolution()
+    lower = Range.at_least(1)
+    upper = Range.at_most(9)
+    first_exclusion = Range.singleton(4)
+    second_exclusion = Range.singleton(7)
+
+    solution.derive("positive", lower, positive=True, cause=CAUSE)
+    solution.derive("negative", first_exclusion, positive=False, cause=CAUSE)
+    solution.decide("gate", 1)
+    solution.derive("positive", upper, positive=True, cause=CAUSE)
+    solution.derive("negative", second_exclusion, positive=False, cause=CAUSE)
+
+    internals = cast("Any", solution)
+    first_intersection = solution.positive_range("positive")
+    first_union = internals._negative_ranges["negative"]
+
+    solution.backtrack(0)
+    solution.derive("positive", upper, positive=True, cause=CAUSE)
+    solution.derive("negative", second_exclusion, positive=False, cause=CAUSE)
+
+    assert solution.positive_range("positive") is first_intersection
+    assert internals._negative_ranges["negative"] is first_union
+
+
+def test_range_operation_memo_keeps_its_operands_alive() -> None:
+    """Identity keys remain valid because the memo retains both operands."""
+    solution: PartialSolution[str, int] = PartialSolution()
+    current = Range.at_least(1)
+    constraint = Range.at_most(9)
+
+    solution.derive("package", current, positive=True, cause=CAUSE)
+    solution.derive("package", constraint, positive=True, cause=CAUSE)
+
+    internals = cast("Any", solution)
+    assert internals._range_op_operands[-2] is current
+    assert internals._range_op_operands[-1] is constraint
+
+
+def test_range_operation_memo_cap_clears_operands_with_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clearing at the cap drops stale identity keys and their strong refs."""
+    monkeypatch.setattr(partial_solution, "RANGE_OP_MEMO_MAX", 1)
+    solution: PartialSolution[str, int] = PartialSolution()
+
+    solution.derive("package", Range.at_least(1), positive=True, cause=CAUSE)
+    solution.derive("package", Range.at_most(9), positive=True, cause=CAUSE)
+    solution.derive("package", Range.at_most(8), positive=True, cause=CAUSE)
+
+    internals = cast("Any", solution)
+    assert len(internals._range_ops) == 1
+    assert len(internals._range_op_operands) == 2
+    effective = solution.get("package")
+    assert effective is not None
+    assert 5 in effective
+    assert 9 not in effective
+
+
+def test_subtraction_and_assignment_effective_ranges_are_reused() -> None:
+    """Both the solution memo and the trail-entry cache reuse subtraction."""
+    solution: PartialSolution[str, int] = PartialSolution()
+    allowed = Range.at_least(1)
+    excluded = Range.singleton(4)
+
+    solution.derive("mixed", allowed, positive=True, cause=CAUSE)
+    solution.derive("mixed", excluded, positive=False, cause=CAUSE)
+
+    internals = cast("Any", solution)
+    first_effective = solution.get("mixed")
+    internals._effective_range_cache.pop("mixed")
+    assert solution.get("mixed") is first_effective
+
+    assignment = cast("Assignment[str, int]", solution.assignments_for("mixed")[-1])
+    term = Term("mixed", allowed)
+    assert assignment._effective is None
+    assert solution.satisfier(term) is not None
+    assignment_effective = assignment._effective
+    assert assignment_effective is not None
+    assert solution.satisfier(term) is not None
+    assert assignment._effective is assignment_effective
