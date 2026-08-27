@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-__all__ = ["HTTPRangeRequestUnsupported", "dist_from_wheel_url"]
+__all__ = [
+    "HTTPRangeRequestUnsupported",
+    "dist_from_wheel_url",
+    "metadata_text_from_wheel_url",
+]
 
 from bisect import bisect_left, bisect_right
 from collections.abc import Generator
@@ -47,6 +51,31 @@ def dist_from_wheel_url(
         if isinstance(exc, requests.exceptions.ContentDecodingError):
             raise InvalidWheel(url, name) from exc
         raise
+
+
+def metadata_text_from_wheel_url(
+    name: str,
+    url: str,
+    session: NetworkSession,
+) -> str:
+    """The ``METADATA`` of a remote wheel, without downloading the wheel.
+
+    Reads the zip's central directory and that one member over HTTP range
+    requests. Returns the text so callers can parse it with the same reader
+    they use for a PEP 658 sidecar rather than taking on a second shape.
+
+    Raises :class:`HTTPRangeRequestUnsupported` if the host will not serve
+    ranges, and whatever the archive or the wheel itself raises otherwise.
+    """
+    from cpip.core.wheel import read_wheel_archive_member, validate_wheel
+
+    with LazyZipOverHTTP(url, session) as lazy, ZipFile(lazy) as archive:
+        info_dir = validate_wheel(archive, name)
+
+        return read_wheel_archive_member(
+            archive,
+            f"{info_dir}/METADATA",
+        ).decode("utf-8", "replace")
 
 
 class LazyZipOverHTTP:

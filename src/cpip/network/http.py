@@ -382,6 +382,15 @@ class NetworkSession:
 
         self.inflight_requests_lock = threading.Lock()
 
+        # Hosts observed not to serve HTTP range requests. Probing one costs a
+        # HEAD plus a failed read, so the answer is remembered for the process
+        # rather than rediscovered per candidate. Only ever grows, and only
+        # from a definite answer -- a timeout or a 500 says nothing about
+        # whether ranges work.
+        self.no_range_requests: set[str] = set()
+
+        self.no_range_requests_lock = threading.Lock()
+
         self.fresh_cached_response_cache: dict[str, float | None] = {}
 
         self.environ_proxies_cache: dict[tuple[str, int | None], dict[str, str]] = {}
@@ -393,6 +402,52 @@ class NetworkSession:
             if os.environ.get("CPIP_BENCH_NETWORK_STATS") == "1"
             else None
         )
+
+    def supports_range_requests(self, url: str) -> bool:
+        """Whether this host has *not* been observed to refuse range requests."""
+        host = urllib.parse.urlsplit(url).netloc.lower()
+
+        with self.no_range_requests_lock:
+            return host not in self.no_range_requests
+
+    def wheel_metadata_text(self, url: str, name: str) -> str | None:
+        """A remote wheel's ``METADATA``, read with HTTP range requests.
+
+        Pulls the zip's central directory and the one member, rather than the
+        whole wheel, so resolution can learn a candidate's dependencies
+        without downloading it. Returns ``None`` when that is not possible --
+        the host does not serve ranges, the response is not a usable zip, the
+        wheel has no readable metadata -- and the caller falls back to
+        downloading, which is what it did before this existed.
+
+        A host that refuses ranges is remembered, so the probe is paid once
+        per host per process instead of once per candidate.
+        """
+        host = urllib.parse.urlsplit(url).netloc.lower()
+
+        with self.no_range_requests_lock:
+            if host in self.no_range_requests:
+                return None
+
+        from cpip.network.lazy_wheel import (
+            HTTPRangeRequestUnsupported,
+            metadata_text_from_wheel_url,
+        )
+
+        try:
+            return metadata_text_from_wheel_url(name, url, self)
+
+        except HTTPRangeRequestUnsupported:
+            with self.no_range_requests_lock:
+                self.no_range_requests.add(host)
+
+            return None
+
+        except Exception:
+            # Anything else says nothing about whether this host serves
+            # ranges, so it is not remembered: a wheel that is not a zip, a
+            # connection that dropped, an index that answered oddly once.
+            return None
 
     def ensure_requests_backend(self) -> None:
         """Initialize the HTTP transport only after the first cache miss."""
