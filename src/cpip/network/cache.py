@@ -83,7 +83,7 @@ class SafeFileCache:
     def get(self, key: str) -> bytes | None:
         metadata_path = self.get_cache_path(key)
         with suppressed_cache_errors():
-            with open(metadata_path, "rb") as file:
+            with open(metadata_path, "rb", buffering=0) as file:
                 head = file.read(COMBINED_HEADER.size)
                 if len(head) == COMBINED_HEADER.size:
                     magic, metadata_length = COMBINED_HEADER.unpack(head)
@@ -124,7 +124,7 @@ class SafeFileCache:
         path = self.get_cache_path(key)
         body: bytes | None = None
         with suppressed_cache_errors():
-            with open(path, "rb") as file:
+            with open(path, "rb", buffering=0) as file:
                 metadata_length = self.read_combined_header(file)
                 if metadata_length is not None:
                     file.seek(metadata_length, os.SEEK_CUR)
@@ -155,7 +155,11 @@ class SafeFileCache:
         """
         metadata_path = self.get_cache_path(key)
         with suppressed_cache_errors():
-            file = open(metadata_path, "rb")
+            # Unbuffered: the header reads stay two small direct reads, and
+            # the caller's body read becomes one presized readall from the
+            # offset instead of a buffered drain-and-join that copies the
+            # body twice more.
+            file = open(metadata_path, "rb", buffering=0)
             try:
                 metadata_length = self.read_combined_header(file)
                 if metadata_length is not None:
@@ -166,13 +170,13 @@ class SafeFileCache:
                 file.close()
                 raise
             file.close()
-            return metadata, open(metadata_path + ".body", "rb")
+            return metadata, open(metadata_path + ".body", "rb", buffering=0)
         return None, None
 
     def get_body(self, key: str) -> BinaryIO | None:
         metadata_path = self.get_cache_path(key)
         with suppressed_cache_errors():
-            file = open(metadata_path, "rb")
+            file = open(metadata_path, "rb", buffering=0)
             try:
                 metadata_length = self.read_combined_header(file)
                 if metadata_length is not None:
@@ -182,7 +186,7 @@ class SafeFileCache:
                 file.close()
                 raise
             file.close()
-            return open(metadata_path + ".body", "rb")
+            return open(metadata_path + ".body", "rb", buffering=0)
         return None
 
     def get_body_path(self, key: str) -> str | None:
@@ -194,7 +198,7 @@ class SafeFileCache:
         metadata_path = self.get_cache_path(key)
         body_path = metadata_path + ".body"
         with suppressed_cache_errors():
-            with open(metadata_path, "rb") as file:
+            with open(metadata_path, "rb", buffering=0) as file:
                 if self.read_combined_header(file) is not None:
                     return None
             os.stat(body_path)
@@ -224,7 +228,7 @@ class SafeFileCache:
         """
         metadata: bytes | None = None
         with suppressed_cache_errors():
-            with open(path, "rb") as file:
+            with open(path, "rb", buffering=0) as file:
                 metadata_length = self.read_combined_header(file)
                 if metadata_length is None:
                     return
