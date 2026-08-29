@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import struct
 from contextlib import contextmanager
 
 from cpip.core.utils import ensure_dir
@@ -12,7 +13,6 @@ from cpip.platform.filesystem import (
     adjacent_tmp_file,
     copy_directory_permissions,
     replace,
-    set_file_permissions,
 )
 
 """Directory under the cache directory holding the HTTP page cache."""
@@ -23,6 +23,10 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
     from typing import Any, BinaryIO
+
+COMBINED_MAGIC = b"cpip-http-cache:1\n"
+
+COMBINED_HEADER = struct.Struct(f"<{len(COMBINED_MAGIC)}sQ")
 
 
 @contextmanager
@@ -40,17 +44,20 @@ class SafeFileCache:
     """A file based cache which is safe to use even when the target directory may
     not be accessible or writable.
 
-    There is a race condition when two processes try to write and/or read the
-    same entry at the same time, since each entry consists of two separate
-    files. We therefore have
-    additional logic that makes sure that both files to be present before
-    returning an entry; this fixes the read side of the race condition.
+    Entries written through ``set_with_body`` are one self-contained file:
+    a fixed header naming the metadata length, the metadata, then the body.
+    One atomic replacement per store, one open per read, and no window in
+    which another process can observe metadata without its body.
 
-    For the write side, we assume that the server will only ever return the
-    same data for the same URL, which ought to be the case for files cpip is
-    downloading.  PyPI does not have a mechanism to swap out a wheel for
-    another wheel, for example.  If this assumption is not true, the
-    this race will need to be fixed.
+    Entries whose body must remain a raw standalone file -- artifact bodies
+    that callers hard-link into place via ``get_body_path`` -- keep the
+    split layout: a metadata file beside a ``.body`` companion, written by
+    ``set``/``set_body``/``set_body_from_io``. Readers accept both layouts,
+    so caches written by earlier versions keep working, and earlier
+    versions treat combined entries as misses.
+
+    Cache writes are not fsynced: an entry lost to a crash only costs a
+    refetch, and the fsync would dominate the write.
     """
 
     def __init__(self, directory: str) -> None:
@@ -62,17 +69,30 @@ class SafeFileCache:
         hashed = hashlib.sha224(name.encode()).hexdigest()
         return os.path.join(self.directory, *hashed[:5], hashed)
 
+    @staticmethod
+    def read_combined_header(file: BinaryIO) -> int | None:
+        """The metadata length when ``file`` starts a combined entry."""
+        header = file.read(COMBINED_HEADER.size)
+        if len(header) != COMBINED_HEADER.size:
+            return None
+        magic, metadata_length = COMBINED_HEADER.unpack(header)
+        if magic != COMBINED_MAGIC:
+            return None
+        return metadata_length
+
     def get(self, key: str) -> bytes | None:
         metadata_path = self.get_cache_path(key)
-        body_path = metadata_path + ".body"
-        metadata: bytes | None = None
         with suppressed_cache_errors():
             with open(metadata_path, "rb") as file:
-                contents = file.read()
-            with open(body_path, "rb"):
-                pass
-            metadata = contents
-        return metadata
+                head = file.read(COMBINED_HEADER.size)
+                if len(head) == COMBINED_HEADER.size:
+                    magic, metadata_length = COMBINED_HEADER.unpack(head)
+                    if magic == COMBINED_MAGIC:
+                        return file.read(metadata_length)
+                metadata = head + file.read()
+            os.stat(metadata_path + ".body")
+            return metadata
+        return None
 
     def get_atomic(self, key: str) -> bytes | None:
         """Read a self-contained entry written with one atomic replacement."""
@@ -87,7 +107,7 @@ class SafeFileCache:
         with suppressed_cache_errors():
             ensure_dir(os.path.dirname(path))
 
-            with adjacent_tmp_file(path) as f:
+            with adjacent_tmp_file(path, durable=False) as f:
                 writer_func(f)
                 copy_directory_permissions(self.directory, f)
 
@@ -100,8 +120,19 @@ class SafeFileCache:
         self.write_to_file(path, lambda f: shutil.copyfileobj(source_file, f))
 
     def set(self, key: str, value: bytes) -> None:
+        """Set an entry's metadata, preserving the body it is stored with."""
         path = self.get_cache_path(key)
-        self.write_internal(path, value)
+        body: bytes | None = None
+        with suppressed_cache_errors():
+            with open(path, "rb") as file:
+                metadata_length = self.read_combined_header(file)
+                if metadata_length is not None:
+                    file.seek(metadata_length, os.SEEK_CUR)
+                    body = file.read()
+        if body is not None:
+            self.write_combined(path, value, body)
+        else:
+            self.write_internal(path, value)
 
     def set_atomic(self, key: str, value: bytes) -> None:
         """Write a self-contained entry that needs no companion body file."""
@@ -117,64 +148,97 @@ class SafeFileCache:
             os.remove(path + ".atomic")
 
     def get_with_body(self, key: str) -> tuple[bytes | None, BinaryIO | None]:
-        """Read the metadata and open the body with one path computation."""
+        """Read the metadata and open the body with one path computation.
+
+        The returned file is positioned at the body, whichever layout the
+        entry uses.
+        """
         metadata_path = self.get_cache_path(key)
-        body_path = metadata_path + ".body"
         with suppressed_cache_errors():
-            with open(metadata_path, "rb") as file:
+            file = open(metadata_path, "rb")
+            try:
+                metadata_length = self.read_combined_header(file)
+                if metadata_length is not None:
+                    return file.read(metadata_length), file
+                file.seek(0)
                 metadata = file.read()
-            return metadata, open(body_path, "rb")
+            except BaseException:
+                file.close()
+                raise
+            file.close()
+            return metadata, open(metadata_path + ".body", "rb")
         return None, None
 
     def get_body(self, key: str) -> BinaryIO | None:
         metadata_path = self.get_cache_path(key)
-        body_path = metadata_path + ".body"
         with suppressed_cache_errors():
-            with open(metadata_path, "rb"):
-                pass
-            return open(body_path, "rb")
+            file = open(metadata_path, "rb")
+            try:
+                metadata_length = self.read_combined_header(file)
+                if metadata_length is not None:
+                    file.seek(metadata_length, os.SEEK_CUR)
+                    return file
+            except BaseException:
+                file.close()
+                raise
+            file.close()
+            return open(metadata_path + ".body", "rb")
         return None
 
     def get_body_path(self, key: str) -> str | None:
-        """Return the immutable body path without opening or copying it."""
-        metadata_path = self.get_cache_path(key)
-        body_path = metadata_path + ".body"
-        with suppressed_cache_errors():
-            with open(metadata_path, "rb"):
-                pass
-            with open(body_path, "rb"):
-                pass
-            return body_path
-        return None
+        """Return the immutable body path without opening or copying it.
 
-    def set_body(self, key: str, body: bytes) -> None:
-        path = self.get_cache_path(key) + ".body"
-        self.write_internal(path, body)
-
-    def set_with_body(self, key: str, metadata: bytes, body: bytes) -> None:
-        """Atomically replace a companion body and its metadata marker.
-
-        Both temporary files share the path setup and directory-mode lookup.
-        The body is installed first so readers never observe new metadata
-        pointing at an old body.
+        Only split-layout entries have a standalone body file; a combined
+        entry returns ``None`` and callers fall back to ``get_body``.
         """
         metadata_path = self.get_cache_path(key)
         body_path = metadata_path + ".body"
         with suppressed_cache_errors():
-            ensure_dir(os.path.dirname(metadata_path))
-            mode = os.stat(self.directory).st_mode & 0o666 | 0o600
-            with (
-                adjacent_tmp_file(metadata_path) as metadata_file,
-                adjacent_tmp_file(body_path) as body_file,
-            ):
-                metadata_file.write(metadata)
-                set_file_permissions(metadata_file, mode)
-                body_file.write(body)
-                set_file_permissions(body_file, mode)
-            replace(body_file.name, body_path)
-            replace(metadata_file.name, metadata_path)
+            with open(metadata_path, "rb") as file:
+                if self.read_combined_header(file) is not None:
+                    return None
+            os.stat(body_path)
+            return body_path
+        return None
+
+    def write_combined(self, path: str, metadata: bytes, body: bytes) -> None:
+        header = COMBINED_HEADER.pack(COMBINED_MAGIC, len(metadata))
+        self.write_to_file(
+            path,
+            lambda f: (f.write(header), f.write(metadata), f.write(body)),
+        )
+
+    def set_with_body(self, key: str, metadata: bytes, body: bytes) -> None:
+        """Atomically replace an entry's metadata and body together."""
+        path = self.get_cache_path(key)
+        self.write_combined(path, metadata, body)
+        with suppressed_cache_errors():
+            os.remove(path + ".body")
+
+    def demote_combined(self, path: str) -> None:
+        """Rewrite a combined entry as a bare metadata file.
+
+        Called after a standalone ``.body`` is written for a key whose
+        entry was combined, so readers see the new body instead of the
+        embedded one.
+        """
+        metadata: bytes | None = None
+        with suppressed_cache_errors():
+            with open(path, "rb") as file:
+                metadata_length = self.read_combined_header(file)
+                if metadata_length is None:
+                    return
+                metadata = file.read(metadata_length)
+        if metadata is not None:
+            self.write_internal(path, metadata)
+
+    def set_body(self, key: str, body: bytes) -> None:
+        path = self.get_cache_path(key)
+        self.write_internal(path + ".body", body)
+        self.demote_combined(path)
 
     def set_body_from_io(self, key: str, body_file: BinaryIO) -> None:
         """Set the body of the cache entry from a file object."""
-        path = self.get_cache_path(key) + ".body"
-        self.write_from_io(path, body_file)
+        path = self.get_cache_path(key)
+        self.write_from_io(path + ".body", body_file)
+        self.demote_combined(path)

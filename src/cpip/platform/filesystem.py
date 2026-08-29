@@ -48,11 +48,19 @@ def format_size(size: float) -> str:
 
 
 @contextmanager
-def adjacent_tmp_file(path: str, **kwargs: Any) -> Generator[BinaryIO, None, None]:
+def adjacent_tmp_file(
+    path: str,
+    *,
+    durable: bool = True,
+    **kwargs: Any,
+) -> Generator[BinaryIO, None, None]:
     """Return a file-like object pointing to a tmp file next to path.
 
-    The file is created securely and is ensured to be written to disk
-    after the context reaches its end.
+    The file is created securely. With ``durable`` (the default) it is
+    fsynced to disk after the context reaches its end; pass
+    ``durable=False`` for data that may be regenerated, such as cache
+    entries, where an entry lost to a crash only costs a refetch and the
+    fsync would dominate the write.
 
     kwargs will be passed to tempfile.NamedTemporaryFile to control
     the way the temporary file will be opened.
@@ -69,7 +77,8 @@ def adjacent_tmp_file(path: str, **kwargs: Any) -> Generator[BinaryIO, None, Non
             yield result
         finally:
             result.flush()
-            os.fsync(result.fileno())
+            if durable:
+                os.fsync(result.fileno())
 
 
 replace = retry(stop_after_delay=1, wait=0.25)(os.replace)
