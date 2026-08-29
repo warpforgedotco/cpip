@@ -123,6 +123,9 @@ class CachedResponse:
 
             yield chunk
 
+    def drain_conn(self) -> None:
+        pass
+
     def close(self) -> None:
         pass
 
@@ -168,6 +171,9 @@ class FileResponse:
                 return
 
             yield chunk
+
+    def drain_conn(self) -> None:
+        pass
 
     def close(self) -> None:
         self._file.close()
@@ -1300,8 +1306,30 @@ class NetworkSession:
                 ):
                     if not isinstance(current_headers, HTTPHeaderDict):
                         current_headers = HTTPHeaderDict(current_headers)
+                    had_authorization = "authorization" in current_headers
                     for header in retries.remove_headers_on_redirect:
                         current_headers.discard(header)
+
+                    # An authenticated request redirected to another host
+                    # dropped its Authorization header above. Resolve the
+                    # destination's own credentials (index URLs, netrc,
+                    # keyring), but only over HTTPS -- never mint
+                    # credentials for a plaintext destination -- and only
+                    # for flows that were authenticated, so an anonymous
+                    # request stays anonymous.
+                    if (
+                        had_authorization
+                        and self.auth is not None
+                        and next_url.startswith("https:")
+                    ):
+                        _, username, password = self.auth.get_url_and_credentials(
+                            next_url,
+                        )
+
+                        if username is not None and password is not None:
+                            current_headers.update(
+                                make_headers(basic_auth=f"{username}:{password}"),
+                            )
 
                 retries = retries.increment(
                     current_method,

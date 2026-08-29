@@ -592,3 +592,32 @@ def test_resumed_download_caching(tmp_path: Path) -> None:
         assert cache_dir.exists()
         cache_files = list(cache_dir.rglob("*"))
         assert len([f for f in cache_files if f.is_file()]) == 2
+
+
+def test_error_response_is_drained_and_closed(monkeypatch) -> None:
+    """A streamed error response must not keep its connection checked out."""
+    from cpip.core.http import HttpStatusError
+    from cpip_test_support.transport_mocks import make_response
+
+    url = "https://example.invalid/demo.whl"
+    resp = make_response(
+        status=404,
+        reason="Not Found",
+        url=url,
+        headers={},
+        body=b"missing",
+        stream=True,
+    )
+    events: list[str] = []
+    monkeypatch.setattr(resp, "drain_conn", lambda: events.append("drain"))
+    monkeypatch.setattr(resp, "close", lambda: events.append("close"))
+
+    session = NetworkSession()
+    monkeypatch.setattr(session, "get", lambda *args, **kwargs: resp)
+
+    link = Link.from_url(url, source_url=None)
+
+    with pytest.raises(HttpStatusError):
+        Downloader(session).http_get(link)
+
+    assert events == ["drain", "close"]

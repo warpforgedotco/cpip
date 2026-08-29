@@ -401,6 +401,12 @@ class Downloader:
                 link,
             )
 
+            # The response was opened streaming; unread data would keep its
+            # connection checked out of the pool and the socket open.
+            e.response.drain_conn()
+
+            e.response.close()
+
             raise
 
         return resp

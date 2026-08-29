@@ -862,3 +862,119 @@ def test_ssl_context_shared_per_tls_policy() -> None:
     assert manager.connection_pool_kw["ssl_context"] is context
     assert session.transport_manager("https://b.invalid/", verify=True) is manager
     assert len(session.ssl_contexts) == 2
+
+
+def test_cross_host_https_redirect_uses_destination_netrc(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """An authenticated request redirected to another HTTPS host drops the
+    original Authorization header and authenticates with the destination's
+    own credentials."""
+    import base64
+
+    netrc_path = tmp_path / "netrc"
+    netrc_path.write_text("machine dest.test login mirror password sesame\n")
+    monkeypatch.setenv("NETRC", str(netrc_path))
+
+    start_url = "https://start.test/file"
+    target_url = "https://dest.test/file"
+    responses = {
+        start_url: make_response(
+            status=302,
+            reason="Found",
+            url=start_url,
+            headers={"Location": target_url, "Content-Length": "0"},
+            body=b"",
+        ),
+        target_url: make_response(
+            status=200,
+            reason="OK",
+            url=target_url,
+            headers={"Content-Length": "2"},
+            body=b"ok",
+        ),
+    }
+    seen: list[tuple[str, str | None]] = []
+
+    class Pool:
+        def is_same_host(self, url: str) -> bool:
+            del url
+            return False
+
+    class Manager:
+        def request(self, method, url, *, headers, **kwargs):
+            del method
+            seen.append((url, headers.get("authorization")))
+            response = responses[url]
+            response.retries = kwargs["retries"]
+            return response
+
+        def connection_from_url(self, url: str) -> Pool:
+            del url
+            return Pool()
+
+    session = NetworkSession()
+    monkeypatch.setattr(session, "transport_manager", lambda *args, **kwargs: Manager())
+
+    response = session.get(start_url, headers={"Authorization": "Basic original"})
+
+    assert response.data == b"ok"
+    expected = "Basic " + base64.b64encode(b"mirror:sesame").decode()
+    assert seen == [(start_url, "Basic original"), (target_url, expected)]
+
+
+def test_anonymous_cross_host_redirect_stays_anonymous(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """A request that never carried credentials gains none from a redirect,
+    even when netrc knows the destination host."""
+    netrc_path = tmp_path / "netrc"
+    netrc_path.write_text("machine dest.test login mirror password sesame\n")
+    monkeypatch.setenv("NETRC", str(netrc_path))
+
+    start_url = "https://anon-start.test/file"
+    target_url = "https://dest.test/file"
+    responses = {
+        start_url: make_response(
+            status=302,
+            reason="Found",
+            url=start_url,
+            headers={"Location": target_url, "Content-Length": "0"},
+            body=b"",
+        ),
+        target_url: make_response(
+            status=200,
+            reason="OK",
+            url=target_url,
+            headers={"Content-Length": "2"},
+            body=b"ok",
+        ),
+    }
+    seen: list[tuple[str, str | None]] = []
+
+    class Pool:
+        def is_same_host(self, url: str) -> bool:
+            del url
+            return False
+
+    class Manager:
+        def request(self, method, url, *, headers, **kwargs):
+            del method
+            seen.append((url, headers.get("authorization")))
+            response = responses[url]
+            response.retries = kwargs["retries"]
+            return response
+
+        def connection_from_url(self, url: str) -> Pool:
+            del url
+            return Pool()
+
+    session = NetworkSession()
+    monkeypatch.setattr(session, "transport_manager", lambda *args, **kwargs: Manager())
+
+    response = session.get(start_url)
+
+    assert response.data == b"ok"
+    assert seen == [(start_url, None), (target_url, None)]

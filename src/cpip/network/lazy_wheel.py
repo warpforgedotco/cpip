@@ -266,7 +266,14 @@ class LazyZipOverHTTP:
             right = bisect_right(self.left_internal, end)
             for start, end in self.merge(start, end, left, right):
                 response = self.stream_response(start, end)
-                raise_for_status(response)
+                try:
+                    raise_for_status(response)
+                except HttpStatusError:
+                    # Streamed; unread data would keep the connection
+                    # checked out of the pool and the socket open.
+                    response.drain_conn()
+                    response.close()
+                    raise
                 self.seek(start)
                 shutil.copyfileobj(
                     response,
