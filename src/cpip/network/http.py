@@ -6,6 +6,7 @@ import enum
 import json
 import logging
 import os
+import ssl
 import sys
 import threading
 import time
@@ -309,6 +310,10 @@ class NetworkSession:
         self.pool_managers: dict[tuple[Any, ...], Any] = {}
 
         self.transport_lock = threading.Lock()
+
+        self.ssl_contexts: dict[tuple[Any, ...], ssl.SSLContext] = {}
+
+        self.ssl_contexts_lock = threading.Lock()
 
         self.cache: SafeFileCache | None = (
             SafeFileCache(cache) if isinstance(cache, str) else cache
@@ -1042,6 +1047,57 @@ class NetworkSession:
             or proxies.get("all")
         )
 
+    def ssl_context_for(
+        self,
+        verify: bool | str,
+        cert: str | tuple[str, str] | None,
+    ) -> ssl.SSLContext:
+        """One shared ``SSLContext`` per TLS policy.
+
+        Without an explicit context, urllib3 builds a fresh one and re-parses
+        the CA bundle for every new connection. The TLS policy is fixed per
+        (verify, cert) pair, so the context is built once and shared by every
+        connection and pool that uses that policy.
+        """
+        key = (verify, cert)
+
+        context = self.ssl_contexts.get(key)
+
+        if context is not None:
+            return context
+
+        from cpip._vendor import certifi
+        from cpip._vendor.urllib3.util.ssl_ import create_urllib3_context
+
+        with self.ssl_contexts_lock:
+            context = self.ssl_contexts.get(key)
+
+            if context is not None:
+                return context
+
+            if verify is False:
+                context = create_urllib3_context(cert_reqs=ssl.CERT_NONE)
+
+            else:
+                context = create_urllib3_context(cert_reqs=ssl.CERT_REQUIRED)
+
+                context.load_verify_locations(
+                    verify
+                    if isinstance(verify, str)
+                    else self.environ_ca_bundle or certifi.where(),
+                )
+
+            if cert is not None:
+                if isinstance(cert, tuple):
+                    context.load_cert_chain(cert[0], cert[1])
+
+                else:
+                    context.load_cert_chain(cert)
+
+            self.ssl_contexts[key] = context
+
+            return context
+
     def transport_manager(
         self,
         url: str,
@@ -1066,7 +1122,6 @@ class NetworkSession:
             return manager
 
         from cpip._vendor import urllib3
-        from cpip._vendor import certifi
 
         with self.transport_lock:
             manager = self.pool_managers.get(key)
@@ -1077,26 +1132,8 @@ class NetworkSession:
             kwargs: dict[str, Any] = {
                 "num_pools": 64,
                 "maxsize": 64,
+                "ssl_context": self.ssl_context_for(verify, cert),
             }
-
-            if verify is False:
-                kwargs["cert_reqs"] = "CERT_NONE"
-
-            else:
-                kwargs["cert_reqs"] = "CERT_REQUIRED"
-
-                kwargs["ca_certs"] = (
-                    verify
-                    if isinstance(verify, str)
-                    else self.environ_ca_bundle or certifi.where()
-                )
-
-            if cert is not None:
-                if isinstance(cert, tuple):
-                    kwargs["cert_file"], kwargs["key_file"] = cert
-
-                else:
-                    kwargs["cert_file"] = cert
 
             if proxy:
                 proxy_url, proxy_headers = self.prepare_proxy(proxy)

@@ -833,3 +833,32 @@ def test_same_host_redirect_preserves_existing_authorization(
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+def test_ssl_context_shared_per_tls_policy() -> None:
+    """One SSLContext per (verify, cert) policy, reused by every pool.
+
+    Without a shared context urllib3 builds a fresh one and re-parses the
+    CA bundle for every new HTTPS connection.
+    """
+    import ssl
+
+    session = NetworkSession()
+
+    context = session.ssl_context_for(True, None)
+
+    assert session.ssl_context_for(True, None) is context
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname
+
+    insecure = session.ssl_context_for(False, None)
+
+    assert insecure is not context
+    assert insecure.verify_mode == ssl.CERT_NONE
+    assert not insecure.check_hostname
+
+    manager = session.transport_manager("https://a.invalid/", verify=True)
+
+    assert manager.connection_pool_kw["ssl_context"] is context
+    assert session.transport_manager("https://b.invalid/", verify=True) is manager
+    assert len(session.ssl_contexts) == 2
