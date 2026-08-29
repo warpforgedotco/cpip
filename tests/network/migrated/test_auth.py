@@ -13,7 +13,7 @@ from unittest.mock import Mock
 import cpip.network.auth
 import pytest
 from cpip.network.auth import MultiDomainBasicAuth
-from cpip.network.http import HttpRequest, NetworkSession
+from cpip.network.http import NetworkSession
 from cpip_test_support.transport_mocks import MockResponse
 
 
@@ -307,16 +307,16 @@ def test_keyring_set_password(
         should_save_password_to_keyring,
     )
 
-    req = HttpRequest("GET", "https://example.com")
+    url = "https://example.com"
     resp = MockResponse(b"")
-    resp.url = req.url
+    resp.url = url
     resp.status = 401
     session = NetworkSession()
     session.auth = auth
 
     def request(method: str, url: str, **kwargs: Any) -> MockResponse:
         assert method == "GET"
-        assert url == req.url
+        assert url == resp.url
         assert "authorization" in kwargs["headers"]
         assert kwargs["stream"] is True
         r = MockResponse(b"")
@@ -324,7 +324,7 @@ def test_keyring_set_password(
         return r
 
     monkeypatch.setattr(session, "request", request)
-    retry = session.retry_auth(resp, req, {}, None, None, stream=True)
+    retry = session.retry_auth(resp, "GET", {}, None, None, stream=True)
 
     assert retry is not None
 
@@ -668,16 +668,16 @@ def test_keyring_cli_set_password(
         should_save_password_to_keyring,
     )
 
-    req = HttpRequest("GET", "https://example.com")
+    url = "https://example.com"
     resp = MockResponse(b"")
-    resp.url = req.url
+    resp.url = url
     resp.status = 401
     session = NetworkSession()
     session.auth = auth
 
     def request(method: str, url: str, **kwargs: Any) -> MockResponse:
         assert method == "GET"
-        assert url == req.url
+        assert url == resp.url
         assert "authorization" in kwargs["headers"]
         assert kwargs["stream"] is False
         r = MockResponse(b"")
@@ -685,7 +685,7 @@ def test_keyring_cli_set_password(
         return r
 
     monkeypatch.setattr(session, "request", request)
-    retry = session.retry_auth(resp, req, {}, None, None, stream=False)
+    retry = session.retry_auth(resp, "GET", {}, None, None, stream=False)
 
     assert retry is not None
 

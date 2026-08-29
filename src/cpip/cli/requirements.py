@@ -172,6 +172,8 @@ class DeferredNetworkSession:
                 cache=(http_cache_path(self.cache_dir) if self.cache_dir else None),
             )
 
+            assert session.auth is not None
+
             session.auth.prompting = not self.no_input
 
             session.auth.keyring_provider = self.keyring_provider

@@ -266,13 +266,7 @@ class Downloader:
                 DOWNLOAD_CHUNK_SIZE,
             )
 
-        except OSError as e:
-            if download.size is None:
-                raise e
-
-            logger.warning("Connection interrupted while downloading.")
-
-        except self._request_error_types() as e:
+        except (OSError, HTTPError) as e:
             if download.size is None:
                 raise e
 
@@ -280,10 +274,6 @@ class Downloader:
 
         finally:
             download.bytes_received += download.output_file.tell() - start
-
-    @staticmethod
-    def _request_error_types() -> tuple[type[BaseException], ...]:
-        return (HTTPError,)
 
     def attempt_resumes_or_redownloads(
         self,
@@ -353,7 +343,7 @@ class Downloader:
         download: FileDownload,
         original_response: HttpResponse,
     ) -> None:
-        cache = getattr(self.session_internal, "cache", None)
+        cache = self.session_internal.cache
 
         if cache is None:
             return

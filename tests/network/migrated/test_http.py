@@ -12,7 +12,7 @@ from cpip._vendor.urllib3.exceptions import DecodeError, NewConnectionError
 from cpip._vendor.urllib3.response import HTTPResponse as Urllib3HTTPResponse
 from cpip._vendor.urllib3.util import Timeout
 from cpip.network.exceptions import ConnectionFailedError, TooManyRedirectsError
-from cpip.network.http import DEFAULT_TIMEOUT, HttpRequest, NetworkSession
+from cpip.network.http import DEFAULT_TIMEOUT, NetworkSession
 from cpip_test_support.transport_mocks import make_response
 
 
@@ -185,7 +185,7 @@ def test_session_coalesces_concurrent_gets() -> None:
 
 def test_uncontended_get_does_not_allocate_wait_event(monkeypatch) -> None:
     session = NetworkSession()
-    request = HttpRequest("GET", "https://example.invalid/simple/demo/", {})
+    url = "https://example.invalid/simple/demo/"
 
     monkeypatch.setattr(
         session,
@@ -193,7 +193,7 @@ def test_uncontended_get_does_not_allocate_wait_event(monkeypatch) -> None:
         lambda *args, **kwargs: make_response(
             status=200,
             reason="OK",
-            url=request.url,
+            url=url,
             headers={},
             body=b"ok",
         ),
@@ -204,7 +204,7 @@ def test_uncontended_get_does_not_allocate_wait_event(monkeypatch) -> None:
 
     monkeypatch.setattr(threading, "Event", unexpected_event)
 
-    assert session.open_coalesced(request, timeout=None).data == b"ok"
+    assert session.open_coalesced("GET", url, {}, None, timeout=None).data == b"ok"
 
 
 def test_new_connection_error_is_not_reported_as_timeout(monkeypatch) -> None:
@@ -240,13 +240,13 @@ def test_streaming_header_override_is_case_insensitive(monkeypatch) -> None:
     session.auth = None
     seen_headers: dict[str, str] = {}
 
-    def open_response(request, timeout, *, stream=False):
-        del timeout, stream
-        seen_headers.update(request.headers)
+    def open_response(method, url, headers, body, timeout, *, stream=False):
+        del method, body, timeout, stream
+        seen_headers.update(headers)
         return make_response(
             status=200,
             reason="OK",
-            url=request.url,
+            url=url,
             headers={},
             body=b"",
         )
@@ -271,14 +271,14 @@ def test_tuple_timeout_is_normalized_before_transport(monkeypatch) -> None:
     session.auth = None
     seen_timeout: Timeout | None = None
 
-    def open_response(request, timeout, *, stream=False):
+    def open_response(method, url, headers, body, timeout, *, stream=False):
         nonlocal seen_timeout
-        del stream
+        del method, headers, body, stream
         seen_timeout = timeout
         return make_response(
             status=200,
             reason="OK",
-            url=request.url,
+            url=url,
             headers={},
             body=b"",
         )
@@ -298,14 +298,14 @@ def test_native_timeout_reaches_transport_without_copy(monkeypatch) -> None:
     native_timeout = Timeout(connect=1.5, read=4.0)
     seen_timeout: Timeout | None = None
 
-    def open_response(request, timeout, *, stream=False):
+    def open_response(method, url, headers, body, timeout, *, stream=False):
         nonlocal seen_timeout
-        del stream
+        del method, headers, body, stream
         seen_timeout = timeout
         return make_response(
             status=200,
             reason="OK",
-            url=request.url,
+            url=url,
             headers={},
             body=b"",
         )
@@ -319,11 +319,7 @@ def test_native_timeout_reaches_transport_without_copy(monkeypatch) -> None:
 
 def test_no_redirect_reuses_request_headers_at_transport(monkeypatch) -> None:
     session = NetworkSession()
-    request = HttpRequest(
-        "GET",
-        "https://example.invalid/demo.whl",
-        {"accept": "application/octet-stream"},
-    )
+    request_headers = {"accept": "application/octet-stream"}
     seen_headers = None
 
     class Manager:
@@ -341,21 +337,25 @@ def test_no_redirect_reuses_request_headers_at_transport(monkeypatch) -> None:
 
     monkeypatch.setattr(session, "transport_manager", lambda *args, **kwargs: Manager())
 
-    session.open_with_redirects(request, Timeout(), stream=False)
+    session.open_with_redirects(
+        "GET",
+        "https://example.invalid/demo.whl",
+        request_headers,
+        None,
+        Timeout(),
+        stream=False,
+    )
 
-    assert seen_headers is request.headers
+    assert seen_headers is request_headers
 
 
 def test_lowercase_range_header_bypasses_cache(tmp_path) -> None:
     class FailingCache:
-        def get(self, key):
+        def get_with_body(self, key):
             raise AssertionError(f"cache lookup for range request: {key}")
 
-        def set(self, key, value):
-            del key, value
-
-        def set_body(self, key, value):
-            del key, value
+        def set_with_body(self, key, metadata, body):
+            del key, metadata, body
 
     artifact = tmp_path / "demo.whl"
     artifact.write_bytes(b"wheel")
@@ -366,13 +366,12 @@ def test_lowercase_range_header_bypasses_cache(tmp_path) -> None:
     assert response.data == b"wheel"
 
 
-def test_file_response_streams_with_urllib3(tmp_path) -> None:
+def test_file_response_streams(tmp_path) -> None:
     artifact = tmp_path / "demo.whl"
     artifact.write_bytes(b"wheel")
 
     response = NetworkSession().get(artifact.as_uri(), stream=True)
 
-    assert isinstance(response, Urllib3HTTPResponse)
     assert b"".join(response.stream(2)) == b"wheel"
 
 
@@ -520,7 +519,6 @@ def test_unchanged_immediately_stale_304_skips_metadata_rewrite(
     session = NetworkSession(cache=str(tmp_path / "http-cache"))
     assert session.cache is not None
     url = "https://example.invalid/simple/demo/"
-    request = HttpRequest("GET", url, {})
     body = b"cached body"
     session.cache_response(
         make_response(
@@ -538,7 +536,7 @@ def test_unchanged_immediately_stale_304_skips_metadata_rewrite(
     monkeypatch.setattr(session.cache, "set", lambda *args: writes.append(args))
 
     response = session.revalidated_response(
-        request,
+        url,
         metadata,
         {"Cache-Control": "max-age=0", "ETag": '"tag"'},
     )
@@ -547,19 +545,16 @@ def test_unchanged_immediately_stale_304_skips_metadata_rewrite(
     assert writes == []
 
 
-def test_cache_response_supports_legacy_split_cache_writes() -> None:
-    writes: list[tuple[str, str, bytes]] = []
+def test_cache_response_writes_metadata_and_body_atomically() -> None:
+    writes: list[tuple[str, bytes, bytes]] = []
 
-    class SplitWriteCache:
-        def set(self, key: str, value: bytes) -> None:
-            writes.append(("metadata", key, value))
-
-        def set_body(self, key: str, value: bytes) -> None:
-            writes.append(("body", key, value))
+    class RecordingCache:
+        def set_with_body(self, key: str, metadata: bytes, body: bytes) -> None:
+            writes.append((key, metadata, body))
 
     url = "https://example.invalid/simple/demo/"
     body = b"cached body"
-    session = NetworkSession(cache=SplitWriteCache())
+    session = NetworkSession(cache=RecordingCache())
     session.cache_response(
         make_response(
             status=200,
@@ -570,10 +565,10 @@ def test_cache_response_supports_legacy_split_cache_writes() -> None:
         ),
     )
 
-    assert [kind for kind, _, _ in writes] == ["metadata", "body"]
-    assert writes[0][1] == url
-    assert json.loads(writes[0][2])["status"] == 200
-    assert writes[1] == ("body", url, body)
+    assert len(writes) == 1
+    assert writes[0][0] == url
+    assert json.loads(writes[0][1])["status"] == 200
+    assert writes[0][2] == body
 
 
 def test_environ_proxies_cached_per_host_and_port(
@@ -660,7 +655,8 @@ def test_redirect_reselects_tls_policy_for_destination(monkeypatch) -> None:
             assert url == self.url
             return Pool()
 
-    def transport_manager(url: str, *, verify: bool | str) -> Manager:
+    def transport_manager(url: str, *, verify: bool | str, parsed=None) -> Manager:
+        del parsed
         selected.append((url, verify))
         return Manager(url)
 

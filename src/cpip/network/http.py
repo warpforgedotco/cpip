@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import enum
-import io
 import json
 import logging
 import os
@@ -22,7 +21,6 @@ from cpip._vendor.urllib3.exceptions import (
     SSLError,
     TimeoutError,
 )
-from cpip._vendor.urllib3.response import HTTPResponse
 from cpip._vendor.urllib3.util import Retry, Timeout, make_headers
 from cpip.core.cpip_version import get_cpip_version
 from cpip.core.urls import redact_auth_from_url, url_to_path
@@ -72,23 +70,106 @@ class _MissingCacheExpiry(enum.Enum):
 _MISSING_CACHE_EXPIRY = _MissingCacheExpiry.TOKEN
 
 
-class HttpRequest:
-    __slots__ = ("body", "headers", "method", "url")
+class CachedResponse:
+    """A preloaded in-memory response with no transport machinery behind it.
+
+    Serves HTTP-cache hits, 304 revalidations, and coalesced-request replays
+    without paying for urllib3's response construction, which exists to
+    manage a live connection this response never had.
+    """
+
+    __slots__ = ("_offset", "data", "from_cache", "headers", "reason", "status", "url")
 
     def __init__(
         self,
-        method: str,
+        body: bytes,
+        headers: HTTPHeaderDict,
+        status: int,
+        reason: str,
         url: str,
-        headers: dict[str, str] | None = None,
-        body: bytes | None = None,
+        *,
+        from_cache: bool = True,
     ) -> None:
-        self.method = method
+        self.data = body
+
+        self._offset = 0
+
+        self.headers = headers
+
+        self.status = status
+
+        self.reason = reason
 
         self.url = url
 
-        self.headers = headers if headers is not None else {}
+        self.from_cache = from_cache
 
-        self.body = body
+    def read(self, amt: int | None = None) -> bytes:
+        start = self._offset
+
+        end = len(self.data) if amt is None else min(start + amt, len(self.data))
+
+        self._offset = end
+
+        return self.data[start:end]
+
+    def stream(self, amt: int = 2**16) -> Any:
+        while True:
+            chunk = self.read(amt)
+
+            if not chunk:
+                return
+
+            yield chunk
+
+    def close(self) -> None:
+        pass
+
+
+class FileResponse:
+    """A ``file://`` response reading straight from the local file."""
+
+    __slots__ = ("_data", "_file", "from_cache", "headers", "reason", "status", "url")
+
+    def __init__(self, file: Any, headers: HTTPHeaderDict, url: str) -> None:
+        self._file = file
+
+        self._data: bytes | None = None
+
+        self.headers = headers
+
+        self.status = 200
+
+        self.reason = "OK"
+
+        self.url = url
+
+        self.from_cache = False
+
+    @property
+    def data(self) -> bytes:
+        if self._data is None:
+            self._data = self._file.read()
+
+        return self._data
+
+    def read(self, amt: int | None = None) -> bytes:
+        if self._data is not None:
+            return b""
+
+        return self._file.read(-1 if amt is None else amt)
+
+    def stream(self, amt: int = 2**16) -> Any:
+        while True:
+            chunk = self.read(amt)
+
+            if not chunk:
+                return
+
+            yield chunk
+
+    def close(self) -> None:
+        self._file.close()
 
 
 class InFlightRequest:
@@ -102,7 +183,7 @@ class InFlightRequest:
                 int,
                 str,
                 str,
-                Mapping[str, str] | email.message.Message,
+                Mapping[str, str],
                 bytes,
             ]
             | None
@@ -183,7 +264,7 @@ class NetworkSession:
         resume_retries: int = 0,
         trusted_hosts: Sequence[str] = (),
         index_urls: list[str] | None = None,
-        cache: Any = None,
+        cache: SafeFileCache | str | None = None,
     ) -> None:
         self.headers = make_headers(
             user_agent=self.user_agent(),
@@ -221,17 +302,17 @@ class NetworkSession:
 
         self.resume_retries = resume_retries
 
-        self.auth: Any = MultiDomainBasicAuth(index_urls=index_urls)
+        self.auth: MultiDomainBasicAuth | None = MultiDomainBasicAuth(
+            index_urls=index_urls,
+        )
 
         self.pool_managers: dict[tuple[Any, ...], Any] = {}
 
         self.transport_lock = threading.Lock()
 
-        if isinstance(cache, str):
-            self.cache = SafeFileCache(cache)
-
-        else:
-            self.cache = cache
+        self.cache: SafeFileCache | None = (
+            SafeFileCache(cache) if isinstance(cache, str) else cache
+        )
 
         self.trusted_hosts = {host.lower().split(":", 1)[0] for host in trusted_hosts}
 
@@ -344,15 +425,12 @@ class NetworkSession:
         if cacheable and headers is not None:
             cacheable = not any(str(name).lower() == "range" for name in headers)
 
-        auth_resolver = getattr(self.auth, "get_url_and_credentials", None)
+        auth = self.auth
 
         # MultiDomainBasicAuth only removes credentials from the URL. When
         # there are none embedded in the authority, the cache key is already
         # final and a fresh hit does not need credential or netrc resolution.
-        looked_up_before_auth = cacheable and (
-            auth_resolver is None
-            or (isinstance(self.auth, MultiDomainBasicAuth) and "@" not in url)
-        )
+        looked_up_before_auth = cacheable and (auth is None or "@" not in url)
 
         if looked_up_before_auth:
             cached, cached_metadata, cached_body = self.cache_lookup(url)
@@ -369,8 +447,8 @@ class NetworkSession:
 
         password: str | None = None
 
-        if auth_resolver is not None:
-            request_url, username, password = auth_resolver(url)
+        if auth is not None:
+            request_url, username, password = auth.get_url_and_credentials(url)
 
         if cacheable and not looked_up_before_auth:
             cached, cached_metadata, cached_body = self.cache_lookup(request_url)
@@ -395,13 +473,6 @@ class NetworkSession:
                 make_headers(basic_auth=f"{username}:{password}"),
             )
 
-        request = HttpRequest(
-            method,
-            request_url,
-            request_headers,
-            data,
-        )
-
         if cached_metadata is not None:
             etag = cached_metadata.get("etag")
 
@@ -417,34 +488,30 @@ class NetworkSession:
 
         try:
             response = self.open_coalesced(
-                request,
-                timeout=request_timeout,
+                method,
+                request_url,
+                request_headers,
+                data,
+                request_timeout,
                 stream=stream,
             )
 
-        except MaxRetryError as exc:
-            self.raise_transport_error(
-                exc.reason if isinstance(exc.reason, Exception) else exc,
-                request_url,
-                self.timeout_for_urllib3(request_timeout),
-            )
-
         except (
+            MaxRetryError,
             NewConnectionError,
             TimeoutError,
             SSLError,
             ProxyError,
             ProtocolError,
+            OSError,
         ) as exc:
-            self.raise_transport_error(
-                exc,
-                request_url,
-                self.timeout_for_urllib3(request_timeout),
-            )
+            error: Exception = exc
 
-        except OSError as exc:
+            if isinstance(exc, MaxRetryError) and isinstance(exc.reason, Exception):
+                error = exc.reason
+
             self.raise_transport_error(
-                exc,
+                error,
                 request_url,
                 self.timeout_for_urllib3(request_timeout),
             )
@@ -452,7 +519,7 @@ class NetworkSession:
         if response.status == 401 and self.auth is not None and _auth_retry:
             retry = self.retry_auth(
                 response,
-                request,
+                method,
                 headers or {},
                 data,
                 timeout,
@@ -466,7 +533,7 @@ class NetworkSession:
             response.close()
 
             return self.revalidated_response(
-                request,
+                request_url,
                 cached_metadata,
                 response.headers,
                 cached_body,
@@ -479,15 +546,20 @@ class NetworkSession:
 
     def open_coalesced(
         self,
-        request: HttpRequest,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes | None,
         timeout: Any,
         *,
         stream: bool = False,
     ) -> HttpResponseProtocol:
-        if request.method != "GET" or stream or "range" in request.headers:
-            return self.open_internal(request, timeout, stream=stream)
+        if method != "GET" or stream or "range" in headers:
+            return self.open_internal(
+                method, url, headers, body, timeout, stream=stream
+            )
 
-        key = (request.url, frozenset(request.headers.items()))
+        key = (url, frozenset(headers.items()))
 
         wait_event = None
 
@@ -524,20 +596,21 @@ class NetworkSession:
 
             if flight.response is None:
                 raise ProtocolError(
-                    f"coalesced request completed without a response: {request.url}",
+                    f"coalesced request completed without a response: {url}",
                 )
 
-            status, reason, url, headers, body = flight.response
-
-            response: Any = HTTPResponse(
-                body=body or io.BytesIO(),
-                headers=HTTPHeaderDict(headers.items()),
-                status=status,
-                reason=reason,
-                decode_content=False,
-                request_url=url,
+            status, reason, response_url, response_headers, response_body = (
+                flight.response
             )
-            return response
+
+            return CachedResponse(
+                response_body,
+                HTTPHeaderDict(response_headers),
+                status,
+                reason,
+                response_url,
+                from_cache=False,
+            )
 
         response = None
 
@@ -545,7 +618,7 @@ class NetworkSession:
             if self.network_stats is not None:
                 self.network_stats.network_requests += 1
 
-                kind = request_kind(request.url)
+                kind = request_kind(url)
 
                 setattr(
                     self.network_stats,
@@ -553,7 +626,9 @@ class NetworkSession:
                     getattr(self.network_stats, f"{kind}_requests") + 1,
                 )
 
-            response = self.open_internal(request, timeout, stream=stream)
+            response = self.open_internal(
+                method, url, headers, body, timeout, stream=stream
+            )
 
             return response
 
@@ -600,15 +675,7 @@ class NetworkSession:
         if self.cache is None:
             return None, None, None
 
-        get_with_body = getattr(self.cache, "get_with_body", None)
-
-        if get_with_body is not None:
-            metadata, body = get_with_body(url)
-
-        else:
-            metadata = self.cache.get(url)
-
-            body = self.cache.get_body(url)
+        metadata, body = self.cache.get_with_body(url)
 
         if metadata is None:
             if body is not None:
@@ -617,7 +684,7 @@ class NetworkSession:
             return None, None, None
 
         try:
-            values = json.loads(metadata.decode("utf-8"))
+            values = json.loads(metadata)
 
             expires_at = values.get("expires_at")
 
@@ -658,21 +725,22 @@ class NetworkSession:
         finally:
             body.close()
 
-        response: Any = HTTPResponse(
-            body=body_data if body_data else io.BytesIO(),
-            headers=HTTPHeaderDict(headers),
-            status=status,
-            reason=reason,
-            decode_content=False,
-            request_url=url,
+        return (
+            CachedResponse(
+                body_data,
+                HTTPHeaderDict(headers),
+                status,
+                reason,
+                url,
+            ),
+            None,
+            None,
         )
-        response.from_cache = True
-        return response, None, None
 
     def has_fresh_cached_response(self, url: str) -> bool:
         """Check cache freshness without reading the cached response body."""
 
-        if self.cache is None or not hasattr(self.cache, "get_body_path"):
+        if self.cache is None:
             return False
 
         cached_expiry = self.fresh_cached_response_cache.get(
@@ -692,7 +760,7 @@ class NetworkSession:
             return False
 
         try:
-            values = json.loads(metadata.decode("utf-8"))
+            values = json.loads(metadata)
 
             expires_at = values.get("expires_at")
 
@@ -710,12 +778,16 @@ class NetworkSession:
 
     def revalidated_response(
         self,
-        request: HttpRequest,
+        url: str,
         metadata: dict[str, Any],
         response_headers: Any = None,
         cached_body: bytes | None = None,
     ) -> HttpResponseProtocol:
-        self.fresh_cached_response_cache.pop(request.url, None)
+        cache = self.cache
+
+        assert cache is not None, "revalidation requires a cache"
+
+        self.fresh_cached_response_cache.pop(url, None)
 
         headers = metadata.get("headers", {})
 
@@ -777,14 +849,14 @@ class NetworkSession:
 
             updated["last_modified"] = last_modified
 
-            self.cache.set(request.url, json.dumps(updated).encode("utf-8"))
+            cache.set(url, json.dumps(updated).encode("utf-8"))
 
         if cached_body is None:
-            body = self.cache.get_body(request.url)
+            body = cache.get_body(url)
 
             if body is None:
                 raise ProtocolError(
-                    f"Cached response body missing for url: {request.url}",
+                    f"Cached response body missing for url: {url}",
                 )
 
             try:
@@ -795,16 +867,13 @@ class NetworkSession:
         else:
             body_data = cached_body
 
-        response: Any = HTTPResponse(
-            body=body_data if body_data else io.BytesIO(),
-            headers=merged,
-            status=int(metadata.get("status", 200)),
-            reason=str(metadata.get("reason", "OK")),
-            decode_content=False,
-            request_url=request.url,
+        return CachedResponse(
+            body_data,
+            merged,
+            int(metadata.get("status", 200)),
+            str(metadata.get("reason", "OK")),
+            url,
         )
-        response.from_cache = True
-        return response
 
     @staticmethod
     def cache_expiry(
@@ -872,29 +941,30 @@ class NetworkSession:
             },
         ).encode("utf-8")
 
-        set_with_body = getattr(self.cache, "set_with_body", None)
-        if set_with_body is not None:
-            set_with_body(response.url, metadata, body)
-        else:
-            self.cache.set(response.url, metadata)
-            self.cache.set_body(response.url, body)
+        self.cache.set_with_body(response.url, metadata, body)
 
     def open_internal(
         self,
-        request: HttpRequest,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes | None,
         timeout: Any,
         *,
         stream: bool = False,
     ) -> HttpResponseProtocol:
-        if urllib.parse.urlsplit(request.url).scheme == "file":
-            return self.open_file(request)
+        if url.startswith("file:"):
+            return self.open_file(url)
 
         transport_timeout = self.timeout_for_urllib3(
             timeout if timeout is not None else self.timeout,
         )
 
         return self.open_with_redirects(
-            request,
+            method,
+            url,
+            headers,
+            body,
             transport_timeout,
             stream=stream,
         )
@@ -958,6 +1028,9 @@ class NetworkSession:
 
         proxies = self.proxies_for(url, parsed)
 
+        if not proxies:
+            return None
+
         host_key = f"{parsed.scheme}://{parsed.hostname}"
 
         all_host_key = f"all://{parsed.hostname}"
@@ -974,17 +1047,26 @@ class NetworkSession:
         url: str,
         *,
         verify: bool | str,
+        parsed: urllib.parse.SplitResult | None = None,
     ) -> Any:
-        from cpip._vendor import urllib3
-        from cpip._vendor import certifi
-
-        parsed = urllib.parse.urlsplit(url)
+        if parsed is None:
+            parsed = urllib.parse.urlsplit(url)
 
         proxy = self.proxy_for(url, parsed)
 
         cert = self.cert
 
         key = (proxy, verify, cert)
+
+        # Reads of an existing manager take no lock: dict lookups are atomic,
+        # and managers are only ever added, never replaced.
+        manager = self.pool_managers.get(key)
+
+        if manager is not None:
+            return manager
+
+        from cpip._vendor import urllib3
+        from cpip._vendor import certifi
 
         with self.transport_lock:
             manager = self.pool_managers.get(key)
@@ -1113,18 +1195,21 @@ class NetworkSession:
 
     def open_with_redirects(
         self,
-        request: HttpRequest,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes | None,
         timeout: Timeout,
         *,
         stream: bool,
     ) -> HttpResponseProtocol:
-        current_method = request.method
+        current_method = method
 
-        current_url = request.url
+        current_url = url
 
-        current_headers: dict[str, str] | HTTPHeaderDict = request.headers
+        current_headers: dict[str, str] | HTTPHeaderDict = headers
 
-        current_body = request.body
+        current_body = body
 
         retries = self.retry
 
@@ -1136,7 +1221,7 @@ class NetworkSession:
             elif verify is True and self.environ_ca_bundle is not None:
                 verify = self.environ_ca_bundle
 
-            manager = self.transport_manager(current_url, verify=verify)
+            manager = self.transport_manager(current_url, verify=verify, parsed=parsed)
 
             raw = manager.request(
                 current_method,
@@ -1202,51 +1287,42 @@ class NetworkSession:
             current_url = next_url
 
     @staticmethod
-    def open_file(request: HttpRequest) -> HttpResponseProtocol:
+    def open_file(url: str) -> HttpResponseProtocol:
         try:
-            file = open(url_to_path(request.url), "rb")
+            file = open(url_to_path(url), "rb")
 
         except OSError as exc:
-            response: Any = HTTPResponse(
-                body=io.BytesIO(f"{type(exc).__name__}: {exc}".encode()),
-                headers=HTTPHeaderDict(),
-                status=404,
-                reason=type(exc).__name__,
-                preload_content=False,
-                decode_content=False,
-                request_url=request.url,
+            return CachedResponse(
+                f"{type(exc).__name__}: {exc}".encode(),
+                HTTPHeaderDict(),
+                404,
+                type(exc).__name__,
+                url,
+                from_cache=False,
             )
-            return response
 
         headers = HTTPHeaderDict()
 
         headers["Content-Length"] = str(os.fstat(file.fileno()).st_size)
 
-        response: Any = HTTPResponse(
-            body=file,
-            headers=headers,
-            status=200,
-            reason="OK",
-            preload_content=False,
-            decode_content=False,
-            request_url=request.url,
-        )
-        return response
+        return FileResponse(file, headers, url)
 
     def retry_auth(
         self,
         response: HttpResponseProtocol,
-        request: HttpRequest,
+        method: str,
         headers: Mapping[str, str],
         data: bytes | None,
         timeout: Any,
         *,
         stream: bool,
     ) -> HttpResponseProtocol | None:
-        if not hasattr(self.auth, "credentials_after_401"):
+        auth = self.auth
+
+        if auth is None:
             return None
 
-        username, password, credentials = self.auth.credentials_after_401(response.url)
+        username, password, credentials = auth.credentials_after_401(response.url)
 
         if username is None or password is None:
             return None
@@ -1260,7 +1336,7 @@ class NetworkSession:
         response.close()
 
         retry = self.request(
-            request.method,
+            method,
             response.url,
             headers=retry_headers,
             data=data,
@@ -1278,7 +1354,7 @@ class NetworkSession:
         elif credentials is not None and retry.status < 400:
             try:
                 logger.info("Saving credentials to keyring")
-                self.auth.keyring_provider.save_auth_info(
+                auth.keyring_provider.save_auth_info(
                     credentials.url,
                     credentials.username,
                     credentials.password,

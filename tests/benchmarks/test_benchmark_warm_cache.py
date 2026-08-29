@@ -406,22 +406,25 @@ def stale_index(
     world opens. This is the everyday case -- PyPI pages outlive their
     max-age between two cpip runs while their content stays unchanged."""
     from cpip.core.http import HttpResponse
-    from cpip.network.http import HttpRequest, NetworkSession
+    from cpip.network.http import NetworkSession
     from cpip_test_support.transport_mocks import make_response
 
     class Stale304Session(NetworkSession):
         def open_internal(
             self,
-            request: HttpRequest,
+            method: str,
+            url: str,
+            headers: dict[str, str],
+            request_body: bytes | None,
             timeout,
             *,
             stream: bool = False,
         ) -> HttpResponse:
-            if request.headers.get("if-none-match") == '"stale-page"':
+            if headers.get("if-none-match") == '"stale-page"':
                 return make_response(
                     status=304,
                     reason="Not Modified",
-                    url=request.url,
+                    url=url,
                     headers={"ETag": '"stale-page"', "Cache-Control": "max-age=0"},
                     body=b"",
                 )
@@ -429,7 +432,7 @@ def stale_index(
             return make_response(
                 status=200,
                 reason="OK",
-                url=request.url,
+                url=url,
                 headers={
                     "Content-Type": "application/vnd.pypi.simple.v1+json",
                     "Cache-Control": "max-age=0",

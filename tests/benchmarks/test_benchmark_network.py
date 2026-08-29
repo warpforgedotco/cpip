@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from cpip.core.http import HttpResponse
 from cpip.network.download import Downloader
-from cpip.network.http import HttpRequest, NetworkSession
+from cpip.network.http import NetworkSession
 from cpip.network.lazy_wheel import dist_from_wheel_url
 from cpip_test_support.transport_mocks import make_response
 from pytest_codspeed import BenchmarkFixture
@@ -72,20 +72,23 @@ class FakeTransportSession(NetworkSession):
 
     def open_internal(
         self,
-        request: HttpRequest,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        request_body: bytes | None,
         timeout,
         *,
         stream: bool = False,
     ) -> HttpResponse:
-        if_none_match = request.headers.get("if-none-match")
+        if_none_match = headers.get("if-none-match")
         if if_none_match and if_none_match == self.response_headers.get("ETag"):
-            return self.not_modified_responses[request.url]
-        body = self.bodies[request.url.partition("#")[0]]
-        range_header = request.headers.get("range")
+            return self.not_modified_responses[url]
+        body = self.bodies[url.partition("#")[0]]
+        range_header = headers.get("range")
         if not stream and range_header is None:
-            return self.responses[request.url]
+            return self.responses[url]
         status = 200
-        headers = dict(self.response_headers)
+        response_headers = dict(self.response_headers)
         if range_header:
             total = len(body)
             spec = range_header.partition("=")[2]
@@ -94,13 +97,13 @@ class FakeTransportSession(NetworkSession):
             end = int(end_text) if end_text else total - 1
             body = body[start : end + 1]
             status = 206
-            headers["Content-Range"] = f"bytes {start}-{end}/{total}"
-        headers["Content-Length"] = str(len(body))
+            response_headers["Content-Range"] = f"bytes {start}-{end}/{total}"
+        response_headers["Content-Length"] = str(len(body))
         return make_response(
             status=status,
             reason="OK",
-            url=request.url,
-            headers=headers,
+            url=url,
+            headers=response_headers,
             body=body,
             stream=stream,
         )
@@ -115,21 +118,24 @@ class RecordingTransportSession(FakeTransportSession):
 
     def open_internal(
         self,
-        request: HttpRequest,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes | None,
         timeout: Any,
         *,
         stream: bool = False,
     ) -> HttpResponse:
         self.transport_calls.append(
             (
-                request.method,
-                request.url,
-                dict(request.headers),
-                request.body,
+                method,
+                url,
+                dict(headers),
+                body,
                 stream,
             ),
         )
-        return super().open_internal(request, timeout, stream=stream)
+        return super().open_internal(method, url, headers, body, timeout, stream=stream)
 
 
 class PreparedTransportSession(NetworkSession):
@@ -141,7 +147,10 @@ class PreparedTransportSession(NetworkSession):
 
     def open_internal(
         self,
-        request: HttpRequest,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes | None,
         timeout: Any,
         *,
         stream: bool = False,
@@ -160,7 +169,10 @@ def prepare_transport_session(
     )
     responses = [
         builder.open_internal(
-            HttpRequest(method, url, headers, body),
+            method,
+            url,
+            headers,
+            body,
             timeout=None,
             stream=stream,
         )
@@ -186,7 +198,9 @@ class NativeTransportSession(NetworkSession):
         super().__init__(**kwargs)
         self.manager = CannedPoolManager(responses)
 
-    def transport_manager(self, url: str, *, verify: bool | str) -> CannedPoolManager:
+    def transport_manager(
+        self, url: str, *, verify: bool | str, parsed: Any = None
+    ) -> CannedPoolManager:
         return self.manager
 
 
@@ -332,7 +346,10 @@ def test_session_cache_store(
         count = 0
         for url in PAGE_URLS:
             response = session.open_internal(
-                HttpRequest("GET", url, dict(session.headers)),
+                "GET",
+                url,
+                dict(session.headers),
+                None,
                 timeout=None,
             )
             session.cache_response(response)

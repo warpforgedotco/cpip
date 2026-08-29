@@ -45,12 +45,8 @@ def dist_from_wheel_url(
         with LazyZipOverHTTP(url, session) as zf:
             with ZipFile(zf) as archive:
                 return MetadataDistribution.from_wheel_archive(archive, name, zf.name)
-    except BadZipFile as exc:
+    except (BadZipFile, DecodeError) as exc:
         raise InvalidWheel(url, name) from exc
-    except Exception as exc:
-        if isinstance(exc, DecodeError):
-            raise InvalidWheel(url, name) from exc
-        raise
 
 
 def metadata_text_from_wheel_url(

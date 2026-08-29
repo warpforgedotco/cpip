@@ -11,7 +11,7 @@ from cpip.core.packaging import parse_requirement
 from cpip.index.catalog_cache import cache_key, catalog_generation
 from cpip.index.source_locations import SimpleIndexSource
 from cpip.network.exceptions import ConnectionFailedError
-from cpip.network.http import HttpRequest, NetworkSession
+from cpip.network.http import NetworkSession
 from cpip_test_support.transport_mocks import make_response
 
 INDEX_URL = "https://index.invalid/simple"
@@ -47,7 +47,10 @@ class FakeIndexSession(NetworkSession):
 
     def open_internal(
         self,
-        request: HttpRequest,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes | None,
         timeout,
         *,
         stream: bool = False,
@@ -59,22 +62,22 @@ class FakeIndexSession(NetworkSession):
             return make_response(
                 status=self.status_override,
                 reason="Not Found",
-                url=request.url,
+                url=url,
                 headers={"Content-Type": "text/plain"},
                 body=b"",
             )
-        if request.headers.get("if-none-match") == self.etag:
+        if headers.get("if-none-match") == self.etag:
             return make_response(
                 status=304,
                 reason="Not Modified",
-                url=request.url,
+                url=url,
                 headers={"ETag": self.etag, "Cache-Control": "max-age=600"},
                 body=b"",
             )
         return make_response(
             status=200,
             reason="OK",
-            url=request.url,
+            url=url,
             headers={
                 "Content-Type": JSON_TYPE,
                 "Cache-Control": "max-age=0",
