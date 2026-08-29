@@ -7,19 +7,15 @@ from typing import Literal
 from cpip.core.errors import CpipError, DiagnosticCpipError
 
 
-class NetworkConnectionError(CpipError):
-    def __init__(self, error_msg: str, response=None, request=None) -> None:
-        self.response = response
-        self.request = request or getattr(response, "request", None)
-        self.error_msg = error_msg
-        super().__init__(error_msg, response, request)
-
-    def __str__(self) -> str:
-        return str(self.error_msg)
-
-
 class IncompleteDownloadError(CpipError):
     """A network download ended before the expected number of bytes arrived."""
+
+
+class TooManyRedirectsError(CpipError):
+    """An HTTP request exhausted its redirect budget."""
+
+    def __init__(self, url: str) -> None:
+        super().__init__(f"Too many redirects while fetching {url}")
 
 
 class ConnectionFailedError(DiagnosticCpipError):
@@ -101,8 +97,8 @@ __all__ = [
     "ConnectionTimeoutError",
     "IncompleteDownloadError",
     "InvalidWheel",
-    "NetworkConnectionError",
     "ProxyConnectionError",
     "SSLMissingError",
     "SSLVerificationError",
+    "TooManyRedirectsError",
 ]

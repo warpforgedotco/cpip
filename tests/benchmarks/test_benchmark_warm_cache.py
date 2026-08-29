@@ -405,9 +405,9 @@ def stale_index(
     each resolve must revalidate (304 answered offline) before the summary
     world opens. This is the everyday case -- PyPI pages outlive their
     max-age between two cpip runs while their content stays unchanged."""
-    import io
-
-    from cpip.network.http import HttpRequest, HttpResponse, NetworkSession
+    from cpip.core.http import HttpResponse
+    from cpip.network.http import HttpRequest, NetworkSession
+    from cpip_test_support.transport_mocks import make_response
 
     class Stale304Session(NetworkSession):
         def open_internal(
@@ -417,19 +417,17 @@ def stale_index(
             *,
             stream: bool = False,
         ) -> HttpResponse:
-            if request.headers.get("If-None-Match") == '"stale-page"':
-                return HttpResponse(
-                    status_code=304,
+            if request.headers.get("if-none-match") == '"stale-page"':
+                return make_response(
+                    status=304,
                     reason="Not Modified",
                     url=request.url,
                     headers={"ETag": '"stale-page"', "Cache-Control": "max-age=0"},
-                    raw=io.BytesIO(b""),
-                    content_internal=b"",
-                    request=request,
+                    body=b"",
                 )
             body = b"{}"
-            return HttpResponse(
-                status_code=200,
+            return make_response(
+                status=200,
                 reason="OK",
                 url=request.url,
                 headers={
@@ -438,9 +436,7 @@ def stale_index(
                     "ETag": '"stale-page"',
                     "Content-Length": str(len(body)),
                 },
-                raw=io.BytesIO(body),
-                content_internal=body,
-                request=request,
+                body=body,
             )
 
     root = tmp_path_factory.mktemp("stale-index")

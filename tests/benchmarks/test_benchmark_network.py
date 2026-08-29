@@ -9,16 +9,20 @@ measure only cpip's own policy code, never sockets.
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
+from typing import Any
 
 import pytest
+from cpip.core.http import HttpResponse
 from cpip.network.download import Downloader
-from cpip.network.http import HttpRequest, HttpResponse, NetworkSession
+from cpip.network.http import HttpRequest, NetworkSession
 from cpip.network.lazy_wheel import dist_from_wheel_url
+from cpip_test_support.transport_mocks import make_response
 from pytest_codspeed import BenchmarkFixture
 
 from benchmark_support import make_wheel, simple_index_html
+
+TransportCall = tuple[str, str, dict[str, str], bytes | None, bool]
 
 INDEX_URLS = [
     "https://mirror.invalid/simple/",
@@ -42,6 +46,29 @@ class FakeTransportSession(NetworkSession):
         super().__init__(**kwargs)
         self.bodies = bodies
         self.response_headers = response_headers
+        self.responses = {
+            url: make_response(
+                status=200,
+                reason="OK",
+                url=url,
+                headers={
+                    **response_headers,
+                    "Content-Length": str(len(body)),
+                },
+                body=body,
+            )
+            for url, body in bodies.items()
+        }
+        self.not_modified_responses = {
+            url: make_response(
+                status=304,
+                reason="Not Modified",
+                url=url,
+                headers=dict(response_headers),
+                body=b"",
+            )
+            for url in bodies
+        }
 
     def open_internal(
         self,
@@ -50,19 +77,13 @@ class FakeTransportSession(NetworkSession):
         *,
         stream: bool = False,
     ) -> HttpResponse:
-        if_none_match = request.headers.get("If-None-Match")
+        if_none_match = request.headers.get("if-none-match")
         if if_none_match and if_none_match == self.response_headers.get("ETag"):
-            return HttpResponse(
-                status_code=304,
-                reason="Not Modified",
-                url=request.url,
-                headers=dict(self.response_headers),
-                raw=io.BytesIO(b""),
-                content_internal=b"",
-                request=request,
-            )
+            return self.not_modified_responses[request.url]
         body = self.bodies[request.url.partition("#")[0]]
-        range_header = request.headers.get("Range")
+        range_header = request.headers.get("range")
+        if not stream and range_header is None:
+            return self.responses[request.url]
         status = 200
         headers = dict(self.response_headers)
         if range_header:
@@ -75,16 +96,98 @@ class FakeTransportSession(NetworkSession):
             status = 206
             headers["Content-Range"] = f"bytes {start}-{end}/{total}"
         headers["Content-Length"] = str(len(body))
-        return HttpResponse(
-            status_code=status,
+        return make_response(
+            status=status,
             reason="OK",
             url=request.url,
             headers=headers,
-            raw=io.BytesIO(body),
-            content_internal=None if stream else body,
-            streaming=stream,
-            request=request,
+            body=body,
+            stream=stream,
         )
+
+
+class RecordingTransportSession(FakeTransportSession):
+    """Record the requests needed to prepare transport responses out of band."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.transport_calls: list[TransportCall] = []
+
+    def open_internal(
+        self,
+        request: HttpRequest,
+        timeout: Any,
+        *,
+        stream: bool = False,
+    ) -> HttpResponse:
+        self.transport_calls.append(
+            (
+                request.method,
+                request.url,
+                dict(request.headers),
+                request.body,
+                stream,
+            ),
+        )
+        return super().open_internal(request, timeout, stream=stream)
+
+
+class PreparedTransportSession(NetworkSession):
+    """Return native responses prepared outside a benchmark's timed region."""
+
+    def __init__(self, responses: list[HttpResponse], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.responses = iter(responses)
+
+    def open_internal(
+        self,
+        request: HttpRequest,
+        timeout: Any,
+        *,
+        stream: bool = False,
+    ) -> HttpResponse:
+        return next(self.responses)
+
+
+def prepare_transport_session(
+    calls: list[TransportCall],
+    bodies: dict[str, bytes],
+    response_headers: dict[str, str],
+) -> PreparedTransportSession:
+    builder = FakeTransportSession(
+        bodies=bodies,
+        response_headers=response_headers,
+    )
+    responses = [
+        builder.open_internal(
+            HttpRequest(method, url, headers, body),
+            timeout=None,
+            stream=stream,
+        )
+        for method, url, headers, body, stream in calls
+    ]
+    return PreparedTransportSession(responses)
+
+
+class CannedPoolManager:
+    """Pool-manager boundary that returns native responses without sockets."""
+
+    def __init__(self, responses: dict[str, HttpResponse]) -> None:
+        self.responses = responses
+
+    def request(self, method: str, url: str, **kwargs: Any) -> HttpResponse:
+        return self.responses[url]
+
+
+class NativeTransportSession(NetworkSession):
+    """NetworkSession exercising its real urllib3 request path offline."""
+
+    def __init__(self, responses: dict[str, HttpResponse], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.manager = CannedPoolManager(responses)
+
+    def transport_manager(self, url: str, *, verify: bool | str) -> CannedPoolManager:
+        return self.manager
 
 
 def page_session(cache: str | None) -> FakeTransportSession:
@@ -118,7 +221,35 @@ def test_session_requests_cache_miss(benchmark: BenchmarkFixture) -> None:
         total = 0
         for url in PAGE_URLS:
             response = session.get(url)
-            total += len(response.content)
+            total += len(response.data)
+            response.close()
+        return total
+
+    assert benchmark(fetch_all) == len(PAGE_BODY) * len(PAGE_URLS)
+
+
+def test_session_native_transport_policy(benchmark: BenchmarkFixture) -> None:
+    """Full request policy through the native urllib3 path, excluding sockets."""
+    responses = {
+        url: make_response(
+            status=200,
+            reason="OK",
+            url=url,
+            headers={
+                "Content-Type": "text/html",
+                "Content-Length": str(len(PAGE_BODY)),
+            },
+            body=PAGE_BODY,
+        )
+        for url in PAGE_URLS
+    }
+    session = NativeTransportSession(responses, index_urls=INDEX_URLS)
+
+    def fetch_all() -> int:
+        total = 0
+        for url in PAGE_URLS:
+            response = session.get(url)
+            total += len(response.data)
             response.close()
         return total
 
@@ -137,7 +268,7 @@ def test_session_requests_cache_hit(
         for url in PAGE_URLS:
             response = session.get(url)
             assert response.from_cache
-            total += len(response.content)
+            total += len(response.data)
             response.close()
         return total
 
@@ -168,7 +299,7 @@ def test_session_requests_revalidation_304(
         for url in PAGE_URLS:
             response = session.get(url)
             assert response.from_cache
-            total += len(response.content)
+            total += len(response.data)
             response.close()
         return total
 
@@ -235,18 +366,33 @@ def test_download_artifacts(
     """Streaming artifact downloads through the Downloader chunk loop."""
     from cpip.index.links import Link
 
-    session = FakeTransportSession(
-        bodies=dict.fromkeys(ARTIFACT_URLS, ARTIFACT_BODY),
-        response_headers={"Content-Type": "application/octet-stream"},
-    )
-    downloader = Downloader(session)
+    bodies = dict.fromkeys(ARTIFACT_URLS, ARTIFACT_BODY)
+    response_headers = {"Content-Type": "application/octet-stream"}
     links = [Link.from_url(url, source_url=None) for url in ARTIFACT_URLS]
     location = str(tmp_path_factory.mktemp("network-downloads"))
 
-    def download_all() -> int:
+    recording_session = RecordingTransportSession(
+        bodies=bodies,
+        response_headers=response_headers,
+    )
+    assert sum(1 for _ in Downloader(recording_session).batch(links, location)) == len(
+        ARTIFACT_URLS,
+    )
+
+    def setup() -> tuple[tuple[Downloader], dict[str, Any]]:
+        session = prepare_transport_session(
+            recording_session.transport_calls,
+            bodies,
+            response_headers,
+        )
+        return (Downloader(session),), {}
+
+    def download_all(downloader: Downloader) -> int:
         return sum(1 for _ in downloader.batch(links, location))
 
-    assert benchmark(download_all) == len(ARTIFACT_URLS)
+    assert benchmark.pedantic(download_all, setup=setup, rounds=25) == len(
+        ARTIFACT_URLS,
+    )
 
 
 @pytest.fixture(scope="session")
@@ -263,16 +409,30 @@ def test_lazy_wheel_metadata(
 ) -> None:
     """Range-request metadata extraction via LazyZipOverHTTP."""
     url, body = range_wheel
-    session = FakeTransportSession(
-        bodies={url: body},
-        response_headers={
-            "Content-Type": "application/octet-stream",
-            "Accept-Ranges": "bytes",
-        },
+    bodies = {url: body}
+    response_headers = {
+        "Content-Type": "application/octet-stream",
+        "Accept-Ranges": "bytes",
+    }
+    recording_session = RecordingTransportSession(
+        bodies=bodies,
+        response_headers=response_headers,
+    )
+    assert (
+        dist_from_wheel_url("lazy-target", url, recording_session).metadata["Name"]
+        == "lazy-target"
     )
 
-    def read_metadata() -> str:
+    def setup() -> tuple[tuple[PreparedTransportSession], dict[str, Any]]:
+        session = prepare_transport_session(
+            recording_session.transport_calls,
+            bodies,
+            response_headers,
+        )
+        return (session,), {}
+
+    def read_metadata(session: NetworkSession) -> str:
         dist = dist_from_wheel_url("lazy-target", url, session)
         return dist.metadata["Name"]
 
-    assert benchmark(read_metadata) == "lazy-target"
+    assert benchmark.pedantic(read_metadata, setup=setup, rounds=25) == "lazy-target"

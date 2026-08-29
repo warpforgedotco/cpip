@@ -6,7 +6,6 @@ providing credentials in the context of network requests.
 
 from __future__ import annotations
 
-import base64
 import getpass
 import importlib.util
 import json
@@ -21,7 +20,7 @@ import urllib.parse
 from abc import ABC, abstractmethod
 from functools import cache
 from os.path import commonpath
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from cpip.core.urls import remove_auth_from_url, split_auth_netloc_from_url
 from cpip.core.utils import AuthInfo
@@ -292,7 +291,6 @@ class MultiDomainBasicAuth:
         self.index_urls = index_urls
         self.keyring_provider = keyring_provider
         self.passwords: dict[str, AuthInfo] = {}
-        self.credentials_to_save: Credentials | None = None
         self.credential_cache: dict[str, tuple[str, str | None, str | None]] = {}
         self.prepared_index_urls_internal: (
             list[tuple[str, urllib.parse.SplitResult, urllib.parse.SplitResult]] | None
@@ -542,77 +540,3 @@ class MultiDomainBasicAuth:
         if save and self.should_save_password_to_keyring_internal():
             credentials = Credentials(url=netloc, username=username, password=password)
         return username, password, credentials
-
-    def handle_401(self, resp: Any, **kwargs: Any) -> Any:
-        if resp.status_code != 401:
-            return resp
-
-        username, password = self.get_new_credentials(
-            resp.url,
-            allow_netrc=False,
-            allow_keyring=self.use_keyring,
-        )
-
-        if not self.prompting and not username and not password:
-            return resp
-
-        parsed = urllib.parse.urlparse(resp.url)
-
-        save = False
-        if not username and not password:
-            username, password, save = self.prompt_for_password(parsed.netloc)
-
-        self.credentials_to_save = None
-        if username is not None and password is not None:
-            self.passwords[parsed.netloc] = (username, password)
-            self.credential_cache.clear()
-
-            if save and self.should_save_password_to_keyring_internal():
-                self.credentials_to_save = Credentials(
-                    url=parsed.netloc,
-                    username=username,
-                    password=password,
-                )
-
-        _ = resp.content
-        resp.raw.release_conn()
-
-        req = resp.request
-        username = username or ""
-        password = password or ""
-        token = base64.b64encode(f"{username}:{password}".encode()).decode()
-        req.headers["Authorization"] = f"Basic {token}"
-        new_resp = resp.connection.send(req, **kwargs)
-        new_resp.history.append(resp)
-        if new_resp.status_code == 401:
-            self.warn_on_401(new_resp)
-        elif self.credentials_to_save:
-            self.save_credentials(new_resp)
-        return new_resp
-
-    def warn_on_401(self, resp: Any, **kwargs: Any) -> None:
-        """Response callback to warn about incorrect credentials."""
-        if resp.status_code == 401:
-            logger.warning(
-                "401 Error, Credentials not correct for %s",
-                resp.request.url,
-            )
-
-    def save_credentials(self, resp: Any, **kwargs: Any) -> None:
-        """Response callback to save credentials on success."""
-        assert self.keyring_provider.has_keyring, (
-            "should never reach here without keyring"
-        )
-
-        creds = self.credentials_to_save
-        self.credentials_to_save = None
-        if creds and resp.status_code < 400:
-            try:
-                logger.info("Saving credentials to keyring")
-                self.keyring_provider.save_auth_info(
-                    creds.url,
-                    creds.username,
-                    creds.password,
-                )
-            except Exception:
-                logger.exception("Failed to save credentials")

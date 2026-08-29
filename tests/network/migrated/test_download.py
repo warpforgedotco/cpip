@@ -23,8 +23,7 @@ from cpip.network.exceptions import (
     SSLMissingError,
 )
 from cpip.network.http import NetworkSession
-from cpip.network.utils import HEADERS
-from cpip_test_support.requests_mocks import BrokenStream, MockResponse
+from cpip_test_support.transport_mocks import BrokenStream, MockResponse
 from cpip_test_support.server import Body, MockServer
 
 if TYPE_CHECKING:
@@ -325,10 +324,10 @@ def test_downloader(
     downloader = Downloader(session)
 
     responses = []
-    for headers, status_code, body in mock_responses:
+    for headers, status, body in mock_responses:
         resp = MockResponse(body)
         resp.headers.update(headers)
-        resp.status_code = status_code
+        resp.status = status
         responses.append(resp)
     http_get_mock = MagicMock(side_effect=responses)
 
@@ -347,7 +346,7 @@ def test_downloader(
 
     calls = [call(link)]
     for range_start, if_range in expected_resume_args:
-        headers = {**HEADERS, "Range": f"bytes={range_start}-"}
+        headers = {"Range": f"bytes={range_start}-"}
         if if_range:
             headers["If-Range"] = if_range
         calls.append(call(link, headers))
@@ -363,12 +362,12 @@ def test_downloader_resumes_on_protocol_error(tmp_path: Path) -> None:
 
     broken_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")
     broken_resp.headers.update({"content-length": "36"})
-    broken_resp.status_code = 200
-    broken_resp.raw = BrokenStream(b"0cfa7e9d-1868-4dd7-9fb3-")
+    broken_resp.status = 200
+    broken_resp._fp = BrokenStream(b"0cfa7e9d-1868-4dd7-9fb3-")
 
     resume_resp = MockResponse(b"f2561d5dfd89")
     resume_resp.headers.update({"content-length": "12"})
-    resume_resp.status_code = 206
+    resume_resp.status = 206
 
     http_get_mock = MagicMock(side_effect=[broken_resp, resume_resp])
 
@@ -397,12 +396,12 @@ def test_downloader_retries_low_level_errors_during_resume(
 
     broken_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")
     broken_resp.headers.update({"content-length": "36"})
-    broken_resp.status_code = 200
-    broken_resp.raw = BrokenStream(b"0cfa7e9d-1868-4dd7-9fb3-")
+    broken_resp.status = 200
+    broken_resp._fp = BrokenStream(b"0cfa7e9d-1868-4dd7-9fb3-")
 
     resume_resp = MockResponse(b"f2561d5dfd89")
     resume_resp.headers.update({"content-length": "12"})
-    resume_resp.status_code = 206
+    resume_resp.status = 206
 
     http_get_mock = MagicMock(side_effect=[broken_resp, resume_error, resume_resp])
 
@@ -446,11 +445,11 @@ def test_downloader_retries_diagnostic_connection_errors_during_resume(
 
     broken_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")
     broken_resp.headers.update({"content-length": "36"})
-    broken_resp.status_code = 200
+    broken_resp.status = 200
 
     resume_resp = MockResponse(b"f2561d5dfd89")
     resume_resp.headers.update({"content-length": "12"})
-    resume_resp.status_code = 206
+    resume_resp.status = 206
 
     http_get_mock = MagicMock(side_effect=[broken_resp, resume_error, resume_resp])
 
@@ -470,7 +469,7 @@ def test_downloader_does_not_retry_on_ssl_missing_error(tmp_path: Path) -> None:
 
     broken_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")
     broken_resp.headers.update({"content-length": "36"})
-    broken_resp.status_code = 200
+    broken_resp.status = 200
     resume_error = SSLMissingError("https://example.com/foo.tgz")
 
     http_get_mock = MagicMock(side_effect=[broken_resp, resume_error])
@@ -527,13 +526,13 @@ def test_downloader_crashes_on_mismatched_resume_offset(tmp_path: Path) -> None:
 
     first = MockResponse(body[:24])
     first.headers.update({"content-length": "36"})
-    first.status_code = 200
+    first.status = 200
 
     mismatched = MockResponse(b"XXXXXXXXXXXX")
     mismatched.headers.update(
         {"content-length": "12", "content-range": "bytes 0-11/36"},
     )
-    mismatched.status_code = 206
+    mismatched.status = 206
 
     http_get_mock = MagicMock(side_effect=[first, mismatched])
     with patch.object(Downloader, "http_get", http_get_mock):
@@ -550,7 +549,7 @@ def test_downloader_without_content_length(tmp_path: Path) -> None:
     """
     body = b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89"
     resp = MockResponse(body)
-    resp.status_code = 200
+    resp.status = 200
 
     assert get_http_response_size(resp) is None
 
@@ -573,11 +572,11 @@ def test_resumed_download_caching(tmp_path: Path) -> None:
 
     incomplete_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")
     incomplete_resp.headers.update({"content-length": "36"})
-    incomplete_resp.status_code = 200
+    incomplete_resp.status = 200
 
     resume_resp = MockResponse(b"f2561d5dfd89")
     resume_resp.headers.update({"content-length": "12"})
-    resume_resp.status_code = 206
+    resume_resp.status = 206
 
     responses = [incomplete_resp, resume_resp]
     http_get_mock = MagicMock(side_effect=responses)

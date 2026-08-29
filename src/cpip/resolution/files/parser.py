@@ -12,9 +12,9 @@ import sys
 import urllib.parse
 
 from cpip.core.errors import InstallationError
+from cpip.core.http import raise_for_status, response_text
 from cpip.core.packaging import parse_requirement
 from cpip.index.prefetch import Prefetcher
-from cpip.network.utils import raise_for_status
 from cpip.resolution.files.models import (
     ParsedRequirement,
     RequirementsFileParseError,
@@ -266,7 +266,7 @@ def _read_requirement_content(
         future = prefetcher.take(normalized)
         response = future.result() if future is not None else session.get(normalized)
         raise_for_status(response)
-        return response.text
+        return response_text(response)
 
     try:
         with open(normalized, "rb") as file:

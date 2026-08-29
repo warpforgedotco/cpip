@@ -7,11 +7,13 @@ import json
 import logging
 import mimetypes
 import os
+import shutil
 from collections.abc import Iterable, Mapping
 from http import HTTPStatus
 from typing import BinaryIO
 
-from cpip._vendor import requests
+from cpip._vendor.urllib3.exceptions import HTTPError
+from cpip.core.http import HttpResponse, HttpStatusError, raise_for_status
 from cpip.core.urls import redact_auth_from_url
 from cpip.index.links import Link
 from cpip.index.paths import PathComponent
@@ -19,15 +21,15 @@ from cpip.network.exceptions import (
     ConnectionFailedError,
     ConnectionTimeoutError,
     IncompleteDownloadError,
-    NetworkConnectionError,
     ProxyConnectionError,
     SSLVerificationError,
 )
-from cpip.network.http import HttpResponse, NetworkSession
-from cpip.network.utils import HEADERS, raise_for_status, response_chunks
+from cpip.network.http import NetworkSession
 from cpip.platform.filesystem import format_size
 
 logger = logging.getLogger(__name__)
+
+DOWNLOAD_CHUNK_SIZE = 256 * 1024
 
 
 def splitext(path: str) -> tuple[str, str]:
@@ -71,7 +73,7 @@ def log_download(
     link: Link,
     total_length: int | None,
     range_start: int | None = 0,
-) -> Iterable[bytes]:
+) -> None:
     if logger.getEffectiveLevel() > logging.INFO:
         url = link.url_without_fragment
 
@@ -99,8 +101,6 @@ def log_download(
 
     else:
         logger.info("Downloading %s", logged_url)
-
-    return response_chunks(resp)
 
 
 def sanitize_content_filename(filename: str) -> str:
@@ -191,11 +191,6 @@ class FileDownload:
     def is_incomplete(self) -> bool:
         return bool(self.size is not None and self.bytes_received < self.size)
 
-    def write_chunk(self, data: bytes) -> None:
-        self.bytes_received += len(data)
-
-        self.output_file.write(data)
-
     def reset_file(self) -> None:
         """Delete any saved data and reset progress to zero."""
 
@@ -255,16 +250,21 @@ class Downloader:
     def process_response(self, download: FileDownload, resp: HttpResponse) -> None:
         """Download and save chunks from a response."""
 
-        chunks = log_download(
+        log_download(
             resp,
             download.link,
             download.size,
             range_start=download.bytes_received,
         )
 
+        start = download.output_file.tell()
+
         try:
-            for chunk in chunks:
-                download.write_chunk(chunk)
+            shutil.copyfileobj(
+                resp,
+                download.output_file,
+                DOWNLOAD_CHUNK_SIZE,
+            )
 
         except OSError as e:
             if download.size is None:
@@ -278,9 +278,12 @@ class Downloader:
 
             logger.warning("Connection interrupted while downloading.")
 
+        finally:
+            download.bytes_received += download.output_file.tell() - start
+
     @staticmethod
     def _request_error_types() -> tuple[type[BaseException], ...]:
-        return (requests.exceptions.RequestException,)
+        return (HTTPError,)
 
     def attempt_resumes_or_redownloads(
         self,
@@ -307,7 +310,7 @@ class Downloader:
             try:
                 resume_resp = self.http_get_resume(download, should_match=first_resp)
 
-                must_restart = resume_resp.status_code != HTTPStatus.PARTIAL_CONTENT
+                must_restart = resume_resp.status != HTTPStatus.PARTIAL_CONTENT
 
                 if must_restart:
                     download.reset_file()
@@ -380,9 +383,7 @@ class Downloader:
     ) -> HttpResponse:
         """Issue a HTTP range request to resume the download."""
 
-        headers = HEADERS.copy()
-
-        headers["Range"] = f"bytes={download.bytes_received}-"
+        headers = {"Range": f"bytes={download.bytes_received}-"}
 
         if identifier := get_http_response_etag_or_last_modified(should_match):
             headers["If-Range"] = identifier
@@ -392,7 +393,7 @@ class Downloader:
     def http_get(
         self,
         link: Link,
-        headers: Mapping[str, str] = HEADERS,
+        headers: Mapping[str, str] | None = None,
     ) -> HttpResponse:
         target_url = link.url_without_fragment
 
@@ -401,12 +402,12 @@ class Downloader:
 
             raise_for_status(resp)
 
-        except NetworkConnectionError as e:
+        except HttpStatusError as e:
             assert e.response is not None
 
             logger.critical(
                 "HTTP error %s while getting %s",
-                e.response.status_code,
+                e.response.status,
                 link,
             )
 
