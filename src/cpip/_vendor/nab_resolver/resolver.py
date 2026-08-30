@@ -22,9 +22,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Generic, Protocol
+from typing import TYPE_CHECKING, Any, Final, Generic, Protocol
 
 from . import conflict, decide, incompat_index, propagate
+from ._compat import override
 from .decision_queue import DecisionQueue
 from .errors import ResolutionError
 from .partial_solution import PartialSolution
@@ -74,7 +75,12 @@ class Solution(Generic[PackageType, VersionType]):
     breadth-first order from ``roots``.  Both endpoints of each edge are
     keys of ``pins``.  ``roots`` are the packages the caller required
     directly, in requirement order.
+
+    Immutable.  No ``__slots__``: pickle and ``copy`` restore a slotted
+    instance by assignment, which :meth:`__setattr__` refuses.
     """
+
+    __match_args__ = ("pins", "edges", "roots")
 
     pins: dict[PackageType, VersionType]
     edges: tuple[tuple[PackageType, PackageType], ...]
@@ -86,32 +92,49 @@ class Solution(Generic[PackageType, VersionType]):
         edges: tuple[tuple[PackageType, PackageType], ...],
         roots: tuple[PackageType, ...],
     ) -> None:
+        """Record the pins, edges and roots of a finished resolution."""
         object.__setattr__(self, "pins", pins)
         object.__setattr__(self, "edges", edges)
         object.__setattr__(self, "roots", roots)
-        object.__setattr__(self, "_frozen", True)
 
+    @override
     def __setattr__(self, name: str, value: object) -> None:
-        if getattr(self, "_frozen", False):
-            raise AttributeError(f"cannot assign to field {name!r}")
-        object.__setattr__(self, name, value)
+        """Refuse the write."""
+        message = f"cannot assign to field {name!r}"
+        raise AttributeError(message)
 
+    @override
     def __delattr__(self, name: str) -> None:
-        raise AttributeError(f"cannot delete field {name!r}")
+        """Refuse the deletion."""
+        message = f"cannot delete field {name!r}"
+        raise AttributeError(message)
 
+    @override
     def __eq__(self, other: object) -> bool:
-        return type(other) is Solution and (
-            self.pins,
-            self.edges,
-            self.roots,
-        ) == (other.pins, other.edges, other.roots)
+        """Compare pins, edges and roots."""
+        if not isinstance(other, Solution):
+            return NotImplemented
+        return (self.pins, self.edges, self.roots) == (
+            other.pins,
+            other.edges,
+            other.roots,
+        )
 
-    __hash__ = None  # type: ignore[assignment]
+    @override
+    def __hash__(self) -> int:
+        """Hash pins, edges and roots together.
 
+        Immutable and comparable, so it declares a hash; the ``pins`` dict
+        makes the call itself raise :exc:`TypeError`.
+        """
+        return hash((self.pins, self.edges, self.roots))
+
+    @override
     def __repr__(self) -> str:
+        """Return a debug representation."""
         return (
-            f"Solution(pins={self.pins!r}, edges={self.edges!r}, "
-            f"roots={self.roots!r})"
+            f"{type(self).__qualname__}(pins={self.pins!r}, "
+            f"edges={self.edges!r}, roots={self.roots!r})"
         )
 
 
@@ -156,14 +179,30 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
         """
         ...
 
-    def begin_decision_scan(self) -> None:
-        """Announce the start of one decision scan.
+    def begin_decision_scan(self) -> Callable[[PackageType], bool] | None:
+        """Announce the start of one decision scan, and offer an arrival probe.
 
-        ``choose_package_to_decide`` builds every undecided package's sort key
-        from ``prioritize`` and ``is_ready``, so both must answer from state
-        that does not move until the next call.  Providers whose answers depend
-        on another thread freeze that state here; for providers with no such
-        state this is a no-op.
+        The scan reads sort keys from ``prioritize`` and ``is_ready``, so both
+        must answer from state that does not move until the next call.
+        Providers whose answers depend on another thread freeze that state
+        here; for providers with no such state this is a no-op.
+
+        Keys are cached across scans.  A package's key is read again when its
+        allowed range moves, when the counts passed to ``prioritize`` move, and
+        on every scan while ``is_ready`` returns False.  A priority that moves
+        for a reason only the provider can see fits none of those and may go
+        unread, so a provider whose priority is still settling returns False
+        from ``is_ready`` until it has.
+
+        A returned probe replaces that every-scan re-read, and is a promise:
+        while it answers False for a package, and that package's range and the
+        counts you were last passed are unchanged, ``prioritize`` and
+        ``is_ready`` must answer what they last answered.  Neither is called
+        for the package meanwhile, over any number of consecutive scans, so a
+        provider that starts its fetch inside ``prioritize`` would wait on a
+        fetch it never begins.  Answering True is always safe.  Return ``None``
+        to decline the probe and keep the every-scan re-read; a provider
+        wrapping another returns the inner probe.
         """
         ...
 
@@ -188,14 +227,12 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
 
         Lets the resolver prefer ready packages while async fetches are still
         in flight.  Providers without an async layer should return True.
-        """
-        ...
 
-    def consume_priority_invalidations(self) -> Sequence[PackageType] | None:
-        """Return provider-owned priority changes since the previous scan.
-
-        Return ``None`` when changes cannot be tracked, which safely rebuilds
-        every undecided key.
+        Returning False also holds the package on the scan's re-read list, so a
+        provider whose ``prioritize`` key is still moving keeps returning False
+        until it settles.  A provider that returns a probe from
+        ``begin_decision_scan`` gives that re-read up: while the probe answers
+        False the key is not read at all.
         """
         ...
 
@@ -294,24 +331,26 @@ class BaseProvider(Generic[PackageType, VersionType]):
     ``from nab_resolver.resolver import BaseProvider``.
     """
 
-    def begin_decision_scan(self) -> None:
-        """Freeze nothing: no state moves between scans."""
+    def begin_decision_scan(self) -> Callable[[PackageType], bool] | None:
+        """Freeze nothing and offer no probe: no state moves between scans."""
+        return None
 
     def is_ready(self, package: PackageType) -> bool:
         """Report every package ready, since answers do not wait on a fetch."""
         del package
         return True
 
-    def consume_priority_invalidations(self) -> Sequence[PackageType]:
-        """Report stable provider-owned priority state."""
-        return ()
-
     def receive_partial_solution_hint(
         self,
         positive_ranges: Mapping[PackageType, RangeProtocol[VersionType]],
         decisions: Mapping[PackageType, VersionType],
     ) -> None:
-        """Drop the snapshot: nothing here forward-checks against it."""
+        """Drop the snapshot: nothing here forward-checks against it.
+
+        A provider that inherits this is not called, and the resolver does
+        not build the two snapshots it would be handed.  Writing an
+        equivalent no-op of your own pays for both.
+        """
         del positive_ranges, decisions
 
     def consume_pending_clauses(
@@ -336,6 +375,41 @@ class BaseProvider(Generic[PackageType, VersionType]):
         return constraint
 
 
+_BASE_PARTIAL_SOLUTION_HINT = BaseProvider.receive_partial_solution_hint
+
+
+def _provider_with_inherited_hint(
+    provider: ResolverProvider[PackageType, VersionType],
+) -> ResolverProvider[PackageType, VersionType] | None:
+    """Return ``provider`` when its hint is :class:`BaseProvider`'s no-op.
+
+    Any other shape gives None, so anything that might read the hint keeps
+    being called: an override on the class, an override on the instance, and
+    a structural implementer.  A provider with no such method gives None as
+    well, and so fails where the resolver calls it rather than here.
+    """
+    hint = getattr(provider, "receive_partial_solution_hint", None)
+    if getattr(hint, "__func__", None) is _BASE_PARTIAL_SOLUTION_HINT:
+        return provider
+    return None
+
+
+# Every counter in declaration order.  ``__slots__`` holds the same names
+# sorted, so equality, the repr and ``__match_args__`` read this one instead.
+_STAT_FIELDS: Final = (
+    "rounds",
+    "decisions",
+    "conflicts",
+    "derivations",
+    "backjumps",
+    "restarts",
+    "targeted_backtracks",
+    "incompatibilities_learned",
+    "package_conflict_counts",
+    "package_culprit_counts",
+)
+
+
 class ResolverStats(Generic[PackageType]):
     """Running statistics for resolution observability.
 
@@ -344,7 +418,33 @@ class ResolverStats(Generic[PackageType]):
     See: https://minisat.se/MiniSat.html
     """
 
-    def __init__(
+    __slots__ = (
+        "backjumps",
+        "conflicts",
+        "decisions",
+        "derivations",
+        "incompatibilities_learned",
+        "package_conflict_counts",
+        "package_culprit_counts",
+        "restarts",
+        "rounds",
+        "targeted_backtracks",
+    )
+
+    __match_args__ = _STAT_FIELDS
+
+    rounds: int
+    decisions: int
+    conflicts: int
+    derivations: int
+    backjumps: int
+    restarts: int
+    targeted_backtracks: int
+    incompatibilities_learned: int
+    package_conflict_counts: defaultdict[PackageType, int]
+    package_culprit_counts: defaultdict[PackageType, int]
+
+    def __init__(  # noqa: PLR0913, PLR0917 - one parameter per counter
         self,
         rounds: int = 0,
         decisions: int = 0,
@@ -357,6 +457,7 @@ class ResolverStats(Generic[PackageType]):
         package_conflict_counts: defaultdict[PackageType, int] | None = None,
         package_culprit_counts: defaultdict[PackageType, int] | None = None,
     ) -> None:
+        """Start every counter at the value given, zero and empty by default."""
         self.rounds = rounds
         self.decisions = decisions
         self.conflicts = conflicts
@@ -365,16 +466,30 @@ class ResolverStats(Generic[PackageType]):
         self.restarts = restarts
         self.targeted_backtracks = targeted_backtracks
         self.incompatibilities_learned = incompatibilities_learned
-        self.package_conflict_counts = (
-            defaultdict(int)
-            if package_conflict_counts is None
-            else package_conflict_counts
+
+        if package_conflict_counts is None:
+            package_conflict_counts = defaultdict(int)
+        if package_culprit_counts is None:
+            package_culprit_counts = defaultdict(int)
+        self.package_conflict_counts = package_conflict_counts
+        self.package_culprit_counts = package_culprit_counts
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        """Compare every counter."""
+        if not isinstance(other, ResolverStats):
+            return NotImplemented
+        return tuple(getattr(self, name) for name in _STAT_FIELDS) == tuple(
+            getattr(other, name) for name in _STAT_FIELDS
         )
-        self.package_culprit_counts = (
-            defaultdict(int)
-            if package_culprit_counts is None
-            else package_culprit_counts
-        )
+
+    __hash__ = None  # type: ignore[assignment]
+
+    @override
+    def __repr__(self) -> str:
+        """Return a debug representation."""
+        counters = ", ".join(f"{name}={getattr(self, name)!r}" for name in _STAT_FIELDS)
+        return f"{type(self).__qualname__}({counters})"
 
 
 class ResolverObserver(Generic[PackageType, VersionType]):
@@ -504,6 +619,12 @@ class Resolver(Generic[PackageType, VersionType]):
         is a debug representation needs its own.
         """
         self.provider = provider
+
+        # Recording the provider rather than a flag keeps the answer tied to
+        # the object it was asked about, so a provider swapped into
+        # ``self.provider`` mid-resolve is not this one and is sent the hint.
+        self._hint_ignoring_provider = _provider_with_inherited_hint(provider)
+
         self.observer: ResolverObserver[PackageType, VersionType] = (
             observer or ResolverObserver()
         )
@@ -518,20 +639,17 @@ class Resolver(Generic[PackageType, VersionType]):
         self.fold_identity: RangeProtocol[Any] = range_type.full()
         self.term_top: RangeProtocol[Any] = ~range_type.empty()
 
+        # as_term_range's answer per supplied range object, keyed by id() with
+        # term_range_keepalive holding the keys alive. Uncapped, unlike
+        # propagate's token memo: the keys are clause and decision ranges rather
+        # than every propagation probe.
+        self.term_range_by_id: dict[int, RangeProtocol[Any]] = {}
+        self.term_range_keepalive: list[RangeProtocol[Any]] = []
+
         self.incompatibilities: list[Incompatibility[Any, Any]] = []
         self.package_to_incompatibilities: defaultdict[Any, list[int]] = defaultdict(
             list
         )
-        self.dependency_parent_incompatibilities: defaultdict[Any, list[int]] = (
-            defaultdict(list)
-        )
-        self.dependency_parent_fallbacks: defaultdict[Any, list[int]] = defaultdict(
-            list
-        )
-        self.dependency_parent_fallback_indices: set[int] = set()
-        self.dependency_parent_versions: defaultdict[
-            Any, defaultdict[Any, list[int]]
-        ] = defaultdict(lambda: defaultdict(list))
 
         # Per clause, the contradiction epoch in which one of its terms was
         # last seen contradicted; unit propagation skips a clause whose stamp
@@ -565,11 +683,12 @@ class Resolver(Generic[PackageType, VersionType]):
         self.relation_cache: dict[tuple[bool, int, int], SetRelation] = {}
 
         # relation_cache_on goes off while the memo's hit rate does not pay for
-        # the key it builds. relation_gate_countdown is the probes left in the
-        # window that rate is judged over, and relation_gate_hits its hits.
+        # the key it builds. A window of probes decides that: relation_gate_hits
+        # counts its hits, relation_gate_probes_left is the window less its
+        # misses, and a miss judges the window once the hits cover what is left.
         self.relation_cache_on = True
-        self.relation_gate_countdown = propagate.RELATION_GATE_WINDOW
         self.relation_gate_hits = 0
+        self.relation_gate_probes_left = propagate.RELATION_GATE_WINDOW
 
         # One token per distinct range, so a relation-cache probe compares ints
         # rather than bound structures. The counter never rewinds, so clearing
@@ -591,8 +710,16 @@ class Resolver(Generic[PackageType, VersionType]):
         the identity :class:`~nab_resolver.types.RangeProtocol` documents
         without equalling ``full()``, such as ``full()`` minus an ``===``
         literal, passes through and reaches conflict resolution's step budget.
+
+        Memoised per supplied range object.
         """
-        return self.term_top if range_ == self.fold_identity else range_
+        key = id(range_)
+        result = self.term_range_by_id.get(key)
+        if result is None:
+            result = self.term_top if range_ == self.fold_identity else range_
+            self.term_range_by_id[key] = result
+            self.term_range_keepalive.append(range_)
+        return result
 
     def resolve(
         self,
@@ -713,54 +840,50 @@ class Resolver(Generic[PackageType, VersionType]):
             decide.record_no_versions(self, next_package, had_pending=had_pending)
             return next_package
 
-        exact_range = self.solution.decide(next_package, chosen_version)
+        self.solution.decide(next_package, chosen_version)
         self.stats.decisions += 1
         self.observer.on_decision(
             next_package, chosen_version, self.solution.decision_level
         )
 
         dependencies = self.provider.get_dependencies(next_package, chosen_version)
-        widened = (
-            self.provider.widen_decision(next_package, chosen_version)
-            if dependencies
-            else None
-        )
+        if not dependencies:
+            invalidated = self._backtrack_dependency_invalidations()
+            return next_package if invalidated is None else invalidated
+        exact_range = self.range_type.singleton(chosen_version)
+        widened = self.provider.widen_decision(next_package, chosen_version)
         parent_range = exact_range if widened is None else self.as_term_range(widened)
-        exact_parent_version = (
-            chosen_version
-            if widened is None
-            else incompat_index.NO_EXACT_PARENT_VERSION
-        )
         for dependency_package, supplied_range in dependencies.items():
             dependency_range = self.as_term_range(supplied_range)
-            if dependency_package != next_package:
-                incompatibility = incompat_index.add_dependency_incompatibility(
-                    self,
-                    next_package,
-                    parent_range,
-                    dependency_package,
-                    dependency_range,
-                    exact_parent_version=exact_parent_version,
-                )
+            cross_package = dependency_package != next_package
+            if not cross_package:
+                # An incompatibility holds at most one term per package,
+                # so self-dependency terms merge to {v} & ~range: empty
+                # (a vacuous clause) when the range contains the chosen
+                # version, else exactly {v}.  The exact singleton is kept:
+                # widening a single-term clause only degrades error text.
+                if chosen_version in dependency_range:
+                    continue
+                terms = [Term(next_package, exact_range, positive=True)]
+            else:
+                terms = [
+                    Term(next_package, parent_range, positive=True),
+                    Term(dependency_package, dependency_range, positive=False),
+                ]
+
+            # The merged term drops the required range, so the clause carries
+            # it for the report.
+            incompatibility = Incompatibility(
+                terms,
+                cause=IncompatibilityCause.DEPENDENCY,
+                dependency_range=None if cross_package else dependency_range,
+            )
+            incompat_index.add_incompatibility(self, incompatibility)
+
+            if cross_package:
                 decide.absorb_redundant_requirement(
                     self, dependency_package, dependency_range, incompatibility
                 )
-                continue
-
-            # An incompatibility holds at most one term per package, so
-            # self-dependency terms merge to {v} & ~range: empty (a vacuous
-            # clause) when the range contains the chosen version, else exactly
-            # {v}.  The exact singleton is kept: widening a single-term clause
-            # only degrades error text.  The merged term drops the required
-            # range, so the clause carries it for the report.
-            if chosen_version in dependency_range:
-                continue
-            incompatibility = Incompatibility(
-                [Term(next_package, exact_range, positive=True)],
-                cause=IncompatibilityCause.DEPENDENCY,
-                dependency_range=dependency_range,
-            )
-            incompat_index.add_incompatibility(self, incompatibility)
         invalidated = self._backtrack_dependency_invalidations()
         if invalidated is not None:
             return invalidated
@@ -824,10 +947,6 @@ class Resolver(Generic[PackageType, VersionType]):
         """Reset solver state for a new resolution."""
         self.incompatibilities.clear()
         self.package_to_incompatibilities.clear()
-        self.dependency_parent_incompatibilities.clear()
-        self.dependency_parent_fallbacks.clear()
-        self.dependency_parent_fallback_indices.clear()
-        self.dependency_parent_versions.clear()
         self.clause_contradicted_at.clear()
         self.dependency_index.clear()
         self.solution = PartialSolution(range_type=self.range_type)
@@ -841,11 +960,16 @@ class Resolver(Generic[PackageType, VersionType]):
         self.priority_epoch = 0
         self.relation_cache.clear()
         self.relation_cache_on = True
-        self.relation_gate_countdown = propagate.RELATION_GATE_WINDOW
         self.relation_gate_hits = 0
+        self.relation_gate_probes_left = propagate.RELATION_GATE_WINDOW
         self.range_tokens.clear()
         self.range_token_by_id.clear()
         self.interned_ranges.clear()
+        self.term_range_by_id.clear()
+        self.term_range_keepalive.clear()
+
+        # Re-asked here, so a hook installed since the last resolve is honoured.
+        self._hint_ignoring_provider = _provider_with_inherited_hint(self.provider)
 
     def _add_root_requirements(
         self, requirements: Sequence[RootRequirement[PackageType, VersionType]]

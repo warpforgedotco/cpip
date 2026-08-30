@@ -1,6 +1,6 @@
 urllib3==2.6.3
 certifi==2026.7.22
 idna==3.18
-nab-resolver @ git+https://github.com/notatallshaw/nab.git@9d07d894d5675aa71705c46272ae8322dcab61a8#subdirectory=nab-resolver
+nab-resolver==0.0.15
 typing_extensions==4.16.0
 tomli==2.4.1

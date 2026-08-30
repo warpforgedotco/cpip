@@ -27,8 +27,6 @@ _EMPTY_REL = RangeRelation.EMPTY
 _SUBSET_REL = RangeRelation.SUBSET
 _DISJOINT_REL = RangeRelation.DISJOINT
 _OVERLAPPING_REL = RangeRelation.OVERLAPPING
-_POINTS_UNSET = object()
-_POINT_SET_MIN_INTERVALS = 16
 
 __all__ = [
     "NEGATIVE_INFINITY",
@@ -116,25 +114,11 @@ Bound: TypeAlias = Any  # V | _NegativeInfinity | _PositiveInfinity
 Interval: TypeAlias = tuple[Bound, bool, Bound, bool]
 
 
-def _same_bound(left: Bound, right: Bound) -> bool:
-    """Compare bounds without asking a version to compare with infinity."""
-    if left is right:
-        return True
-    if (
-        left is NEGATIVE_INFINITY
-        or left is POSITIVE_INFINITY
-        or right is NEGATIVE_INFINITY
-        or right is POSITIVE_INFINITY
-    ):
-        return False
-    return bool(left == right)
-
-
 def _max_lower_bound(left: Interval, right: Interval) -> tuple[Bound, bool]:
     """Return the higher of two lower bounds (for intersection)."""
     left_lower, left_lower_inc = left[0], left[1]
     right_lower, right_lower_inc = right[0], right[1]
-    if _same_bound(left_lower, right_lower):
+    if left_lower == right_lower:
         return left_lower, left_lower_inc and right_lower_inc
     if left_lower is NEGATIVE_INFINITY or (
         right_lower is not NEGATIVE_INFINITY and left_lower < right_lower
@@ -147,7 +131,7 @@ def _min_upper_bound(left: Interval, right: Interval) -> tuple[Bound, bool]:
     """Return the lower of two upper bounds (for intersection)."""
     left_upper, left_upper_inc = left[2], left[3]
     right_upper, right_upper_inc = right[2], right[3]
-    if _same_bound(left_upper, right_upper):
+    if left_upper == right_upper:
         return left_upper, left_upper_inc and right_upper_inc
     if left_upper is POSITIVE_INFINITY or (
         right_upper is not POSITIVE_INFINITY and left_upper > right_upper
@@ -208,7 +192,7 @@ class Range(Generic[VersionType]):
     See :meth:`__init__` for the invariant the interval list must satisfy.
     """
 
-    __slots__ = ("_hash", "_intervals", "_points")
+    __slots__ = ("_hash", "_intervals")
 
     def __init__(self, intervals: tuple[Interval, ...] = ()) -> None:
         """Create a range from intervals that already satisfy the invariant.
@@ -227,38 +211,6 @@ class Range(Generic[VersionType]):
         """
         self._intervals = intervals
         self._hash = 0
-        self._points: frozenset[VersionType] | None | object = _POINTS_UNSET
-
-    def _as_points(self) -> frozenset[VersionType] | None:
-        """Return members for a discrete singleton range, otherwise ``None``."""
-        cached = self._points
-        if cached is None or isinstance(cached, frozenset):
-            return cached
-
-        values: list[VersionType] = []
-        for lower, lower_inclusive, upper, upper_inclusive in self._intervals:
-            if (
-                lower is NEGATIVE_INFINITY
-                or upper is POSITIVE_INFINITY
-                or not lower_inclusive
-                or not upper_inclusive
-                or not _same_bound(lower, upper)
-            ):
-                self._points = None
-                return None
-            values.append(lower)
-
-        points = frozenset(values)
-        self._points = points
-        return points
-
-    @classmethod
-    def _from_points(cls, points: frozenset[VersionType]) -> Range[VersionType]:
-        result = cls(
-            tuple((version, True, version, True) for version in sorted(points))
-        )
-        result._points = points
-        return result
 
     @classmethod
     def empty(cls) -> Range[VersionType]:
@@ -294,13 +246,8 @@ class Range(Generic[VersionType]):
         Cheaper than folding :meth:`singleton` with ``|``.
         """
         # sorted() needs an ordering bound, which VersionType does not declare.
-        points = frozenset(cast("Iterable[Any]", versions))
-        result = cls(
-            tuple((version, True, version, True) for version in sorted(points))
-        )
-        if len(points) >= _POINT_SET_MIN_INTERVALS:
-            result._points = points
-        return result
+        distinct = sorted(set(cast("Iterable[Any]", versions)))
+        return cls(tuple((version, True, version, True) for version in distinct))
 
     @classmethod
     def at_least(cls, version: VersionType) -> Range[VersionType]:
@@ -323,23 +270,13 @@ class Range(Generic[VersionType]):
         return cls(((NEGATIVE_INFINITY, False, version, False),))
 
     @classmethod
-    def between(
-        cls,
-        lower: VersionType,
-        upper: VersionType,
-        *,
-        lower_inclusive: bool = True,
-        upper_inclusive: bool = False,
-    ) -> Range[VersionType]:
-        """Create one bounded interval, or empty when its bounds exclude all."""
+    def between(cls, lower: VersionType, upper: VersionType) -> Range[VersionType]:
+        """Create ``[lower, upper)``, or the empty range if ``lower >= upper``."""
         if _interval_is_empty(
-            lower,
-            lower_inclusive=lower_inclusive,
-            upper=upper,
-            upper_inclusive=upper_inclusive,
+            lower, lower_inclusive=True, upper=upper, upper_inclusive=False
         ):
             return cls(())
-        return cls(((lower, lower_inclusive, upper, upper_inclusive),))
+        return cls(((lower, True, upper, False),))
 
     @property
     def is_empty(self) -> bool:
@@ -347,56 +284,23 @@ class Range(Generic[VersionType]):
         return len(self._intervals) == 0
 
     def __contains__(self, version: object) -> bool:
-        """Test membership by point lookup or binary-searching intervals."""
-        intervals = self._intervals
-        interval_count = len(intervals)
-        if interval_count == 0:
-            return False
-        if interval_count >= _POINT_SET_MIN_INTERVALS:
-            points = self._as_points()
-            if points is not None:
-                return version in points
-
-        if interval_count == 1:
-            lower, lower_inclusive, upper, upper_inclusive = intervals[0]
-            if lower is not NEGATIVE_INFINITY:
-                if version < lower:
-                    return False
-                if _same_bound(version, lower) and not lower_inclusive:
-                    return False
-        else:
-            low = 0
-            high = interval_count
-            while low < high:
-                middle = (low + high) // 2
-                lower = intervals[middle][0]
-                if lower is NEGATIVE_INFINITY or not version < lower:
-                    low = middle + 1
-                else:
-                    high = middle
-            if low == 0:
-                return False
-            lower, lower_inclusive, upper, upper_inclusive = intervals[low - 1]
-            if lower is not NEGATIVE_INFINITY and _same_bound(version, lower):
-                return lower_inclusive
-        if upper is POSITIVE_INFINITY:
+        """Test whether version falls within this range."""
+        for lower, lower_inclusive, upper, upper_inclusive in self._intervals:
+            if lower is not NEGATIVE_INFINITY and (
+                version < lower or (version == lower and not lower_inclusive)
+            ):
+                continue
+            if upper is not POSITIVE_INFINITY and (
+                version > upper or (version == upper and not upper_inclusive)
+            ):
+                continue
             return True
-        return not (
-            version > upper or (_same_bound(version, upper) and not upper_inclusive)
-        )
+        return False
 
     def __and__(self, other: object) -> Range[VersionType]:
         """Compute the intersection of two ranges (versions in both)."""
         if not isinstance(other, Range):
             return NotImplemented
-        if (
-            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
-        ):
-            left_points = self._as_points()
-            right_points = other._as_points()
-            if left_points is not None and right_points is not None:
-                return self._from_points(left_points & right_points)
         result: list[Interval] = []
         left_index = right_index = 0
         while left_index < len(self._intervals) and right_index < len(other._intervals):
@@ -410,11 +314,17 @@ class Range(Generic[VersionType]):
                 left_interval, right_interval
             )
 
-            if not _interval_is_empty(
-                inter_lower,
-                lower_inclusive=inter_lower_inc,
-                upper=inter_upper,
-                upper_inclusive=inter_upper_inc,
+            # _interval_is_empty, written out.
+            if not (
+                inter_lower is not NEGATIVE_INFINITY
+                and inter_upper is not POSITIVE_INFINITY
+                and (
+                    inter_lower > inter_upper
+                    or (
+                        inter_lower == inter_upper
+                        and not (inter_lower_inc and inter_upper_inc)
+                    )
+                )
             ):
                 result.append(
                     (inter_lower, inter_lower_inc, inter_upper, inter_upper_inc)
@@ -423,7 +333,7 @@ class Range(Generic[VersionType]):
             # Advance the side with the smaller upper bound
             left_upper = left_interval[2]
             right_upper = right_interval[2]
-            if _same_bound(left_upper, right_upper):
+            if left_upper == right_upper:
                 left_index += 1
                 right_index += 1
             elif left_upper is POSITIVE_INFINITY or (
@@ -439,14 +349,6 @@ class Range(Generic[VersionType]):
         """Union of two ranges (versions in either)."""
         if not isinstance(other, Range):
             return NotImplemented
-        if (
-            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
-        ):
-            left_points = self._as_points()
-            right_points = other._as_points()
-            if left_points is not None and right_points is not None:
-                return self._from_points(left_points | right_points)
         all_intervals = list(self._intervals) + list(other._intervals)
         return Range(_normalize_intervals(all_intervals))
 
@@ -509,60 +411,48 @@ class Range(Generic[VersionType]):
         if not isinstance(other, Range):
             return NotImplemented
 
-        left_intervals = self._intervals
         right_intervals = other._intervals
-        if (
-            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
-        ):
-            left_points = self._as_points()
-            right_points = other._as_points()
-            if left_points is not None and right_points is not None:
-                return self._from_points(left_points - right_points)
-
         right_count = len(right_intervals)
         result: list[Interval] = []
         right_index = 0
 
-        # These comparisons stay inline: subtraction runs on every probe of
-        # the conflict trail, where helper-call overhead is measurable.
-        for left in left_intervals:
+        for left in self._intervals:
             lower, lower_inclusive, upper, upper_inclusive = left
 
             # A right interval below this one is below every later one too.
-            while right_index < right_count:
-                right = right_intervals[right_index]
-                right_upper = right[2]
-                if right_upper is POSITIVE_INFINITY or lower is NEGATIVE_INFINITY:
-                    break
-                if right_upper == lower:
-                    if right[3] and lower_inclusive:
-                        break
-                elif not right_upper < lower:
-                    break
+            # Written out it would need an ``if`` to break on, which puts
+            # ``__sub__`` past ruff's C901 ceiling, so this one stays a call.
+            while right_index < right_count and _ends_before(
+                right_intervals[right_index], left
+            ):
                 right_index += 1
 
-            exhausted = False
+            fully_covered = False
             scan = right_index
 
             while scan < right_count:
-                right = right_intervals[scan]
+                right_lower, right_lower_inc, right_upper, right_upper_inc = (
+                    right_intervals[scan]
+                )
 
-                right_lower, right_lower_inc, right_upper, right_upper_inc = right
-
+                # _ends_before, written out.  Carving only moves the
+                # remainder's lower end, so ``upper`` is still left's own.
                 if (
                     upper is not POSITIVE_INFINITY
                     and right_lower is not NEGATIVE_INFINITY
+                    and (
+                        not (upper_inclusive and right_lower_inc)
+                        if upper == right_lower
+                        else upper < right_lower
+                    )
                 ):
-                    if upper == right_lower:
-                        if not (upper_inclusive and right_lower_inc):
-                            break
-                    elif upper < right_lower:
-                        break
+                    break
 
-                # Whatever of the remainder sits below this right interval survives.
+                # Whatever of the remainder sits below this right interval
+                # survives.  _interval_is_empty, written out.
                 if right_lower is not NEGATIVE_INFINITY and not (
                     lower is not NEGATIVE_INFINITY
+                    and right_lower is not POSITIVE_INFINITY
                     and (
                         lower > right_lower
                         or (
@@ -576,21 +466,29 @@ class Range(Generic[VersionType]):
                     )
 
                 if right_upper is POSITIVE_INFINITY:
-                    exhausted = True
+                    fully_covered = True
                     break
 
-                # Resume above this right interval.
+                # Resume above this right interval, stopping when nothing of
+                # it is left.  _interval_is_empty, written out.
                 lower, lower_inclusive = right_upper, not right_upper_inc
-                if upper is not POSITIVE_INFINITY and (
-                    lower > upper
-                    or (lower == upper and not (lower_inclusive and upper_inclusive))
+                if (
+                    lower is not NEGATIVE_INFINITY
+                    and upper is not POSITIVE_INFINITY
+                    and (
+                        lower > upper
+                        or (
+                            lower == upper and not (lower_inclusive and upper_inclusive)
+                        )
+                    )
                 ):
-                    exhausted = True
+                    fully_covered = True
                     break
 
                 scan += 1
 
-            if not exhausted and not (
+            # _interval_is_empty, written out.
+            if not fully_covered and not (
                 lower is not NEGATIVE_INFINITY
                 and upper is not POSITIVE_INFINITY
                 and (
@@ -610,31 +508,27 @@ class Range(Generic[VersionType]):
         ``other`` always leave a gap, so an interval of self is covered only
         when a single interval of other holds all of it.
         """
-        left_intervals = self._intervals
         right_intervals = other._intervals
-        if (
-            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
-        ):
-            left_points = self._as_points()
-            right_points = other._as_points()
-            if left_points is not None and right_points is not None:
-                return left_points <= right_points
-
         right_count = len(right_intervals)
         right_index = 0
 
-        for left in left_intervals:
+        for left in self._intervals:
             left_lower, left_lower_inclusive = left[0], left[1]
+
+            # Retire every right interval that finishes below this one:
+            # _ends_before, written out.
             while right_index < right_count:
-                right = right_intervals[right_index]
-                right_upper = right[2]
-                if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
-                    break
-                if right_upper == left_lower:
-                    if right[3] and left_lower_inclusive:
-                        break
-                elif not right_upper < left_lower:
+                candidate = right_intervals[right_index]
+                candidate_upper = candidate[2]
+                if (
+                    candidate_upper is POSITIVE_INFINITY
+                    or left_lower is NEGATIVE_INFINITY
+                    or (
+                        (candidate[3] and left_lower_inclusive)
+                        if candidate_upper == left_lower
+                        else not candidate_upper < left_lower
+                    )
+                ):
                     break
                 right_index += 1
 
@@ -645,12 +539,7 @@ class Range(Generic[VersionType]):
             lower, lower_inclusive = _max_lower_bound(left, right)
             upper, upper_inclusive = _min_upper_bound(left, right)
 
-            if (
-                lower_inclusive is not left[1]
-                or upper_inclusive is not left[3]
-                or not _same_bound(lower, left[0])
-                or not _same_bound(upper, left[2])
-            ):
+            if (lower, lower_inclusive, upper, upper_inclusive) != left:
                 return False
 
         return True
@@ -665,15 +554,6 @@ class Range(Generic[VersionType]):
         Stops at the first shared version rather than building the whole
         intersection.
         """
-        if (
-            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
-        ):
-            left_points = self._as_points()
-            right_points = other._as_points()
-            if left_points is not None and right_points is not None:
-                return left_points.isdisjoint(right_points)
-
         left_intervals = self._intervals
         right_intervals = other._intervals
         left_count = len(left_intervals)
@@ -687,11 +567,14 @@ class Range(Generic[VersionType]):
             lower, lower_inclusive = _max_lower_bound(left, right)
             upper, upper_inclusive = _min_upper_bound(left, right)
 
-            if not _interval_is_empty(
-                lower,
-                lower_inclusive=lower_inclusive,
-                upper=upper,
-                upper_inclusive=upper_inclusive,
+            # _interval_is_empty, written out.
+            if not (
+                lower is not NEGATIVE_INFINITY
+                and upper is not POSITIVE_INFINITY
+                and (
+                    lower > upper
+                    or (lower == upper and not (lower_inclusive and upper_inclusive))
+                )
             ):
                 return False
 
@@ -703,71 +586,84 @@ class Range(Generic[VersionType]):
         return True
 
     def relation(self, other: Range[VersionType]) -> RangeRelation:
-        """Return how self's members sit against other's in one interval walk."""
+        """Return how self's members sit against other's.
+
+        The empty range is both a subset and disjoint, so it is answered
+        before the walk rather than by it.
+
+        One walk answers subset and disjoint together, on the same invariant
+        :meth:`is_subset` relies on.  Each interval of self is decided by the
+        first interval of other that does not end below it: everything the
+        walk skipped ended below, and the invariant leaves a gap after the one
+        it stopped on, so nothing else can cover what that one leaves out.
+        """
         if self.is_empty:
             return _EMPTY_REL
 
-        left_intervals = self._intervals
         right_intervals = other._intervals
-        if (
-            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
-            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
-        ):
-            left_points = self._as_points()
-            right_points = other._as_points()
-            if left_points is not None and right_points is not None:
-                if left_points <= right_points:
-                    return _SUBSET_REL
-                if left_points.isdisjoint(right_points):
-                    return _DISJOINT_REL
-                return _OVERLAPPING_REL
-
         right_count = len(right_intervals)
-        is_subset = True
-        is_disjoint = True
         right_index = 0
 
-        for left in left_intervals:
+        # subset is cleared by an interval of self that other leaves
+        # uncovered, disjoint by one that meets other.
+        subset = True
+        disjoint = True
+
+        for left in self._intervals:
             left_lower, left_lower_inclusive = left[0], left[1]
+
+            # Retire every right interval that finishes below this one:
+            # _ends_before, written out.
             while right_index < right_count:
-                right = right_intervals[right_index]
-                right_upper = right[2]
-                if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
-                    break
-                if right_upper == left_lower:
-                    if right[3] and left_lower_inclusive:
-                        break
-                elif not right_upper < left_lower:
+                candidate = right_intervals[right_index]
+                candidate_upper = candidate[2]
+                if (
+                    candidate_upper is POSITIVE_INFINITY
+                    or left_lower is NEGATIVE_INFINITY
+                    or (
+                        (candidate[3] and left_lower_inclusive)
+                        if candidate_upper == left_lower
+                        else not candidate_upper < left_lower
+                    )
+                ):
                     break
                 right_index += 1
 
             if right_index >= right_count:
-                is_subset = False
-                if not is_disjoint:
-                    return _OVERLAPPING_REL
+                # Every remaining interval of self sits above all of other, so
+                # none is covered and none meets anything.
+                subset = False
                 break
 
+            # _ends_before, written out, against the first right interval
+            # still standing.
             right = right_intervals[right_index]
-            if _ends_before(left, right):
-                is_subset = False
-                if not is_disjoint:
-                    return _OVERLAPPING_REL
+            left_upper = left[2]
+            right_lower = right[0]
+            if (
+                left_upper is not POSITIVE_INFINITY
+                and right_lower is not NEGATIVE_INFINITY
+                and (
+                    not (left[3] and right[1])
+                    if left_upper == right_lower
+                    else left_upper < right_lower
+                )
+            ):
+                # It meets nothing: the walk skipped everything below it, and
+                # right starts above it.  Leave right for the next one.
+                subset = False
                 continue
 
-            is_disjoint = False
+            disjoint = False
             lower, lower_inclusive = _max_lower_bound(left, right)
             upper, upper_inclusive = _min_upper_bound(left, right)
-            if (
-                lower_inclusive is not left[1]
-                or upper_inclusive is not left[3]
-                or not _same_bound(lower, left[0])
-                or not _same_bound(upper, left[2])
-            ):
+
+            if (lower, lower_inclusive, upper, upper_inclusive) != left:
                 return _OVERLAPPING_REL
 
-        if is_subset:
+        if subset:
             return _SUBSET_REL
-        if is_disjoint:
+        if disjoint:
             return _DISJOINT_REL
         return _OVERLAPPING_REL
 
@@ -807,7 +703,6 @@ class Range(Generic[VersionType]):
         """Restore from :meth:`__getstate__`, leaving the hash to be recomputed."""
         (self._intervals,) = state
         self._hash = 0
-        self._points = _POINTS_UNSET
 
     @override
     def __repr__(self) -> str:

@@ -16,6 +16,11 @@ from cpip._vendor.nab_resolver.types import (
     Term,
 )
 
+_REQUIRES_RESOLVER_OPTIMIZATIONS = pytest.mark.skipif(
+    not hasattr(incompat_index, "add_dependency_incompatibility"),
+    reason="requires cpip's resolver optimization patch",
+)
+
 
 class Provider:
     def receive_partial_solution_hint(self, ranges: Any, decisions: Any) -> None:
@@ -61,6 +66,7 @@ def test_replacement_value_types_reject_attribute_deletion() -> None:
         del requirement.constraint
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_range_token_memo_is_bounded() -> None:
     candidate = resolver()
 
@@ -71,6 +77,7 @@ def test_range_token_memo_is_bounded() -> None:
     assert candidate.next_range_token == propagate.RANGE_ID_MEMO_MAX + 1
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_cross_dependency_does_not_construct_discarded_terms(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -92,6 +99,7 @@ def test_cross_dependency_does_not_construct_discarded_terms(
     ]
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_decision_passes_explicit_parent_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -127,6 +135,7 @@ def test_decision_passes_explicit_parent_dispatch(
     assert widened.incompatibilities[0].terms[0].constraint == broad
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_decision_reuses_its_exact_range(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -153,6 +162,7 @@ def test_decision_reuses_its_exact_range(
     )
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_dependency_clause_is_reused_when_parent_range_is_covered() -> None:
     candidate = resolver()
     dependency_range = Range.at_least(1)
@@ -176,6 +186,7 @@ def test_dependency_clause_is_reused_when_parent_range_is_covered() -> None:
     )
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_dependency_clause_widens_in_place() -> None:
     candidate = resolver()
     dependency_range = Range.at_least(1)
@@ -194,6 +205,7 @@ def test_dependency_clause_widens_in_place() -> None:
     assert candidate.dependency_parent_fallbacks["parent"] == [0]
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_distinct_dependency_keys_get_distinct_clauses() -> None:
     candidate = resolver()
     incompat_index.add_dependency_incompatibility(
@@ -210,6 +222,7 @@ def test_distinct_dependency_keys_get_distinct_clauses() -> None:
     assert len(candidate.dependency_index) == 3
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_exact_parent_decision_dispatches_only_its_version_clauses() -> None:
     candidate = resolver()
     first = incompat_index.add_dependency_incompatibility(
@@ -245,6 +258,7 @@ def test_exact_parent_decision_dispatches_only_its_version_clauses() -> None:
     assert candidate.incompatibilities == [first, second, general]
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_reused_dependency_clause_registers_each_exact_parent_version() -> None:
     candidate = resolver()
     dependency_range = Range.singleton(1)
@@ -276,6 +290,7 @@ def test_reused_dependency_clause_registers_each_exact_parent_version() -> None:
     )
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_undecided_parent_dispatches_every_dependency_clause() -> None:
     candidate = resolver()
     cause: Incompatibility[Any, Any] = Incompatibility(
@@ -318,6 +333,7 @@ def test_undecided_parent_dispatches_every_dependency_clause() -> None:
         (((0, 4), (1, 4), (), (2, 3, 4)), (0, 1, 2, 3, 4)),
     ],
 )
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_unit_propagation_merges_clause_groups_in_sorted_unique_order(
     groups: tuple[tuple[int, ...], ...],
     expected: tuple[int, ...],
@@ -359,6 +375,7 @@ def test_unit_propagation_merges_clause_groups_in_sorted_unique_order(
     ]
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_unit_propagation_reuses_the_classified_assignment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -393,6 +410,7 @@ def test_unit_propagation_reuses_the_classified_assignment(
     assert get_calls == ["target", "gate", "target", "target"]
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_widened_merge_promotes_exact_clause_to_fallback() -> None:
     candidate = resolver()
     dependency_range = Range.at_least(1)
@@ -420,6 +438,7 @@ def test_widened_merge_promotes_exact_clause_to_fallback() -> None:
     )
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_unhashable_parent_version_uses_exhaustive_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -447,6 +466,7 @@ def test_unhashable_parent_version_uses_exhaustive_fallback(
     )
 
 
+@_REQUIRES_RESOLVER_OPTIMIZATIONS
 def test_replayed_clause_still_replays_requirement_refinement(monkeypatch: Any) -> None:
     """Interning must not skip refinements that a backtrack removed."""
     candidate = resolver()

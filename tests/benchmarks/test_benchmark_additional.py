@@ -13,6 +13,11 @@ from cpip.build.build_backend import ProjectBuilder, prepare_project_metadata
 from cpip.build.metadata import InstalledDistributionStore
 from cpip._vendor.nab_resolver.ranges import Range
 from cpip._vendor.nab_resolver.resolver import Resolver
+from cpip._vendor.nab_resolver.types import (
+    Incompatibility,
+    IncompatibilityCause,
+    Term,
+)
 from cpip.core.errors import BuildError
 from cpip.core.packaging import SpecifierSet, parse_requirement
 from cpip.core.wheel import read_metadata_message
@@ -78,17 +83,32 @@ def test_discrete_release_range_algebra(benchmark: BenchmarkFixture) -> None:
 
 
 def test_exact_dependency_clause_dispatch(benchmark: BenchmarkFixture) -> None:
-    """Dispatch one selected release without scanning its historical clauses."""
+    """Propagate one selected release across its historical clauses."""
     resolver = Resolver(cast(Any, None))
+    add_dependency = getattr(incompat_index, "add_dependency_incompatibility", None)
     for version in range(4_096):
-        incompat_index.add_dependency_incompatibility(
-            resolver,
-            "parent",
-            Range.singleton(version),
-            "dependency",
-            Range.singleton(version),
-            exact_parent_version=version,
-        )
+        parent_range = Range.singleton(version)
+        dependency_range = Range.singleton(version)
+        if add_dependency is None:
+            incompat_index.add_incompatibility(
+                resolver,
+                Incompatibility(
+                    [
+                        Term("parent", parent_range, positive=True),
+                        Term("dependency", dependency_range, positive=False),
+                    ],
+                    cause=IncompatibilityCause.DEPENDENCY,
+                ),
+            )
+        else:
+            add_dependency(
+                resolver,
+                "parent",
+                parent_range,
+                "dependency",
+                dependency_range,
+                exact_parent_version=version,
+            )
     resolver.solution.decide("parent", 4_095)
     resolver.solution.decide("dependency", 4_095)
 

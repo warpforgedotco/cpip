@@ -28,6 +28,8 @@ from cpip._vendor.nab_resolver.types import (
     Term,
 )
 
+_HAS_PARTIAL_SOLUTION_FAST_PATHS = "_effective" in Assignment.__slots__
+
 PACKAGES = ("alpha", "beta", "gamma", "delta")
 VERSIONS = tuple(range(1, 9))
 
@@ -179,6 +181,10 @@ def test_backtrack_to_zero_clears_every_package() -> None:
     assert_consistent(solution)
 
 
+@pytest.mark.skipif(
+    not _HAS_PARTIAL_SOLUTION_FAST_PATHS,
+    reason="requires cpip's partial-solution optimization patch",
+)
 def test_decision_snapshot_tracks_later_derivations() -> None:
     """Derivations recorded after a decision carry that decision forward."""
     solution: PartialSolution[str, int] = PartialSolution()
@@ -221,6 +227,10 @@ def test_first_derivations_retain_their_range_objects() -> None:
     assert internals._range_ops == {}
 
 
+@pytest.mark.skipif(
+    not _HAS_PARTIAL_SOLUTION_FAST_PATHS,
+    reason="requires cpip's partial-solution optimization patch",
+)
 def test_derive_returns_the_cached_effective_range() -> None:
     solution: PartialSolution[str, int] = PartialSolution()
     allowed = Range.at_least(1)
@@ -254,6 +264,10 @@ def test_derive_returns_the_cached_effective_range() -> None:
     assert cast("Any", solution)._assignments[-1] is empty_assignment
 
 
+@pytest.mark.skipif(
+    not _HAS_PARTIAL_SOLUTION_FAST_PATHS,
+    reason="requires cpip's partial-solution optimization patch",
+)
 def test_decide_returns_exact_range_after_recording_trails() -> None:
     solution: PartialSolution[str, int] = PartialSolution()
     excluded = Range.singleton(2)
@@ -335,6 +349,10 @@ def test_range_operation_memo_cap_clears_operands_with_entries(
     assert 9 not in effective
 
 
+@pytest.mark.skipif(
+    not _HAS_PARTIAL_SOLUTION_FAST_PATHS,
+    reason="requires cpip's partial-solution optimization patch",
+)
 def test_subtraction_and_assignment_effective_ranges_are_reused() -> None:
     """Both the solution memo and the trail-entry cache reuse subtraction."""
     solution: PartialSolution[str, int] = PartialSolution()

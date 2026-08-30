@@ -9,25 +9,18 @@ requires Python 3.11 or newer. Refresh them from the repository root with:
 uv run --group vendoring vendoring sync -v
 ```
 
-`nab-resolver` is built from commit
-`9d07d894d5675aa71705c46272ae8322dcab61a8` in the `nab-resolver`
-subdirectory of <https://github.com/notatallshaw/nab>. The direct Git reference
-is supported by `vendoring sync`, but not by the tool's `update` or SBOM
-parsers; update that commit manually and keep this document as its provenance
-record until a published release can be pinned with `==`.
-
 | Package | Version/source | License |
 | --- | --- | --- |
 | urllib3 | 2.6.3 | MIT |
 | certifi | 2026.7.22 | MPL-2.0 |
 | idna | 3.18 | BSD-3-Clause |
-| nab-resolver | 0.0.15.dev0 at `9d07d894` | MIT |
+| nab-resolver | 0.0.15 | MIT |
 | typing_extensions | 4.16.0 | PSF-2.0 |
 | tomli | 2.4.1 | MIT |
 
 The tool extracts license texts beside their packages, with single-module
-licenses and the nab source license at this directory's root. Tests verify
-that every expected license is shipped.
+licenses at this directory's root. Tests verify that every expected license
+is shipped.
 
 ## Local patches
 
@@ -38,7 +31,7 @@ the same tracked tree.
 | Distribution | Patch | Purpose |
 | --- | --- | --- |
 | certifi | `certifi.patch` | Resolve `cacert.pem` through the `cpip._vendor.certifi` resource package. |
-| nab-resolver | `nab-resolver.patch` | Preserve cpip's late-extras invalidation contract and provider priority invalidations; accelerate large discrete ranges, membership, dependency-clause construction, exact-parent clause dispatch, and backtracking; compare infinity bounds safely; and avoid importing `dataclasses` during ordinary cpip startup. Exact dispatch retains upstream contradiction-epoch stamps and falls back to exhaustive dispatch for undecided, widened, or unhashable parent versions. |
+| nab-resolver | `nab-resolver.patch` | Preserve cpip's late-extras invalidation contract. No resolver performance optimizations are applied in this baseline. |
 
 ## Windows launchers
 

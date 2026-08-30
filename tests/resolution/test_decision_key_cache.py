@@ -25,10 +25,13 @@ from typing import Any
 
 import pytest
 from cpip._vendor.nab_resolver import decide
+from cpip._vendor.nab_resolver.resolver import BaseProvider
 from cpip.core.errors import ResolutionError
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.nab_provider import NabProvider
+
+_HAS_PRIORITY_INVALIDATIONS = hasattr(BaseProvider, "consume_priority_invalidations")
 
 _BENCHMARKS = Path(__file__).resolve().parents[1] / "benchmarks"
 if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect
@@ -277,6 +280,10 @@ def test_a_moved_culprit_count_rebuilds_the_key() -> None:
     assert choose(resolver) == "beta"
 
 
+@pytest.mark.skipif(
+    not _HAS_PRIORITY_INVALIDATIONS,
+    reason="requires cpip's provider-priority invalidation patch",
+)
 def test_a_provider_reported_change_rebuilds_the_key() -> None:
     resolver, stub = scan_resolver()
     assert choose(resolver) == "alpha"
@@ -288,6 +295,10 @@ def test_a_provider_reported_change_rebuilds_the_key() -> None:
     assert choose(resolver) == "beta"
 
 
+@pytest.mark.skipif(
+    not _HAS_PRIORITY_INVALIDATIONS,
+    reason="requires cpip's provider-priority invalidation patch",
+)
 def test_a_provider_that_cannot_report_rebuilds_every_key() -> None:
     resolver, stub = scan_resolver()
     stub.consume_priority_invalidations = lambda: None  # type: ignore[assignment]
@@ -297,6 +308,10 @@ def test_a_provider_that_cannot_report_rebuilds_every_key() -> None:
     assert choose(resolver) == "beta"
 
 
+@pytest.mark.skipif(
+    not _HAS_PRIORITY_INVALIDATIONS,
+    reason="requires cpip's provider-priority invalidation patch",
+)
 def test_a_provider_without_the_method_rebuilds_every_key() -> None:
     """A third-party provider predating the hook still resolves correctly."""
     resolver, stub = scan_resolver()

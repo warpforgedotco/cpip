@@ -12,7 +12,7 @@ LAUNCHER_ROOT = Path(__file__).parents[2] / "src" / "cpip" / "_launchers"
 LICENSE_PATHS = (
     "certifi/LICENSE",
     "idna/LICENSE.md",
-    "nab-resolver.LICENSE",
+    "nab_resolver/LICENSE",
     "urllib3/LICENSE.txt",
     "tomli/LICENSE",
     "typing_extensions.LICENSE",
