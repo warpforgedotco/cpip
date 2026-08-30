@@ -92,17 +92,12 @@ def _implied_range(specifier: SpecifierSet) -> Range[Version]:
         )
 
     upper_version, upper_inclusive = upper
-    lower_range = (
-        Range.at_least(lower_version)
-        if lower_inclusive
-        else Range.greater_than(lower_version)
+    return Range.between(
+        lower_version,
+        upper_version,
+        lower_inclusive=lower_inclusive,
+        upper_inclusive=upper_inclusive,
     )
-    upper_range = (
-        Range.at_most(upper_version)
-        if upper_inclusive
-        else Range.less_than(upper_version)
-    )
-    return lower_range & upper_range
 
 
 def _key(requirement: Requirement) -> str:

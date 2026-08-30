@@ -11,6 +11,7 @@ per-clause skip stamp.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from typing import TYPE_CHECKING, Any
 
 from .types import Incompatibility, IncompatibilityCause, Term
@@ -20,11 +21,15 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "NO_EXACT_PARENT_VERSION",
     "add_incompatibility",
+    "add_dependency_incompatibility",
     "dependency_merge_key",
     "index_dependency",
     "maybe_merge_dependency",
 ]
+
+NO_EXACT_PARENT_VERSION = object()
 
 
 # A dependency-style clause is exactly two terms (parent + dep).
@@ -35,6 +40,62 @@ _DEPENDENCY_CLAUSE_TERMS = 2
 _NOT_CONTRADICTED = -1
 
 
+def _insert_sorted_unique(indices: list[int], index: int) -> None:
+    position = bisect_left(indices, index)
+    if position == len(indices) or indices[position] != index:
+        indices.insert(position, index)
+
+
+def _append_general(
+    resolver: Resolver[Any, Any], incompatibility: Incompatibility[Any, Any]
+) -> int:
+    index = len(resolver.incompatibilities)
+    resolver.incompatibilities.append(incompatibility)
+    resolver.clause_contradicted_at.append(_NOT_CONTRADICTED)
+    for term in incompatibility.terms:
+        resolver.package_to_incompatibilities[term.package].append(index)
+    return index
+
+
+def _register_fallback_parent(
+    resolver: Resolver[Any, Any], package: Any, index: int
+) -> None:
+    if index in resolver.dependency_parent_fallback_indices:
+        return
+    resolver.dependency_parent_fallback_indices.add(index)
+    _insert_sorted_unique(resolver.dependency_parent_fallbacks[package], index)
+
+
+def _register_exact_parent(
+    resolver: Resolver[Any, Any], package: Any, version: Any, index: int
+) -> None:
+    try:
+        bucket = resolver.dependency_parent_versions[package][version]
+    except TypeError:
+        _register_fallback_parent(resolver, package, index)
+        return
+    _insert_sorted_unique(bucket, index)
+
+
+def _append_dependency(
+    resolver: Resolver[Any, Any],
+    incompatibility: Incompatibility[Any, Any],
+    *,
+    exact_parent_version: Any = NO_EXACT_PARENT_VERSION,
+) -> int:
+    index = len(resolver.incompatibilities)
+    resolver.incompatibilities.append(incompatibility)
+    resolver.clause_contradicted_at.append(_NOT_CONTRADICTED)
+    parent, dependency = incompatibility.terms
+    resolver.dependency_parent_incompatibilities[parent.package].append(index)
+    resolver.package_to_incompatibilities[dependency.package].append(index)
+    if exact_parent_version is NO_EXACT_PARENT_VERSION:
+        _register_fallback_parent(resolver, parent.package, index)
+    else:
+        _register_exact_parent(resolver, parent.package, exact_parent_version, index)
+    return index
+
+
 def add_incompatibility(
     resolver: Resolver[Any, Any], incompatibility: Incompatibility[Any, Any]
 ) -> None:
@@ -42,12 +103,73 @@ def add_incompatibility(
     if maybe_merge_dependency(resolver, incompatibility):
         return
 
-    index = len(resolver.incompatibilities)
-    resolver.incompatibilities.append(incompatibility)
-    resolver.clause_contradicted_at.append(_NOT_CONTRADICTED)
-    for term in incompatibility.terms:
-        resolver.package_to_incompatibilities[term.package].append(index)
-    index_dependency(resolver, incompatibility, index)
+    key = dependency_merge_key(incompatibility)
+    if key is None:
+        _append_general(resolver, incompatibility)
+        return
+    index = _append_dependency(resolver, incompatibility)
+    resolver.dependency_index[key] = index
+
+
+def add_dependency_incompatibility(
+    resolver: Resolver[Any, Any],
+    package: Any,
+    package_range: Any,
+    dependency_package: Any,
+    dependency_range: Any,
+    *,
+    exact_parent_version: Any = NO_EXACT_PARENT_VERSION,
+) -> Incompatibility[Any, Any]:
+    """Intern a cross-package dependency clause before constructing it."""
+    key = (package, dependency_package, dependency_range, False)
+    existing_index = resolver.dependency_index.get(key)
+    if existing_index is not None:
+        existing = resolver.incompatibilities[existing_index]
+        existing_package, existing_dependency = existing.terms
+        if package_range.is_subset(existing_package.constraint):
+            if exact_parent_version is NO_EXACT_PARENT_VERSION:
+                _register_fallback_parent(resolver, package, existing_index)
+            else:
+                _register_exact_parent(
+                    resolver, package, exact_parent_version, existing_index
+                )
+            return existing
+
+        merged = Incompatibility(
+            [
+                Term(
+                    package,
+                    existing_package.constraint | package_range,
+                    positive=True,
+                ),
+                existing_dependency,
+            ],
+            cause=IncompatibilityCause.DEPENDENCY,
+        )
+        resolver.incompatibilities[existing_index] = merged
+        resolver.clause_contradicted_at[existing_index] = _NOT_CONTRADICTED
+        if exact_parent_version is NO_EXACT_PARENT_VERSION:
+            _register_fallback_parent(resolver, package, existing_index)
+        else:
+            _register_exact_parent(
+                resolver, package, exact_parent_version, existing_index
+            )
+        return merged
+
+    incompatibility = Incompatibility(
+        [
+            Term(package, package_range, positive=True),
+            Term(dependency_package, dependency_range, positive=False),
+        ],
+        cause=IncompatibilityCause.DEPENDENCY,
+    )
+    index = _append_dependency(
+        resolver,
+        incompatibility,
+        exact_parent_version=exact_parent_version,
+    )
+    resolver.dependency_index[key] = index
+    return incompatibility
 
 
 def dependency_merge_key(
@@ -125,4 +247,5 @@ def maybe_merge_dependency(
     resolver.incompatibilities[existing_index] = merged
     # The union widens the package term, which can lift a contradiction.
     resolver.clause_contradicted_at[existing_index] = _NOT_CONTRADICTED
+    _register_fallback_parent(resolver, existing_pkg.package, existing_index)
     return True

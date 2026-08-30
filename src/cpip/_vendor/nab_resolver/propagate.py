@@ -11,6 +11,9 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propa
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Sequence
+from heapq import merge
+from itertools import chain
 from typing import TYPE_CHECKING, Any
 
 from .types import IncompatibilityState, SetRelation, Term
@@ -50,6 +53,23 @@ RELATION_GATE_RECHECK = 65_536
 RANGE_ID_MEMO_MAX = 8_192
 
 
+def _related_incompatibility_groups(
+    resolver: Resolver[Any, Any], package: Any
+) -> tuple[Sequence[int], ...]:
+    """Return sorted clause-index groups relevant to ``package`` now."""
+    general = resolver.package_to_incompatibilities.get(package, ())
+    decision = resolver.solution.decided_version(package)
+    if decision is None:
+        return general, resolver.dependency_parent_incompatibilities.get(package, ())
+
+    by_version = resolver.dependency_parent_versions.get(package)
+    try:
+        exact = () if by_version is None else by_version.get(decision, ())
+    except TypeError:
+        return general, resolver.dependency_parent_incompatibilities.get(package, ())
+    return general, resolver.dependency_parent_fallbacks.get(package, ()), exact
+
+
 def unit_propagation(
     resolver: Resolver[Any, Any], changed_package: Any
 ) -> Incompatibility[Any, Any] | None:
@@ -64,58 +84,216 @@ def unit_propagation(
     contradiction epoch.  Each clause records the epoch it was last settled in,
     and is skipped while that stamp is current.
 
+    The per-term relation check stays inline: this loop evaluates tens of
+    thousands of terms during deep backtracking, so routing each one through
+    ``evaluate_incompatibility`` and ``term_relation`` dominates the solve.
+
     Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation
     """
+    groups = _related_incompatibility_groups(resolver, changed_package)
+    epoch = resolver.solution.contradiction_epoch
+    contradicted_at = resolver.clause_contradicted_at
+    for group in groups:
+        for incompatibility_index in group:
+            if contradicted_at[incompatibility_index] != epoch:
+                return _unit_propagation_core(resolver, changed_package, groups, epoch)
+    return None
+
+
+def _unit_propagation_core(
+    resolver: Resolver[Any, Any],
+    changed_package: Any,
+    initial_groups: tuple[Sequence[int], ...],
+    epoch: int,
+) -> Incompatibility[Any, Any] | None:
+    """Run propagation after the entry package has relevant clauses."""
     propagation_queue: deque[Any] = deque([changed_package])
     in_queue: set[Any] = {changed_package}
 
     contradicted_at = resolver.clause_contradicted_at
-    epoch = resolver.solution.contradiction_epoch
+    solution = resolver.solution
+    solution_get = solution.get
+    has_positive_constraint = solution.has_positive_constraint
+    derive = solution.derive
+    incompatibilities = resolver.incompatibilities
+    stats = resolver.stats
+    observer = resolver.observer
+    cache = resolver.relation_cache
+    satisfied = SetRelation.SATISFIED
+    contradicted = SetRelation.CONTRADICTED
 
     while propagation_queue:
         package = propagation_queue.popleft()
         in_queue.discard(package)
-        related_indices = resolver.package_to_incompatibilities.get(package, [])
+        if initial_groups:
+            groups = initial_groups
+            initial_groups = ()
+        else:
+            groups = _related_incompatibility_groups(resolver, package)
+        # Production dispatch returns two or three groups.  Keep that path
+        # allocation-free while retaining arbitrary arity for private callers.
+        group_count = len(groups)
+        if group_count not in (2, 3):
+            nonempty = tuple(group for group in groups if group)
+            if not nonempty:
+                continue
+            if len(nonempty) == 1:
+                related_indices = nonempty[0]
+            elif len(nonempty) == 2:
+                left = nonempty[0]
+                right = nonempty[1]
+                if left[-1] < right[0]:
+                    related_indices = chain(left, right)
+                elif right[-1] < left[0]:
+                    related_indices = chain(right, left)
+                else:
+                    related_indices = merge(left, right)
+            else:
+                related_indices = merge(*nonempty)
+        else:
+            first = groups[0]
+            second = groups[1]
+            third: Sequence[int] = groups[2] if group_count == 3 else ()
+            if first and second and third:
+                related_indices = merge(first, second, third)
+            else:
+                if first:
+                    left = first
+                    right = second if second else third
+                elif second:
+                    left = second
+                    right = third
+                else:
+                    left = third
+                    right = ()
 
+                if not left:
+                    continue
+                if not right:
+                    related_indices = left
+                elif left[-1] < right[0]:
+                    related_indices = chain(left, right)
+                elif right[-1] < left[0]:
+                    related_indices = chain(right, left)
+                else:
+                    related_indices = merge(left, right)
+
+        previous_index = -1
         for incompatibility_index in related_indices:
+            if incompatibility_index == previous_index:
+                continue
+            previous_index = incompatibility_index
             if contradicted_at[incompatibility_index] == epoch:
                 continue
 
-            incompatibility = resolver.incompatibilities[incompatibility_index]
-            evaluation = evaluate_incompatibility(resolver, incompatibility)
+            incompatibility = incompatibilities[incompatibility_index]
 
-            if evaluation is _CONTRADICTED_STATE:
-                contradicted_at[incompatibility_index] = epoch
+            undetermined_term = None
+            undetermined_assignment: RangeProtocol[Any] | None = None
+            conflict = True
+            for term in incompatibility.terms:
+                assignment = solution_get(term.package)
+                if assignment is None:
+                    relation = None
+                else:
+                    positive = term._positive  # noqa: SLF001
+                    constraint = term.constraint
+
+                    key = None
+                    relation = None
+                    if resolver.relation_cache_on:
+                        id_tokens = resolver.range_token_by_id
+                        assignment_token = id_tokens.get(id(assignment))
+                        if assignment_token is None:
+                            assignment_token = _intern_range(resolver, assignment)
+                        constraint_token = id_tokens.get(id(constraint))
+                        if constraint_token is None:
+                            constraint_token = _intern_range(resolver, constraint)
+                        key = (positive, assignment_token, constraint_token)
+                        relation = cache.get(key)
+
+                    if relation is None:
+                        range_relation = assignment.relation(constraint)
+                        subset = range_relation.is_subset
+                        disjoint = range_relation.is_disjoint
+                        if positive:
+                            relation = (
+                                satisfied
+                                if subset
+                                else (
+                                    contradicted
+                                    if disjoint
+                                    else SetRelation.UNDETERMINED
+                                )
+                            )
+                        else:
+                            relation = (
+                                satisfied
+                                if disjoint
+                                else (
+                                    contradicted if subset else SetRelation.UNDETERMINED
+                                )
+                            )
+                        probes_left = resolver.relation_gate_probes_left - 1
+                        resolver.relation_gate_probes_left = probes_left
+                        if key is not None:
+                            if len(cache) >= RELATION_CACHE_MAX:
+                                cache.clear()
+                            cache[key] = relation
+                        if probes_left <= resolver.relation_gate_hits:
+                            _resample_relation_gate(resolver)
+                    else:
+                        resolver.relation_gate_hits += 1
+
+                    if (
+                        (positive and relation is satisfied)
+                        or (not positive and relation is contradicted)
+                    ) and not has_positive_constraint(term.package):
+                        relation = None
+
+                if relation is satisfied:
+                    continue
+                if relation is contradicted:
+                    contradicted_at[incompatibility_index] = epoch
+                    conflict = False
+                    undetermined_term = None
+                    break
+                if undetermined_term is not None:
+                    conflict = False
+                    undetermined_term = None
+                    break
+                undetermined_term = term
+                undetermined_assignment = assignment
+
+            if undetermined_term is None:
+                if conflict:
+                    return incompatibility
                 continue
 
-            if evaluation is _CONFLICT_STATE:
-                return incompatibility
+            negated_package = undetermined_term.package
+            negated_positive = not undetermined_term._positive  # noqa: SLF001
+            range_before = undetermined_assignment
+            range_after = derive(
+                negated_package,
+                undetermined_term.constraint,
+                positive=negated_positive,
+                cause=incompatibility,
+            )
 
-            if isinstance(evaluation, Term):
-                negated_term = evaluation.negate()
-                range_before = resolver.solution.get(negated_term.package)
-                resolver.solution.derive(
-                    negated_term.package,
-                    negated_term.constraint,
-                    positive=negated_term.is_positive(),
+            # A derive that empties a range advances the epoch, which retires
+            # stamps taken before it.
+            epoch = solution.contradiction_epoch
+
+            if range_before != range_after:
+                stats.derivations += 1
+                observer.on_derivation(
+                    negated_package,
+                    positive=negated_positive,
                     cause=incompatibility,
                 )
-                range_after = resolver.solution.get(negated_term.package)
-
-                # A derive that empties a range advances the epoch, which
-                # retires the stamps taken before it.
-                epoch = resolver.solution.contradiction_epoch
-
-                if range_before != range_after:
-                    resolver.stats.derivations += 1
-                    resolver.observer.on_derivation(
-                        negated_term.package,
-                        positive=negated_term.is_positive(),
-                        cause=incompatibility,
-                    )
-                    if negated_term.package not in in_queue:
-                        propagation_queue.append(negated_term.package)
-                        in_queue.add(negated_term.package)
+                if negated_package not in in_queue:
+                    propagation_queue.append(negated_package)
+                    in_queue.add(negated_package)
 
     return None
 
@@ -159,6 +337,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
     tokens = resolver.range_tokens
     token = tokens.get(range_)
     if token is None:
+        if len(tokens) >= RANGE_ID_MEMO_MAX:
+            tokens.clear()
         token = resolver.next_range_token
         resolver.next_range_token = token + 1
         tokens[range_] = token

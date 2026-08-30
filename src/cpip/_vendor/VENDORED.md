@@ -31,7 +31,7 @@ the same tracked tree.
 | Distribution | Patch | Purpose |
 | --- | --- | --- |
 | certifi | `certifi.patch` | Resolve `cacert.pem` through the `cpip._vendor.certifi` resource package. |
-| nab-resolver | `nab-resolver.patch` | Preserve cpip's late-extras invalidation contract. No resolver performance optimizations are applied in this baseline. |
+| nab-resolver | `nab-resolver.patch` | Preserve cpip's late-extras invalidation contract and provider priority invalidations; accelerate large discrete ranges, membership, dependency-clause construction, exact-parent clause dispatch, and backtracking; compare infinity bounds safely. The startup-oriented value types and root hashing from the former patch are already included upstream. |
 
 ## Windows launchers
 

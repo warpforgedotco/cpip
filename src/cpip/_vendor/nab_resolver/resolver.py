@@ -236,6 +236,14 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
         """
         ...
 
+    def consume_priority_invalidations(self) -> Sequence[PackageType] | None:
+        """Return provider-owned priority changes since the previous scan.
+
+        Return ``None`` when changes cannot be tracked, which safely rebuilds
+        every undecided key.
+        """
+        ...
+
     def receive_partial_solution_hint(
         self,
         positive_ranges: Mapping[PackageType, RangeProtocol[VersionType]],
@@ -339,6 +347,10 @@ class BaseProvider(Generic[PackageType, VersionType]):
         """Report every package ready, since answers do not wait on a fetch."""
         del package
         return True
+
+    def consume_priority_invalidations(self) -> Sequence[PackageType]:
+        """Report stable provider-owned priority state."""
+        return ()
 
     def receive_partial_solution_hint(
         self,
@@ -650,6 +662,16 @@ class Resolver(Generic[PackageType, VersionType]):
         self.package_to_incompatibilities: defaultdict[Any, list[int]] = defaultdict(
             list
         )
+        self.dependency_parent_incompatibilities: defaultdict[Any, list[int]] = (
+            defaultdict(list)
+        )
+        self.dependency_parent_fallbacks: defaultdict[Any, list[int]] = defaultdict(
+            list
+        )
+        self.dependency_parent_fallback_indices: set[int] = set()
+        self.dependency_parent_versions: defaultdict[
+            Any, defaultdict[Any, list[int]]
+        ] = defaultdict(lambda: defaultdict(list))
 
         # Per clause, the contradiction epoch in which one of its terms was
         # last seen contradicted; unit propagation skips a clause whose stamp
@@ -840,50 +862,54 @@ class Resolver(Generic[PackageType, VersionType]):
             decide.record_no_versions(self, next_package, had_pending=had_pending)
             return next_package
 
-        self.solution.decide(next_package, chosen_version)
+        exact_range = self.solution.decide(next_package, chosen_version)
         self.stats.decisions += 1
         self.observer.on_decision(
             next_package, chosen_version, self.solution.decision_level
         )
 
         dependencies = self.provider.get_dependencies(next_package, chosen_version)
-        if not dependencies:
-            invalidated = self._backtrack_dependency_invalidations()
-            return next_package if invalidated is None else invalidated
-        exact_range = self.range_type.singleton(chosen_version)
-        widened = self.provider.widen_decision(next_package, chosen_version)
+        widened = (
+            self.provider.widen_decision(next_package, chosen_version)
+            if dependencies
+            else None
+        )
         parent_range = exact_range if widened is None else self.as_term_range(widened)
+        exact_parent_version = (
+            chosen_version
+            if widened is None
+            else incompat_index.NO_EXACT_PARENT_VERSION
+        )
         for dependency_package, supplied_range in dependencies.items():
             dependency_range = self.as_term_range(supplied_range)
-            cross_package = dependency_package != next_package
-            if not cross_package:
-                # An incompatibility holds at most one term per package,
-                # so self-dependency terms merge to {v} & ~range: empty
-                # (a vacuous clause) when the range contains the chosen
-                # version, else exactly {v}.  The exact singleton is kept:
-                # widening a single-term clause only degrades error text.
-                if chosen_version in dependency_range:
-                    continue
-                terms = [Term(next_package, exact_range, positive=True)]
-            else:
-                terms = [
-                    Term(next_package, parent_range, positive=True),
-                    Term(dependency_package, dependency_range, positive=False),
-                ]
-
-            # The merged term drops the required range, so the clause carries
-            # it for the report.
-            incompatibility = Incompatibility(
-                terms,
-                cause=IncompatibilityCause.DEPENDENCY,
-                dependency_range=None if cross_package else dependency_range,
-            )
-            incompat_index.add_incompatibility(self, incompatibility)
-
-            if cross_package:
+            if dependency_package != next_package:
+                incompatibility = incompat_index.add_dependency_incompatibility(
+                    self,
+                    next_package,
+                    parent_range,
+                    dependency_package,
+                    dependency_range,
+                    exact_parent_version=exact_parent_version,
+                )
                 decide.absorb_redundant_requirement(
                     self, dependency_package, dependency_range, incompatibility
                 )
+                continue
+
+            # An incompatibility holds at most one term per package, so
+            # self-dependency terms merge to {v} & ~range: empty (a vacuous
+            # clause) when the range contains the chosen version, else exactly
+            # {v}.  The exact singleton is kept: widening a single-term clause
+            # only degrades error text.  The merged term drops the required
+            # range, so the clause carries it for the report.
+            if chosen_version in dependency_range:
+                continue
+            incompatibility = Incompatibility(
+                [Term(next_package, exact_range, positive=True)],
+                cause=IncompatibilityCause.DEPENDENCY,
+                dependency_range=dependency_range,
+            )
+            incompat_index.add_incompatibility(self, incompatibility)
         invalidated = self._backtrack_dependency_invalidations()
         if invalidated is not None:
             return invalidated
@@ -947,6 +973,10 @@ class Resolver(Generic[PackageType, VersionType]):
         """Reset solver state for a new resolution."""
         self.incompatibilities.clear()
         self.package_to_incompatibilities.clear()
+        self.dependency_parent_incompatibilities.clear()
+        self.dependency_parent_fallbacks.clear()
+        self.dependency_parent_fallback_indices.clear()
+        self.dependency_parent_versions.clear()
         self.clause_contradicted_at.clear()
         self.dependency_index.clear()
         self.solution = PartialSolution(range_type=self.range_type)

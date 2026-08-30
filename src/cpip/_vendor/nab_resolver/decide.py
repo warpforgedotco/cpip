@@ -71,10 +71,18 @@ def choose_package_to_decide(resolver: Resolver[Any, Any]) -> Any | None:
             tiebreak_cache[package] = tiebreak
         return (ready_penalty, priority, tiebreak)
 
+    changed = resolver.solution.take_changed_packages()
+    reporter = getattr(resolver.provider, "consume_priority_invalidations", None)
+    reported = reporter() if reporter is not None else None
+    if reported is None:
+        changed.update(undecided)
+    else:
+        changed.update(reported)
+
     return resolver.decision_queue.pick(
         undecided,
         sort_key,
-        resolver.solution.take_changed_packages(),
+        changed,
         resolver.priority_epoch,
         key_inputs_arrived,
     )
