@@ -85,10 +85,29 @@ def _darwin_clone(source: str, destination: str) -> bool:
     raise OSError(error, os.strerror(error), destination)
 
 
+_reflink_unsupported: set[str] = set()
+
+"""Destination directories whose filesystem rejected FICLONE outright.
+
+``ioctl`` is issued on the destination descriptor, so support is a property
+of the destination filesystem, and one that does not change mid-run.  Without
+this, a cache tree cloned onto ext4, overlayfs or tmpfs pays an open, an
+exclusive create, the failing ioctl and an unlink for every file before
+falling back to a copy.  Keying on the directory rather than ``st_dev`` keeps
+the check free: the caller already holds the path, whereas a device number
+costs the stat this is trying to avoid.
+"""
+
+
 def _linux_reflink(source: str, destination: str) -> bool:
     """Clone one regular file with the Linux FICLONE ioctl when available."""
 
     if not sys.platform.startswith("linux"):
+        return False
+
+    destination_parent = os.path.dirname(destination)
+
+    if destination_parent in _reflink_unsupported:
         return False
 
     try:
@@ -126,9 +145,12 @@ def _linux_reflink(source: str, destination: str) -> bool:
                 errno.ENOTTY,
                 errno.ENOSYS,
                 errno.EOPNOTSUPP,
-                errno.EXDEV,
-                errno.EINVAL,
             }:
+                _reflink_unsupported.add(destination_parent)
+
+                return False
+
+            if exc.errno in {errno.EXDEV, errno.EINVAL}:
                 return False
 
             raise
@@ -178,52 +200,14 @@ def clone_path(source: str, destination: str) -> None:
             destination_exists = True
 
     if not destination_exists:
-        if os.path.isdir(source_text) and not os.path.islink(source_text):
-            source_mode = stat.S_IMODE(os.stat(source_text).st_mode)
+        source_is_link = os.path.islink(source_text)
 
-            try:
-                os.mkdir(destination_text, source_mode)
-
-            except FileExistsError:
-                destination_exists = True
-
-            if destination_exists:
-                return clone_path(source_text, destination_text)
-
-            import shutil
-
-            try:
-                with os.scandir(source_text) as entries:
-                    for entry in entries:
-                        clone_path(
-                            os.path.join(source_text, entry.name),
-                            os.path.join(destination_text, entry.name),
-                        )
-
-                shutil.copystat(
-                    source_text,
-                    destination_text,
-                    follow_symlinks=False,
-                )
-
-            except BaseException:
-                shutil.rmtree(destination_text, ignore_errors=True)
-
-                raise
-
-            return
-
-        if os.path.islink(source_text):
-            os.symlink(os.readlink(source_text), destination_text)
-
-            return
-
-        if not _linux_reflink(source_text, destination_text):
-            import shutil
-
-            shutil.copy2(source_text, destination_text, follow_symlinks=False)
-
-        return
+        return _clone_absent(
+            source_text,
+            destination_text,
+            os.path.isdir(source_text) and not source_is_link,
+            source_is_link,
+        )
 
     if not (
         os.path.isdir(source_text)
@@ -243,3 +227,59 @@ def clone_path(source: str, destination: str) -> None:
                 os.path.join(source_text, entry.name),
                 os.path.join(destination_text, entry.name),
             )
+
+
+def _clone_absent(
+    source: str,
+    destination: str,
+    is_directory: bool,
+    is_symlink: bool,
+) -> None:
+    """Clone ``source`` onto a ``destination`` known not to exist.
+
+    ``is_directory`` and ``is_symlink`` are passed in because the directory
+    walk below already has them from ``scandir``, which answers both from the
+    ``readdir`` result.  Re-deriving them per entry -- as recursing through
+    ``clone_path`` did -- costs an ``lexists``, an ``isdir`` and an ``islink``
+    on every file in the tree.
+    """
+
+    if is_directory:
+        source_mode = stat.S_IMODE(os.stat(source).st_mode)
+
+        try:
+            os.mkdir(destination, source_mode)
+
+        except FileExistsError:
+            return clone_path(source, destination)
+
+        import shutil
+
+        try:
+            with os.scandir(source) as entries:
+                for entry in entries:
+                    _clone_absent(
+                        entry.path,
+                        os.path.join(destination, entry.name),
+                        entry.is_dir(follow_symlinks=False),
+                        entry.is_symlink(),
+                    )
+
+            shutil.copystat(source, destination, follow_symlinks=False)
+
+        except BaseException:
+            shutil.rmtree(destination, ignore_errors=True)
+
+            raise
+
+        return
+
+    if is_symlink:
+        os.symlink(os.readlink(source), destination)
+
+        return
+
+    if not _linux_reflink(source, destination):
+        import shutil
+
+        shutil.copy2(source, destination, follow_symlinks=False)
