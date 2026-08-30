@@ -410,11 +410,17 @@ class Range(Generic[VersionType]):
                 left_interval, right_interval
             )
 
-            if not _interval_is_empty(
-                inter_lower,
-                lower_inclusive=inter_lower_inc,
-                upper=inter_upper,
-                upper_inclusive=inter_upper_inc,
+            # _interval_is_empty, written out.
+            if not (
+                inter_lower is not NEGATIVE_INFINITY
+                and inter_upper is not POSITIVE_INFINITY
+                and (
+                    inter_lower > inter_upper
+                    or (
+                        inter_lower == inter_upper
+                        and not (inter_lower_inc and inter_upper_inc)
+                    )
+                )
             ):
                 result.append(
                     (inter_lower, inter_lower_inc, inter_upper, inter_upper_inc)
@@ -547,7 +553,6 @@ class Range(Generic[VersionType]):
 
             while scan < right_count:
                 right = right_intervals[scan]
-
                 right_lower, right_lower_inc, right_upper, right_upper_inc = right
 
                 if (
@@ -579,7 +584,8 @@ class Range(Generic[VersionType]):
                     exhausted = True
                     break
 
-                # Resume above this right interval.
+                # Resume above this right interval, stopping when nothing of
+                # it is left.  _interval_is_empty, written out.
                 lower, lower_inclusive = right_upper, not right_upper_inc
                 if upper is not POSITIVE_INFINITY and (
                     lower > upper
@@ -687,11 +693,14 @@ class Range(Generic[VersionType]):
             lower, lower_inclusive = _max_lower_bound(left, right)
             upper, upper_inclusive = _min_upper_bound(left, right)
 
-            if not _interval_is_empty(
-                lower,
-                lower_inclusive=lower_inclusive,
-                upper=upper,
-                upper_inclusive=upper_inclusive,
+            # _interval_is_empty, written out.
+            if not (
+                lower is not NEGATIVE_INFINITY
+                and upper is not POSITIVE_INFINITY
+                and (
+                    lower > upper
+                    or (lower == upper and not (lower_inclusive and upper_inclusive))
+                )
             ):
                 return False
 

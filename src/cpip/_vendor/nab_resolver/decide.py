@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .incompat_index import add_incompatibility
-from .root import ROOT
 from .types import Incompatibility, IncompatibilityCause, RangeProtocol, Term
 
 if TYPE_CHECKING:
@@ -32,16 +31,20 @@ def choose_package_to_decide(resolver: Resolver[Any, Any]) -> Any | None:
     Prefers ``is_ready`` packages so resolution keeps making progress while
     other listings/metadata are still in flight.  ``begin_decision_scan`` marks
     the start of the scan so a provider fed by another thread can hold the
-    state behind its sort key still. The queue keeps that key across scans, so
-    one that moves without the solution or ``priority_epoch`` moving is never
-    read again.
+    state behind its sort key still, and may hand back a probe that lets the
+    queue leave a still-waiting package's key alone. The queue keeps that key
+    across scans, so one that moves without the solution or ``priority_epoch``
+    moving is never read again.
+
+    ``ROOT`` never turns up in the undecided set: it is decided at level 1, a
+    targeted backtrack never aims lower, and conflict resolution raises rather
+    than backjumping to level 0.
     """
     undecided = resolver.solution.undecided_packages()
-    undecided.discard(ROOT)
     if not undecided:
         return None
 
-    resolver.provider.begin_decision_scan()
+    key_inputs_arrived = resolver.provider.begin_decision_scan()
 
     conflict_counts = resolver.stats.package_conflict_counts
     culprit_counts = resolver.stats.package_culprit_counts
@@ -81,6 +84,7 @@ def choose_package_to_decide(resolver: Resolver[Any, Any]) -> Any | None:
         sort_key,
         changed,
         resolver.priority_epoch,
+        key_inputs_arrived,
     )
 
 
@@ -95,11 +99,17 @@ def choose_version(resolver: Resolver[Any, Any], package: Any) -> Any | None:
     constraint = resolver.constraints.get(package)
     if constraint is not None:
         current_range = current_range & constraint
-    resolver.provider.receive_partial_solution_hint(
-        resolver.solution.positive_ranges(),
-        resolver.solution.decisions(),
-    )
-    return resolver.provider.choose_version(package, current_range)
+
+    provider = resolver.provider
+    # The hint costs two snapshots of the solution, so it is skipped for the
+    # provider whose hook is ``BaseProvider``'s discarding no-op.
+    if provider is not resolver._hint_ignoring_provider:  # noqa: SLF001
+        provider.receive_partial_solution_hint(
+            resolver.solution.positive_ranges(),
+            resolver.solution.decisions(),
+        )
+
+    return provider.choose_version(package, current_range)
 
 
 def _normalize_terms(

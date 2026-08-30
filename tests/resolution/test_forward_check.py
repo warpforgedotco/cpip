@@ -35,6 +35,8 @@ from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.models import ResolutionConfig
 from cpip.resolution.nab_provider import NabProvider
 
+_HAS_EXACT_CLAUSE_DISPATCH = hasattr(propagate, "_related_incompatibility_groups")
+
 _BENCHMARKS = Path(__file__).resolve().parents[1] / "benchmarks"
 if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect
     sys.path.insert(0, str(_BENCHMARKS))
@@ -156,6 +158,10 @@ def test_forward_check_never_changes_the_answer(
 
 
 @pytest.mark.parametrize("seed", range(20))
+@pytest.mark.skipif(
+    not _HAS_EXACT_CLAUSE_DISPATCH,
+    reason="requires cpip's exact-parent clause dispatch patch",
+)
 def test_exact_clause_dispatch_matches_exhaustive_propagation(
     seed: int,
     tmp_path: Path,

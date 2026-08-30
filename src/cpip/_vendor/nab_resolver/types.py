@@ -274,11 +274,16 @@ class RootRequirement(Generic[PackageType, VersionType]):
     incompatibility, so a caller's own error reporter can identify the
     requirement behind a clause.  Two requirements on one package can share a
     range, so the range alone cannot tell them apart.
+
+    Immutable.  No ``__slots__``: pickle and ``copy`` restore a slotted
+    instance by assignment, which :meth:`__setattr__` refuses.
     """
+
+    __match_args__ = ("package", "constraint", "origin")
 
     package: PackageType
     constraint: RangeProtocol[VersionType]
-    origin: Any = None
+    origin: Any
 
     def __init__(
         self,
@@ -286,32 +291,44 @@ class RootRequirement(Generic[PackageType, VersionType]):
         constraint: RangeProtocol[VersionType],
         origin: Any = None,
     ) -> None:
+        """Record one requirement on ``package``."""
         object.__setattr__(self, "package", package)
         object.__setattr__(self, "constraint", constraint)
         object.__setattr__(self, "origin", origin)
-        object.__setattr__(self, "_frozen", True)
 
+    @override
     def __setattr__(self, name: str, value: object) -> None:
-        if getattr(self, "_frozen", False):
-            raise AttributeError(f"cannot assign to field {name!r}")
-        object.__setattr__(self, name, value)
+        """Refuse the write."""
+        message = f"cannot assign to field {name!r}"
+        raise AttributeError(message)
 
+    @override
     def __delattr__(self, name: str) -> None:
-        raise AttributeError(f"cannot delete field {name!r}")
+        """Refuse the deletion."""
+        message = f"cannot delete field {name!r}"
+        raise AttributeError(message)
 
+    @override
     def __eq__(self, other: object) -> bool:
-        return type(other) is RootRequirement and (
-            self.package,
-            self.constraint,
-            self.origin,
-        ) == (other.package, other.constraint, other.origin)
+        """Compare package, constraint and origin."""
+        if not isinstance(other, RootRequirement):
+            return NotImplemented
+        return (self.package, self.constraint, self.origin) == (
+            other.package,
+            other.constraint,
+            other.origin,
+        )
 
+    @override
     def __hash__(self) -> int:
+        """Hash package, constraint and origin together."""
         return hash((self.package, self.constraint, self.origin))
 
+    @override
     def __repr__(self) -> str:
+        """Return a debug representation."""
         return (
-            f"RootRequirement(package={self.package!r}, "
+            f"{type(self).__qualname__}(package={self.package!r}, "
             f"constraint={self.constraint!r}, origin={self.origin!r})"
         )
 

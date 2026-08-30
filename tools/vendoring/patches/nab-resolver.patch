@@ -1,8 +1,8 @@
 diff --git a/src/cpip/_vendor/nab_resolver/decide.py b/src/cpip/_vendor/nab_resolver/decide.py
-index 5d0bc55..9223895 100644
+index 9dd16ee..835b0f6 100644
 --- a/src/cpip/_vendor/nab_resolver/decide.py
 +++ b/src/cpip/_vendor/nab_resolver/decide.py
-@@ -68,10 +68,18 @@ def choose_package_to_decide(resolver: Resolver[Any, Any]) -> Any | None:
+@@ -71,10 +71,18 @@ def choose_package_to_decide(resolver: Resolver[Any, Any]) -> Any | None:
              tiebreak_cache[package] = tiebreak
          return (ready_penalty, priority, tiebreak)
  
@@ -20,10 +20,10 @@ index 5d0bc55..9223895 100644
 -        resolver.solution.take_changed_packages(),
 +        changed,
          resolver.priority_epoch,
+         key_inputs_arrived,
      )
- 
 diff --git a/src/cpip/_vendor/nab_resolver/incompat_index.py b/src/cpip/_vendor/nab_resolver/incompat_index.py
-index c771106..4d6b3a8 100644
+index c771106..6e9ea13 100644
 --- a/src/cpip/_vendor/nab_resolver/incompat_index.py
 +++ b/src/cpip/_vendor/nab_resolver/incompat_index.py
 @@ -11,6 +11,7 @@ per-clause skip stamp.
@@ -51,7 +51,7 @@ index c771106..4d6b3a8 100644
  
  # A dependency-style clause is exactly two terms (parent + dep).
  _DEPENDENCY_CLAUSE_TERMS = 2
-@@ -35,19 +40,138 @@ _DEPENDENCY_CLAUSE_TERMS = 2
+@@ -35,19 +40,136 @@ _DEPENDENCY_CLAUSE_TERMS = 2
  _NOT_CONTRADICTED = -1
  
  
@@ -113,9 +113,7 @@ index c771106..4d6b3a8 100644
 +    if exact_parent_version is NO_EXACT_PARENT_VERSION:
 +        _register_fallback_parent(resolver, parent.package, index)
 +    else:
-+        _register_exact_parent(
-+            resolver, parent.package, exact_parent_version, index
-+        )
++        _register_exact_parent(resolver, parent.package, exact_parent_version, index)
 +    return index
 +
 +
@@ -196,25 +194,17 @@ index c771106..4d6b3a8 100644
  
  
  def dependency_merge_key(
-@@ -125,4 +249,5 @@ def maybe_merge_dependency(
+@@ -125,4 +247,5 @@ def maybe_merge_dependency(
      resolver.incompatibilities[existing_index] = merged
      # The union widens the package term, which can lift a contradiction.
      resolver.clause_contradicted_at[existing_index] = _NOT_CONTRADICTED
 +    _register_fallback_parent(resolver, existing_pkg.package, existing_index)
      return True
 diff --git a/src/cpip/_vendor/nab_resolver/partial_solution.py b/src/cpip/_vendor/nab_resolver/partial_solution.py
-index 66212e0..f15c9d2 100644
+index c330a27..f2245b6 100644
 --- a/src/cpip/_vendor/nab_resolver/partial_solution.py
 +++ b/src/cpip/_vendor/nab_resolver/partial_solution.py
-@@ -17,7 +17,6 @@ from __future__ import annotations
- import operator
- from collections import defaultdict
- from collections.abc import Mapping
--from dataclasses import dataclass
- from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast, overload
- from weakref import ref
- 
-@@ -149,6 +148,15 @@ class _Snapshot(Mapping[PackageType, _ValueType]):
+@@ -149,6 +149,15 @@ class _Snapshot(Mapping[PackageType, _ValueType]):
      def __len__(self) -> int:
          return sum(1 for _ in self)
  
@@ -230,58 +220,27 @@ index 66212e0..f15c9d2 100644
  
  def _take_snapshot(
      live: dict[PackageType, _ValueType],
-@@ -174,10 +182,24 @@ def _detach_snapshots(
-             snapshot.detach()
+@@ -187,6 +196,7 @@ _ASSIGNMENT_FIELDS: Final = (
+     "positive",
+     "cum_positive",
+     "cum_negative",
++    "cum_decision",
+ )
  
  
--@dataclass(slots=True)
- class Assignment(Generic[PackageType, VersionType]):
+@@ -194,8 +204,10 @@ class Assignment(Generic[PackageType, VersionType]):
      """A single entry in the partial solution trail."""
  
-+    __slots__ = (
+     __slots__ = (
 +        "_effective",
-+        "accumulated_range",
-+        "cause",
+         "accumulated_range",
+         "cause",
 +        "cum_decision",
-+        "cum_negative",
-+        "cum_positive",
-+        "decision_level",
-+        "is_decision",
-+        "package",
-+        "positive",
-+        "trail_index",
-+        "version",
-+    )
-+
-     package: PackageType
-     """Which package this assignment constrains."""
- 
-@@ -190,24 +212,99 @@ class Assignment(Generic[PackageType, VersionType]):
-     is_decision: bool
-     """True if this is a version choice; False if derived by propagation."""
- 
--    trail_index: int = 0
-+    trail_index: int
-     """Chronological position in the assignment trail."""
- 
--    version: VersionType | None = None
-+    version: VersionType | None
-     """The chosen version (only set for decisions)."""
- 
--    cause: Incompatibility[PackageType, VersionType] | None = None
-+    cause: Incompatibility[PackageType, VersionType] | None
-     """The incompatibility that forced this derivation (only for derivations)."""
- 
--    positive: bool = True
-+    positive: bool
-     """Whether this constrains the package positively or negatively."""
- 
--    cum_positive: RangeProtocol[VersionType] | None = None
-+    cum_positive: RangeProtocol[VersionType] | None
-     """Latest positive accumulated range for the package as of this entry."""
- 
--    cum_negative: RangeProtocol[VersionType] | None = None
-+    cum_negative: RangeProtocol[VersionType] | None
+         "cum_negative",
+         "cum_positive",
+         "decision_level",
+@@ -238,6 +250,12 @@ class Assignment(Generic[PackageType, VersionType]):
+     cum_negative: RangeProtocol[VersionType] | None
      """Latest negative accumulated range for the package as of this entry."""
  
 +    cum_decision: VersionType | None
@@ -290,91 +249,50 @@ index 66212e0..f15c9d2 100644
 +    _effective: RangeProtocol[VersionType] | None
 +    """Lazily cached ``cum_positive - cum_negative`` for conflict probes."""
 +
-+    def __init__(
-+        self,
-+        package: PackageType,
-+        accumulated_range: RangeProtocol[VersionType],
-+        decision_level: int,
-+        is_decision: bool,
-+        trail_index: int = 0,
-+        version: VersionType | None = None,
-+        cause: Incompatibility[PackageType, VersionType] | None = None,
-+        positive: bool = True,
-+        cum_positive: RangeProtocol[VersionType] | None = None,
-+        cum_negative: RangeProtocol[VersionType] | None = None,
+     def __init__(  # noqa: PLR0913, PLR0917 - one parameter per field
+         self,
+         package: PackageType,
+@@ -250,19 +268,21 @@ class Assignment(Generic[PackageType, VersionType]):
+         positive: bool = True,  # noqa: FBT001, FBT002
+         cum_positive: RangeProtocol[VersionType] | None = None,
+         cum_negative: RangeProtocol[VersionType] | None = None,
 +        cum_decision: VersionType | None = None,
-+    ) -> None:
-+        self.package = package
-+        self.accumulated_range = accumulated_range
-+        self.decision_level = decision_level
-+        self.is_decision = is_decision
-+        self.trail_index = trail_index
-+        self.version = version
-+        self.cause = cause
-+        self.positive = positive
-+        self.cum_positive = cum_positive
-+        self.cum_negative = cum_negative
+     ) -> None:
+         """Record one trail entry."""
+         self.package = package
+         self.accumulated_range = accumulated_range
+         self.decision_level = decision_level
+         self.is_decision = is_decision
+-
+         self.trail_index = trail_index
+         self.version = version
+         self.cause = cause
+         self.positive = positive
+         self.cum_positive = cum_positive
+         self.cum_negative = cum_negative
 +        self.cum_decision = cum_decision
 +        self._effective = None
-+
-+    def _values(self) -> tuple[object, ...]:
-+        return (
-+            self.package,
-+            self.accumulated_range,
-+            self.decision_level,
-+            self.is_decision,
-+            self.trail_index,
-+            self.version,
-+            self.cause,
-+            self.positive,
-+            self.cum_positive,
-+            self.cum_negative,
-+            self.cum_decision,
-+        )
-+
-+    def __eq__(self, other: object) -> bool:
-+        return type(other) is Assignment and self._values() == other._values()
-+
-+    __hash__ = None  # type: ignore[assignment]
-+
-+    def __repr__(self) -> str:
-+        values = ", ".join(
-+            f"{name}={value!r}"
-+            for name, value in zip(
-+                (
-+                    "package",
-+                    "accumulated_range",
-+                    "decision_level",
-+                    "is_decision",
-+                    "trail_index",
-+                    "version",
-+                    "cause",
-+                    "positive",
-+                    "cum_positive",
-+                    "cum_negative",
-+                    "cum_decision",
-+                ),
-+                self._values(),
-+            )
-+        )
-+        return f"Assignment({values})"
-+
  
- class PartialSolution(Generic[PackageType, VersionType]):
-     """Tracks the resolver's current partial solution as a decision trail.
-@@ -335,7 +432,9 @@ class PartialSolution(Generic[PackageType, VersionType]):
+     @override
+     def __eq__(self, other: object) -> bool:
+@@ -408,10 +428,12 @@ class PartialSolution(Generic[PackageType, VersionType]):
+ 
+         Computes ``positive - negative``, cached per package.
          """
-         cached = self._effective_range_cache.get(package, _UNSET)
-         if cached is not _UNSET:
--            return cast("RangeProtocol[VersionType] | None", cached)
+-        # ``None`` is a cached answer, so membership decides the hit.
+         cache = self._effective_range_cache
+-        if package in cache:
+-            return cache[package]
++        cached = cache.get(package, _UNSET)
++        if cached is not _UNSET:
 +            # ``typing.cast`` is a runtime call, and this is the hottest read
 +            # in propagation. The sentinel proves the cached union here.
 +            return cached  # ty: ignore[invalid-return-type]
  
          positive = self._positive_ranges.get(package)
          negative = self._negative_ranges.get(package)
-@@ -355,7 +454,9 @@ class PartialSolution(Generic[PackageType, VersionType]):
-         self._effective_range_cache[package] = result
+@@ -431,7 +453,9 @@ class PartialSolution(Generic[PackageType, VersionType]):
+         cache[package] = result
          return result
  
 -    def _refresh_effective_range(self, package: PackageType) -> None:
@@ -384,7 +302,7 @@ index 66212e0..f15c9d2 100644
          """Recompute the package's range, advancing the epoch if it emptied."""
          self._effective_range_cache.pop(package, None)
          self._changed.add(package)
-@@ -363,9 +464,12 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -439,9 +463,12 @@ class PartialSolution(Generic[PackageType, VersionType]):
          assert effective is not None
          if effective.is_empty:
              self._contradiction_epoch += 1
@@ -399,7 +317,7 @@ index 66212e0..f15c9d2 100644
          self._decision_level += 1
          exact_range = self._range_type.singleton(version)
  
-@@ -386,9 +490,11 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -462,9 +489,11 @@ class PartialSolution(Generic[PackageType, VersionType]):
              positive=True,
              cum_positive=exact_range,
              cum_negative=self._negative_ranges.get(package),
@@ -411,7 +329,7 @@ index 66212e0..f15c9d2 100644
  
      def derive(
          self,
-@@ -397,12 +503,14 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -473,12 +502,14 @@ class PartialSolution(Generic[PackageType, VersionType]):
          *,
          positive: bool,
          cause: Incompatibility[PackageType, VersionType],
@@ -427,7 +345,7 @@ index 66212e0..f15c9d2 100644
          See: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation
          """
          if positive:
-@@ -427,7 +535,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -503,7 +534,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
              )
              self._negative_ranges[package] = new_range
  
@@ -436,7 +354,7 @@ index 66212e0..f15c9d2 100644
  
          assignment = Assignment(
              package=package,
-@@ -439,9 +547,11 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -515,9 +546,11 @@ class PartialSolution(Generic[PackageType, VersionType]):
              positive=positive,
              cum_positive=self._positive_ranges.get(package),
              cum_negative=self._negative_ranges.get(package),
@@ -448,7 +366,7 @@ index 66212e0..f15c9d2 100644
  
      def backtrack(self, target_level: int) -> None:
          """Remove all assignments above target_level.
-@@ -459,20 +569,22 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -535,55 +568,44 @@ class PartialSolution(Generic[PackageType, VersionType]):
          # Trail levels never decrease, so this pops exactly the assignments above
          # target_level; every other package keeps the positive and negative ranges
          # its cached effective range was derived from.
@@ -463,10 +381,14 @@ index 66212e0..f15c9d2 100644
  
 -        empty_packages: list[PackageType] = []
 -        for package, entries in self._assignments_by_package.items():
+-            popped = decision_popped = False
 +        for package in changed_packages:
 +            entries = self._assignments_by_package[package]
              while entries and entries[-1].decision_level > target_level:
-                 entries.pop()
+-                popped = True
+-                if entries.pop().is_decision:
+-                    decision_popped = True
++                entries.pop()
  
              if not entries:
 -                empty_packages.append(package)
@@ -474,32 +396,39 @@ index 66212e0..f15c9d2 100644
                  self._positive_ranges.pop(package, None)
                  self._negative_ranges.pop(package, None)
                  self._decided_versions.pop(package, None)
-@@ -480,9 +592,6 @@ class PartialSolution(Generic[PackageType, VersionType]):
-             else:
-                 self._update_package_state_after_backtrack(package, entries)
- 
+                 self._undecided.discard(package)
+-            # A package that kept every entry already holds what the rebuild
+-            # would restore.
+-            elif popped:
+-                self._update_package_state_after_backtrack(
+-                    package, entries, decision_popped=decision_popped
+-                )
+-
 -        for package in empty_packages:
 -            del self._assignments_by_package[package]
--
++            else:
++                self._update_package_state_after_backtrack(package, entries)
+ 
      def _update_package_state_after_backtrack(
          self,
          package: PackageType,
-@@ -495,18 +604,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
-         never decrease, so popping a decision pops every later entry for the
-         same package; a surviving decision is always the current one.
+         entries: list[Assignment[PackageType, VersionType]],
+-        *,
+-        decision_popped: bool,
+     ) -> None:
+         """Restore a package's state from its last surviving entry.
+ 
+         ``decide`` and ``derive`` stamp each entry with the package's positive
+-        and negative ranges as of that entry, and a backtrack keeps a prefix of
+-        the entries, so the last survivor already carries both.  A package holds
+-        at most one decision at a time, so its decided version stands unless the
+-        pop reached the decision itself.
++        and negative ranges and decided version as of that entry. A backtrack
++        keeps a prefix, so the last survivor already carries the complete state.
          """
--        last_pos: RangeProtocol[VersionType] | None = None
--        last_neg: RangeProtocol[VersionType] | None = None
--        last_decision_version: VersionType | None = None
--
--        for assignment in entries:
--            if assignment.is_decision:
--                last_pos = assignment.accumulated_range
--                last_decision_version = assignment.version
--            elif assignment.positive:
--                last_pos = assignment.accumulated_range
--            else:
--                last_neg = assignment.accumulated_range
+-        tail = entries[-1]
+-        last_pos = tail.cum_positive
+-        last_neg = tail.cum_negative
 +        last_entry = entries[-1]
 +        last_pos = last_entry.cum_positive
 +        last_neg = last_entry.cum_negative
@@ -507,7 +436,22 @@ index 66212e0..f15c9d2 100644
  
          if last_pos is None:
              self._positive_ranges.pop(package, None)
-@@ -535,6 +636,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -595,10 +617,12 @@ class PartialSolution(Generic[PackageType, VersionType]):
+         else:
+             self._negative_ranges[package] = last_neg
+ 
+-        if decision_popped:
++        if last_decision_version is None:
+             self._decided_versions.pop(package, None)
++        else:
++            self._decided_versions[package] = last_decision_version
+ 
+-        if last_pos is not None and package not in self._decided_versions:
++        if last_pos is not None and last_decision_version is None:
+             self._undecided.add(package)
+         else:
+             self._undecided.discard(package)
+@@ -610,6 +634,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
          """
          return _take_snapshot(self._decided_versions, self._decision_snapshots)
  
@@ -518,7 +462,7 @@ index 66212e0..f15c9d2 100644
      def _freeze_decisions(self, package: PackageType) -> None:
          """Preserve the package's decided version in outstanding snapshots."""
          for holder in self._decision_snapshots:
-@@ -599,15 +704,18 @@ class PartialSolution(Generic[PackageType, VersionType]):
+@@ -675,15 +703,18 @@ class PartialSolution(Generic[PackageType, VersionType]):
          if is_positive and cum_positive is None:
              return False
  
@@ -547,7 +491,7 @@ index 66212e0..f15c9d2 100644
          return term.satisfies(effective)
  
 diff --git a/src/cpip/_vendor/nab_resolver/propagate.py b/src/cpip/_vendor/nab_resolver/propagate.py
-index c6cf101..4bb6eae 100644
+index bc7edc0..9d1a08f 100644
 --- a/src/cpip/_vendor/nab_resolver/propagate.py
 +++ b/src/cpip/_vendor/nab_resolver/propagate.py
 @@ -11,6 +11,9 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propa
@@ -560,7 +504,7 @@ index c6cf101..4bb6eae 100644
  from typing import TYPE_CHECKING, Any
  
  from .types import IncompatibilityState, SetRelation, Term
-@@ -43,6 +46,23 @@ RELATION_GATE_RECHECK = 65_536
+@@ -50,6 +53,23 @@ RELATION_GATE_RECHECK = 65_536
  RANGE_ID_MEMO_MAX = 8_192
  
  
@@ -584,7 +528,7 @@ index c6cf101..4bb6eae 100644
  def unit_propagation(
      resolver: Resolver[Any, Any], changed_package: Any
  ) -> Incompatibility[Any, Any] | None:
-@@ -57,58 +77,218 @@ def unit_propagation(
+@@ -64,58 +84,216 @@ def unit_propagation(
      contradiction epoch.  Each clause records the epoch it was last settled in,
      and is skipped while that stamp is current.
  
@@ -696,7 +640,7 @@ index c6cf101..4bb6eae 100644
 -            incompatibility = resolver.incompatibilities[incompatibility_index]
 -            evaluation = evaluate_incompatibility(resolver, incompatibility)
 -
--            if evaluation is IncompatibilityState.CONTRADICTED:
+-            if evaluation is _CONTRADICTED_STATE:
 -                contradicted_at[incompatibility_index] = epoch
 +            incompatibility = incompatibilities[incompatibility_index]
 +
@@ -710,12 +654,6 @@ index c6cf101..4bb6eae 100644
 +                else:
 +                    positive = term._positive  # noqa: SLF001
 +                    constraint = term.constraint
-+
-+                    countdown = resolver.relation_gate_countdown - 1
-+                    if countdown:
-+                        resolver.relation_gate_countdown = countdown
-+                    else:
-+                        _resample_relation_gate(resolver)
 +
 +                    key = None
 +                    relation = None
@@ -752,10 +690,14 @@ index c6cf101..4bb6eae 100644
 +                                    contradicted if subset else SetRelation.UNDETERMINED
 +                                )
 +                            )
++                        probes_left = resolver.relation_gate_probes_left - 1
++                        resolver.relation_gate_probes_left = probes_left
 +                        if key is not None:
 +                            if len(cache) >= RELATION_CACHE_MAX:
 +                                cache.clear()
 +                            cache[key] = relation
++                        if probes_left <= resolver.relation_gate_hits:
++                            _resample_relation_gate(resolver)
 +                    else:
 +                        resolver.relation_gate_hits += 1
 +
@@ -784,7 +726,7 @@ index c6cf101..4bb6eae 100644
 +                    return incompatibility
                  continue
  
--            if evaluation is IncompatibilityState.CONFLICT:
+-            if evaluation is _CONFLICT_STATE:
 -                return incompatibility
 -
 -            if isinstance(evaluation, Term):
@@ -837,7 +779,7 @@ index c6cf101..4bb6eae 100644
  
      return None
  
-@@ -152,6 +332,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
+@@ -159,6 +337,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
      tokens = resolver.range_tokens
      token = tokens.get(range_)
      if token is None:
@@ -847,7 +789,7 @@ index c6cf101..4bb6eae 100644
          resolver.next_range_token = token + 1
          tokens[range_] = token
 diff --git a/src/cpip/_vendor/nab_resolver/ranges.py b/src/cpip/_vendor/nab_resolver/ranges.py
-index 568bd5a..38da578 100644
+index 4385af4..a31a214 100644
 --- a/src/cpip/_vendor/nab_resolver/ranges.py
 +++ b/src/cpip/_vendor/nab_resolver/ranges.py
 @@ -27,6 +27,8 @@ _EMPTY_REL = RangeRelation.EMPTY
@@ -1055,7 +997,7 @@ index 568bd5a..38da578 100644
          result: list[Interval] = []
          left_index = right_index = 0
          while left_index < len(self._intervals) and right_index < len(other._intervals):
-@@ -327,7 +423,7 @@ class Range(Generic[VersionType]):
+@@ -333,7 +429,7 @@ class Range(Generic[VersionType]):
              # Advance the side with the smaller upper bound
              left_upper = left_interval[2]
              right_upper = right_interval[2]
@@ -1064,7 +1006,7 @@ index 568bd5a..38da578 100644
                  left_index += 1
                  right_index += 1
              elif left_upper is POSITIVE_INFINITY or (
-@@ -343,6 +439,14 @@ class Range(Generic[VersionType]):
+@@ -349,6 +445,14 @@ class Range(Generic[VersionType]):
          """Union of two ranges (versions in either)."""
          if not isinstance(other, Range):
              return NotImplemented
@@ -1079,7 +1021,7 @@ index 568bd5a..38da578 100644
          all_intervals = list(self._intervals) + list(other._intervals)
          return Range(_normalize_intervals(all_intervals))
  
-@@ -405,66 +509,94 @@ class Range(Generic[VersionType]):
+@@ -411,48 +515,59 @@ class Range(Generic[VersionType]):
          if not isinstance(other, Range):
              return NotImplemented
  
@@ -1105,6 +1047,8 @@ index 568bd5a..38da578 100644
              lower, lower_inclusive, upper, upper_inclusive = left
  
              # A right interval below this one is below every later one too.
+-            # Written out it would need an ``if`` to break on, which puts
+-            # ``__sub__`` past ruff's C901 ceiling, so this one stays a call.
 -            while right_index < right_count and _ends_before(
 -                right_intervals[right_index], left
 -            ):
@@ -1125,43 +1069,40 @@ index 568bd5a..38da578 100644
              scan = right_index
  
              while scan < right_count:
-                 right = right_intervals[scan]
+-                right_lower, right_lower_inc, right_upper, right_upper_inc = (
+-                    right_intervals[scan]
+-                )
++                right = right_intervals[scan]
++                right_lower, right_lower_inc, right_upper, right_upper_inc = right
  
--                # Carving moves the remainder's lower end only, so its upper end
--                # is still left's and this comparison can read left directly.
--                if _ends_before(left, right):
+-                # _ends_before, written out.  Carving only moves the
+-                # remainder's lower end, so ``upper`` is still left's own.
+                 if (
+                     upper is not POSITIVE_INFINITY
+                     and right_lower is not NEGATIVE_INFINITY
+-                    and (
+-                        not (upper_inclusive and right_lower_inc)
+-                        if upper == right_lower
+-                        else upper < right_lower
+-                    )
+                 ):
 -                    break
--
-                 right_lower, right_lower_inc, right_upper, right_upper_inc = right
- 
-+                if (
-+                    upper is not POSITIVE_INFINITY
-+                    and right_lower is not NEGATIVE_INFINITY
-+                ):
 +                    if upper == right_lower:
 +                        if not (upper_inclusive and right_lower_inc):
 +                            break
 +                    elif upper < right_lower:
 +                        break
-+
-                 # Whatever of the remainder sits below this right interval survives.
--                if right_lower is not NEGATIVE_INFINITY and not _interval_is_empty(
--                    lower,
--                    lower_inclusive=lower_inclusive,
--                    upper=right_lower,
--                    upper_inclusive=not right_lower_inc,
-+                if right_lower is not NEGATIVE_INFINITY and not (
-+                    lower is not NEGATIVE_INFINITY
-+                    and (
-+                        lower > right_lower
-+                        or (
-+                            lower == right_lower
-+                            and not (lower_inclusive and not right_lower_inc)
-+                        )
-+                    )
-                 ):
-                     result.append(
-                         (lower, lower_inclusive, right_lower, not right_lower_inc)
+ 
+-                # Whatever of the remainder sits below this right interval
+-                # survives.  _interval_is_empty, written out.
++                # Whatever of the remainder sits below this right interval survives.
+                 if right_lower is not NEGATIVE_INFINITY and not (
+                     lower is not NEGATIVE_INFINITY
+-                    and right_lower is not POSITIVE_INFINITY
+                     and (
+                         lower > right_lower
+                         or (
+@@ -466,29 +581,22 @@ class Range(Generic[VersionType]):
                      )
  
                  if right_upper is POSITIVE_INFINITY:
@@ -1169,13 +1110,18 @@ index 568bd5a..38da578 100644
 +                    exhausted = True
                      break
  
-                 # Resume above this right interval.
+                 # Resume above this right interval, stopping when nothing of
+                 # it is left.  _interval_is_empty, written out.
                  lower, lower_inclusive = right_upper, not right_upper_inc
--                if _interval_is_empty(
--                    lower,
--                    lower_inclusive=lower_inclusive,
--                    upper=upper,
--                    upper_inclusive=upper_inclusive,
+-                if (
+-                    lower is not NEGATIVE_INFINITY
+-                    and upper is not POSITIVE_INFINITY
+-                    and (
+-                        lower > upper
+-                        or (
+-                            lower == upper and not (lower_inclusive and upper_inclusive)
+-                        )
+-                    )
 +                if upper is not POSITIVE_INFINITY and (
 +                    lower > upper
 +                    or (lower == upper and not (lower_inclusive and upper_inclusive))
@@ -1186,22 +1132,13 @@ index 568bd5a..38da578 100644
  
                  scan += 1
  
--            if not fully_covered and not _interval_is_empty(
--                lower,
--                lower_inclusive=lower_inclusive,
--                upper=upper,
--                upper_inclusive=upper_inclusive,
+-            # _interval_is_empty, written out.
+-            if not fully_covered and not (
 +            if not exhausted and not (
-+                lower is not NEGATIVE_INFINITY
-+                and upper is not POSITIVE_INFINITY
-+                and (
-+                    lower > upper
-+                    or (lower == upper and not (lower_inclusive and upper_inclusive))
-+                )
-             ):
-                 result.append((lower, lower_inclusive, upper, upper_inclusive))
- 
-@@ -478,14 +610,32 @@ class Range(Generic[VersionType]):
+                 lower is not NEGATIVE_INFINITY
+                 and upper is not POSITIVE_INFINITY
+                 and (
+@@ -508,27 +616,31 @@ class Range(Generic[VersionType]):
          ``other`` always leave a gap, so an interval of self is covered only
          when a single interval of other holds all of it.
          """
@@ -1220,12 +1157,23 @@ index 568bd5a..38da578 100644
          right_index = 0
  
 -        for left in self._intervals:
--            while right_index < right_count and _ends_before(
--                right_intervals[right_index], left
--            ):
 +        for left in left_intervals:
-+            left_lower, left_lower_inclusive = left[0], left[1]
-+            while right_index < right_count:
+             left_lower, left_lower_inclusive = left[0], left[1]
+-
+-            # Retire every right interval that finishes below this one:
+-            # _ends_before, written out.
+             while right_index < right_count:
+-                candidate = right_intervals[right_index]
+-                candidate_upper = candidate[2]
+-                if (
+-                    candidate_upper is POSITIVE_INFINITY
+-                    or left_lower is NEGATIVE_INFINITY
+-                    or (
+-                        (candidate[3] and left_lower_inclusive)
+-                        if candidate_upper == left_lower
+-                        else not candidate_upper < left_lower
+-                    )
+-                ):
 +                right = right_intervals[right_index]
 +                right_upper = right[2]
 +                if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
@@ -1234,11 +1182,10 @@ index 568bd5a..38da578 100644
 +                    if right[3] and left_lower_inclusive:
 +                        break
 +                elif not right_upper < left_lower:
-+                    break
+                     break
                  right_index += 1
  
-             if right_index >= right_count:
-@@ -495,7 +645,12 @@ class Range(Generic[VersionType]):
+@@ -539,7 +651,12 @@ class Range(Generic[VersionType]):
              lower, lower_inclusive = _max_lower_bound(left, right)
              upper, upper_inclusive = _min_upper_bound(left, right)
  
@@ -1252,7 +1199,7 @@ index 568bd5a..38da578 100644
                  return False
  
          return True
-@@ -510,6 +665,15 @@ class Range(Generic[VersionType]):
+@@ -554,6 +671,15 @@ class Range(Generic[VersionType]):
          Stops at the first shared version rather than building the whole
          intersection.
          """
@@ -1268,22 +1215,27 @@ index 568bd5a..38da578 100644
          left_intervals = self._intervals
          right_intervals = other._intervals
          left_count = len(left_intervals)
-@@ -539,16 +703,71 @@ class Range(Generic[VersionType]):
+@@ -586,84 +712,71 @@ class Range(Generic[VersionType]):
          return True
  
      def relation(self, other: Range[VersionType]) -> RangeRelation:
 -        """Return how self's members sit against other's.
 -
--        The empty range is both a subset and disjoint, so it is answered ahead
--        of the walks instead of by running both of them.
+-        The empty range is both a subset and disjoint, so it is answered
+-        before the walk rather than by it.
+-
+-        One walk answers subset and disjoint together, on the same invariant
+-        :meth:`is_subset` relies on.  Each interval of self is decided by the
+-        first interval of other that does not end below it: everything the
+-        walk skipped ended below, and the invariant leaves a gap after the one
+-        it stopped on, so nothing else can cover what that one leaves out.
 -        """
 +        """Return how self's members sit against other's in one interval walk."""
          if self.is_empty:
              return _EMPTY_REL
--        if self.is_subset(other):
-+
+ 
 +        left_intervals = self._intervals
-+        right_intervals = other._intervals
+         right_intervals = other._intervals
 +        if (
 +            len(left_intervals) >= _POINT_SET_MIN_INTERVALS
 +            or len(right_intervals) >= _POINT_SET_MIN_INTERVALS
@@ -1297,14 +1249,34 @@ index 568bd5a..38da578 100644
 +                    return _DISJOINT_REL
 +                return _OVERLAPPING_REL
 +
-+        right_count = len(right_intervals)
+         right_count = len(right_intervals)
 +        is_subset = True
 +        is_disjoint = True
-+        right_index = 0
-+
+         right_index = 0
+ 
+-        # subset is cleared by an interval of self that other leaves
+-        # uncovered, disjoint by one that meets other.
+-        subset = True
+-        disjoint = True
+-
+-        for left in self._intervals:
 +        for left in left_intervals:
-+            left_lower, left_lower_inclusive = left[0], left[1]
-+            while right_index < right_count:
+             left_lower, left_lower_inclusive = left[0], left[1]
+-
+-            # Retire every right interval that finishes below this one:
+-            # _ends_before, written out.
+             while right_index < right_count:
+-                candidate = right_intervals[right_index]
+-                candidate_upper = candidate[2]
+-                if (
+-                    candidate_upper is POSITIVE_INFINITY
+-                    or left_lower is NEGATIVE_INFINITY
+-                    or (
+-                        (candidate[3] and left_lower_inclusive)
+-                        if candidate_upper == left_lower
+-                        else not candidate_upper < left_lower
+-                    )
+-                ):
 +                right = right_intervals[right_index]
 +                right_upper = right[2]
 +                if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
@@ -1313,41 +1285,64 @@ index 568bd5a..38da578 100644
 +                    if right[3] and left_lower_inclusive:
 +                        break
 +                elif not right_upper < left_lower:
-+                    break
-+                right_index += 1
-+
-+            if right_index >= right_count:
+                     break
+                 right_index += 1
+ 
+             if right_index >= right_count:
+-                # Every remaining interval of self sits above all of other, so
+-                # none is covered and none meets anything.
+-                subset = False
 +                is_subset = False
 +                if not is_disjoint:
 +                    return _OVERLAPPING_REL
-+                break
-+
-+            right = right_intervals[right_index]
+                 break
+ 
+-            # _ends_before, written out, against the first right interval
+-            # still standing.
+             right = right_intervals[right_index]
+-            left_upper = left[2]
+-            right_lower = right[0]
+-            if (
+-                left_upper is not POSITIVE_INFINITY
+-                and right_lower is not NEGATIVE_INFINITY
+-                and (
+-                    not (left[3] and right[1])
+-                    if left_upper == right_lower
+-                    else left_upper < right_lower
+-                )
+-            ):
+-                # It meets nothing: the walk skipped everything below it, and
+-                # right starts above it.  Leave right for the next one.
+-                subset = False
 +            if _ends_before(left, right):
 +                is_subset = False
 +                if not is_disjoint:
 +                    return _OVERLAPPING_REL
-+                continue
-+
+                 continue
+ 
+-            disjoint = False
 +            is_disjoint = False
-+            lower, lower_inclusive = _max_lower_bound(left, right)
-+            upper, upper_inclusive = _min_upper_bound(left, right)
+             lower, lower_inclusive = _max_lower_bound(left, right)
+             upper, upper_inclusive = _min_upper_bound(left, right)
+-
+-            if (lower, lower_inclusive, upper, upper_inclusive) != left:
 +            if (
 +                lower_inclusive is not left[1]
 +                or upper_inclusive is not left[3]
 +                or not _same_bound(lower, left[0])
 +                or not _same_bound(upper, left[2])
 +            ):
-+                return _OVERLAPPING_REL
-+
+                 return _OVERLAPPING_REL
+ 
+-        if subset:
 +        if is_subset:
              return _SUBSET_REL
--        if self.is_disjoint(other):
+-        if disjoint:
 +        if is_disjoint:
              return _DISJOINT_REL
          return _OVERLAPPING_REL
  
-@@ -588,6 +807,7 @@ class Range(Generic[VersionType]):
+@@ -703,6 +816,7 @@ class Range(Generic[VersionType]):
          """Restore from :meth:`__getstate__`, leaving the hash to be recomputed."""
          (self._intervals,) = state
          self._hash = 0
@@ -1356,67 +1351,10 @@ index 568bd5a..38da578 100644
      @override
      def __repr__(self) -> str:
 diff --git a/src/cpip/_vendor/nab_resolver/resolver.py b/src/cpip/_vendor/nab_resolver/resolver.py
-index 2035d02..913f806 100644
+index c71fbef..d1e89fb 100644
 --- a/src/cpip/_vendor/nab_resolver/resolver.py
 +++ b/src/cpip/_vendor/nab_resolver/resolver.py
-@@ -22,7 +22,6 @@ from __future__ import annotations
- 
- from collections import defaultdict
- from collections.abc import Callable, Mapping, Sequence
--from dataclasses import dataclass, field
- from typing import TYPE_CHECKING, Any, Generic, Protocol
- 
- from . import conflict, decide, incompat_index, propagate
-@@ -67,7 +66,6 @@ __all__ = [
- DEFAULT_MAX_ITERATIONS = 200_000
- 
- 
--@dataclass(frozen=True)
- class Solution(Generic[PackageType, VersionType]):
-     """Pins and dependency relationships from a finished resolution.
- 
-@@ -82,6 +80,40 @@ class Solution(Generic[PackageType, VersionType]):
-     edges: tuple[tuple[PackageType, PackageType], ...]
-     roots: tuple[PackageType, ...]
- 
-+    def __init__(
-+        self,
-+        pins: dict[PackageType, VersionType],
-+        edges: tuple[tuple[PackageType, PackageType], ...],
-+        roots: tuple[PackageType, ...],
-+    ) -> None:
-+        object.__setattr__(self, "pins", pins)
-+        object.__setattr__(self, "edges", edges)
-+        object.__setattr__(self, "roots", roots)
-+        object.__setattr__(self, "_frozen", True)
-+
-+    def __setattr__(self, name: str, value: object) -> None:
-+        if getattr(self, "_frozen", False):
-+            raise AttributeError(f"cannot assign to field {name!r}")
-+        object.__setattr__(self, name, value)
-+
-+    def __delattr__(self, name: str) -> None:
-+        raise AttributeError(f"cannot delete field {name!r}")
-+
-+    def __eq__(self, other: object) -> bool:
-+        return type(other) is Solution and (
-+            self.pins,
-+            self.edges,
-+            self.roots,
-+        ) == (other.pins, other.edges, other.roots)
-+
-+    __hash__ = None  # type: ignore[assignment]
-+
-+    def __repr__(self) -> str:
-+        return (
-+            f"Solution(pins={self.pins!r}, edges={self.edges!r}, "
-+            f"roots={self.roots!r})"
-+        )
-+
- 
- class ResolverProvider(Protocol[PackageType, VersionType]):
-     """Interface for supplying version and dependency information.
-@@ -159,6 +191,14 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
+@@ -236,6 +236,14 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
          """
          ...
  
@@ -1431,7 +1369,7 @@ index 2035d02..913f806 100644
      def receive_partial_solution_hint(
          self,
          positive_ranges: Mapping[PackageType, RangeProtocol[VersionType]],
-@@ -262,6 +302,10 @@ class BaseProvider(Generic[PackageType, VersionType]):
+@@ -340,6 +348,10 @@ class BaseProvider(Generic[PackageType, VersionType]):
          del package
          return True
  
@@ -1442,67 +1380,7 @@ index 2035d02..913f806 100644
      def receive_partial_solution_hint(
          self,
          positive_ranges: Mapping[PackageType, RangeProtocol[VersionType]],
-@@ -292,7 +336,6 @@ class BaseProvider(Generic[PackageType, VersionType]):
-         return constraint
- 
- 
--@dataclass
- class ResolverStats(Generic[PackageType]):
-     """Running statistics for resolution observability.
- 
-@@ -301,20 +344,37 @@ class ResolverStats(Generic[PackageType]):
-     See: https://minisat.se/MiniSat.html
-     """
- 
--    rounds: int = 0
--    decisions: int = 0
--    conflicts: int = 0
--    derivations: int = 0
--    backjumps: int = 0
--    restarts: int = 0
--    targeted_backtracks: int = 0
--    incompatibilities_learned: int = 0
--    package_conflict_counts: defaultdict[PackageType, int] = field(
--        default_factory=lambda: defaultdict(int)
--    )
--    package_culprit_counts: defaultdict[PackageType, int] = field(
--        default_factory=lambda: defaultdict(int)
--    )
-+    def __init__(
-+        self,
-+        rounds: int = 0,
-+        decisions: int = 0,
-+        conflicts: int = 0,
-+        derivations: int = 0,
-+        backjumps: int = 0,
-+        restarts: int = 0,
-+        targeted_backtracks: int = 0,
-+        incompatibilities_learned: int = 0,
-+        package_conflict_counts: defaultdict[PackageType, int] | None = None,
-+        package_culprit_counts: defaultdict[PackageType, int] | None = None,
-+    ) -> None:
-+        self.rounds = rounds
-+        self.decisions = decisions
-+        self.conflicts = conflicts
-+        self.derivations = derivations
-+        self.backjumps = backjumps
-+        self.restarts = restarts
-+        self.targeted_backtracks = targeted_backtracks
-+        self.incompatibilities_learned = incompatibilities_learned
-+        self.package_conflict_counts = (
-+            defaultdict(int)
-+            if package_conflict_counts is None
-+            else package_conflict_counts
-+        )
-+        self.package_culprit_counts = (
-+            defaultdict(int)
-+            if package_culprit_counts is None
-+            else package_culprit_counts
-+        )
- 
- 
- class ResolverObserver(Generic[PackageType, VersionType]):
-@@ -462,6 +522,16 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -650,6 +662,16 @@ class Resolver(Generic[PackageType, VersionType]):
          self.package_to_incompatibilities: defaultdict[Any, list[int]] = defaultdict(
              list
          )
@@ -1519,7 +1397,7 @@ index 2035d02..913f806 100644
  
          # Per clause, the contradiction epoch in which one of its terms was
          # last seen contradicted; unit propagation skips a clause whose stamp
-@@ -643,51 +713,96 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -840,51 +862,96 @@ class Resolver(Generic[PackageType, VersionType]):
              decide.record_no_versions(self, next_package, had_pending=had_pending)
              return next_package
  
@@ -1646,7 +1524,7 @@ index 2035d02..913f806 100644
      def _build_result(self) -> Solution[PackageType, VersionType]:
          """Build the final result, including only reachable packages.
  
-@@ -709,6 +824,10 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -906,6 +973,10 @@ class Resolver(Generic[PackageType, VersionType]):
          """Reset solver state for a new resolution."""
          self.incompatibilities.clear()
          self.package_to_incompatibilities.clear()
@@ -1657,84 +1535,3 @@ index 2035d02..913f806 100644
          self.clause_contradicted_at.clear()
          self.dependency_index.clear()
          self.solution = PartialSolution(range_type=self.range_type)
-diff --git a/src/cpip/_vendor/nab_resolver/root.py b/src/cpip/_vendor/nab_resolver/root.py
-index d13c593..1735fc6 100644
---- a/src/cpip/_vendor/nab_resolver/root.py
-+++ b/src/cpip/_vendor/nab_resolver/root.py
-@@ -24,9 +24,8 @@ class _RootPackage:
-     def __repr__(self) -> str:
-         return "<root>"
- 
--    @override
--    def __hash__(self) -> int:
--        return hash("__nab_root__")
-+    # Keep object's C-level identity hash. A Python override adds a frame to
-+    # every package-keyed lookup involving the virtual root.
- 
- 
- ROOT = _RootPackage()
-diff --git a/src/cpip/_vendor/nab_resolver/types.py b/src/cpip/_vendor/nab_resolver/types.py
-index e91a66b..cbcc3c1 100644
---- a/src/cpip/_vendor/nab_resolver/types.py
-+++ b/src/cpip/_vendor/nab_resolver/types.py
-@@ -12,7 +12,6 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#definition
- from __future__ import annotations
- 
- import enum
--from dataclasses import dataclass
- from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
- 
- from ._compat import override
-@@ -259,10 +258,6 @@ class RelationProtocol(Protocol):
-         ...
- 
- 
--# No ``slots=True``: on 3.10 a frozen slotted dataclass raises TypeError when
--# ``typing._GenericAlias.__call__`` sets ``__orig_class__``, which the
--# subscripted construction in ``resolver._as_root_requirements`` triggers.
--@dataclass(frozen=True)
- class RootRequirement(Generic[PackageType, VersionType]):
-     """One requirement as the caller wrote it, kept as its own clause.
- 
-@@ -281,6 +276,41 @@ class RootRequirement(Generic[PackageType, VersionType]):
-     constraint: RangeProtocol[VersionType]
-     origin: Any = None
- 
-+    def __init__(
-+        self,
-+        package: PackageType,
-+        constraint: RangeProtocol[VersionType],
-+        origin: Any = None,
-+    ) -> None:
-+        object.__setattr__(self, "package", package)
-+        object.__setattr__(self, "constraint", constraint)
-+        object.__setattr__(self, "origin", origin)
-+        object.__setattr__(self, "_frozen", True)
-+
-+    def __setattr__(self, name: str, value: object) -> None:
-+        if getattr(self, "_frozen", False):
-+            raise AttributeError(f"cannot assign to field {name!r}")
-+        object.__setattr__(self, name, value)
-+
-+    def __delattr__(self, name: str) -> None:
-+        raise AttributeError(f"cannot delete field {name!r}")
-+
-+    def __eq__(self, other: object) -> bool:
-+        return type(other) is RootRequirement and (
-+            self.package,
-+            self.constraint,
-+            self.origin,
-+        ) == (other.package, other.constraint, other.origin)
-+
-+    def __hash__(self) -> int:
-+        return hash((self.package, self.constraint, self.origin))
-+
-+    def __repr__(self) -> str:
-+        return (
-+            f"RootRequirement(package={self.package!r}, "
-+            f"constraint={self.constraint!r}, origin={self.origin!r})"
-+        )
-+
- 
- class SetRelation(enum.Enum):
-     """How the partial solution relates to a term.

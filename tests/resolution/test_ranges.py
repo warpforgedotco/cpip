@@ -11,14 +11,20 @@ membership oracle over sampled points.
 
 from __future__ import annotations
 
+import inspect
 import random
 
 import pytest
+from cpip._vendor.nab_resolver import ranges as ranges_module
 from cpip._vendor.nab_resolver.ranges import (
     NEGATIVE_INFINITY,
     POSITIVE_INFINITY,
     Range,
 )
+
+_HAS_EXTENDED_BETWEEN = "lower_inclusive" in inspect.signature(Range.between).parameters
+_HAS_POINT_SET_CACHE = "_points" in Range.__slots__
+_HAS_SAFE_INFINITY_COMPARISONS = hasattr(ranges_module, "_same_bound")
 
 PROBES = [value * 0.5 for value in range(-2, 20)]
 
@@ -92,6 +98,10 @@ def point_range(values: set[int]) -> Range:
     "lower_inclusive, upper_inclusive",
     [(False, False), (False, True), (True, False), (True, True)],
 )
+@pytest.mark.skipif(
+    not _HAS_EXTENDED_BETWEEN,
+    reason="requires cpip's extended Range.between patch",
+)
 def test_between_preserves_bound_inclusivity(
     lower_inclusive: bool,
     upper_inclusive: bool,
@@ -115,6 +125,10 @@ def test_between_preserves_bound_inclusivity(
         (1, 1, False, False, Range.empty()),
         (2, 1, True, True, Range.empty()),
     ],
+)
+@pytest.mark.skipif(
+    not _HAS_EXTENDED_BETWEEN,
+    reason="requires cpip's extended Range.between patch",
 )
 def test_between_rejects_empty_bound_combinations(
     lower: int,
@@ -202,6 +216,10 @@ def test_discrete_and_continuous_ranges_use_the_same_semantics() -> None:
     assert not points.is_disjoint(span)
 
 
+@pytest.mark.skipif(
+    not _HAS_POINT_SET_CACHE,
+    reason="requires cpip's discrete-range optimization patch",
+)
 def test_point_set_cache_is_reserved_for_large_discrete_ranges() -> None:
     small = point_range(set(range(15)))
     large = point_range(set(range(16)))
@@ -215,6 +233,10 @@ def test_point_set_cache_is_reserved_for_large_discrete_ranges() -> None:
     assert isinstance(large._points, frozenset)
 
 
+@pytest.mark.skipif(
+    not _HAS_POINT_SET_CACHE,
+    reason="requires cpip's discrete-range optimization patch",
+)
 def test_large_discrete_binary_operation_converts_both_operands() -> None:
     small = point_range({1, 3})
     large = point_range(set(range(0, 32, 2)))
@@ -224,6 +246,10 @@ def test_large_discrete_binary_operation_converts_both_operands() -> None:
     assert isinstance(large._points, frozenset)
 
 
+@pytest.mark.skipif(
+    not _HAS_POINT_SET_CACHE,
+    reason="requires cpip's discrete-range optimization patch",
+)
 def test_large_discrete_range_rebuilds_point_cache_after_pickle() -> None:
     import pickle
 
@@ -372,6 +398,10 @@ def plain(candidate: Range) -> Range:
 
 
 @pytest.mark.parametrize("seed", range(8))
+@pytest.mark.skipif(
+    not _HAS_SAFE_INFINITY_COMPARISONS,
+    reason="requires cpip's infinity-bound compatibility patch",
+)
 def test_bounds_are_never_compared_with_a_sentinel(seed: int) -> None:
     """The interval algebra over bounds that refuse foreign operands gives
     the same answers as over plain integers."""

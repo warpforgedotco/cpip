@@ -92,9 +92,7 @@ def _append_dependency(
     if exact_parent_version is NO_EXACT_PARENT_VERSION:
         _register_fallback_parent(resolver, parent.package, index)
     else:
-        _register_exact_parent(
-            resolver, parent.package, exact_parent_version, index
-        )
+        _register_exact_parent(resolver, parent.package, exact_parent_version, index)
     return index
 
 
