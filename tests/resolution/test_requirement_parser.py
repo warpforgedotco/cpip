@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import io
 import threading
 import time
 from pathlib import Path
 
 import pytest
 from cpip.core.errors import InstallationError
-from cpip.network.http import HttpResponse
+from cpip.core.http import HttpResponse
 from cpip.resolution.files.models import RequirementsFileParseError
 from cpip.resolution.files.parser import parse_requirements
+from cpip_test_support.transport_mocks import make_response
 
 
 def test_deep_requirement_includes_without_recursion(tmp_path: Path) -> None:
@@ -124,12 +124,12 @@ def test_remote_requirement_includes_are_prefetched(tmp_path) -> None:
                 content = (
                     b"demo==1\n" if url.endswith("requirements.txt") else b"demo<2\n"
                 )
-                return HttpResponse(
-                    status_code=200,
+                return make_response(
+                    status=200,
                     reason="OK",
                     url=url,
                     headers={"Content-Type": "text/plain"},
-                    raw=io.BytesIO(content),
+                    body=content,
                 )
             finally:
                 with self.lock:

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import io
 import logging
 import os
 from pathlib import Path
 
 import pytest
 from cpip.cli.main import main
+from cpip.core.http import HttpResponse
 from cpip.core.packaging import Requirement, parse_requirement
 from cpip.core.versions import Version
 from cpip.core.wheel import TargetContext
@@ -32,7 +32,7 @@ from cpip.index.source_models import (
 )
 from cpip.index.vcs import is_immutable_vcs_link, vcs_reference
 from cpip.network.cache import SafeFileCache
-from cpip.network.http import HttpResponse
+from cpip_test_support.transport_mocks import make_response
 from ..wheel_helpers import make_sdist, make_wheel
 
 
@@ -633,14 +633,14 @@ def test_pypi_release_metadata_is_shared_by_artifacts() -> None:
         def get(self, url: str) -> HttpResponse:
             self.calls += 1
             assert url == "https://pypi.org/pypi/demo/1.0/json"
-            return HttpResponse(
-                status_code=200,
+            return make_response(
+                status=200,
                 reason="OK",
                 url=url,
                 headers={"Content-Type": "application/json"},
-                raw=io.BytesIO(
+                body=(
                     b'{"info": {"name": "demo", "version": "1.0", '
-                    b'"requires_dist": ["base", "extra; extra == \'feature\'"]}}',
+                    b'"requires_dist": ["base", "extra; extra == \'feature\'"]}}'
                 ),
             )
 
@@ -669,12 +669,12 @@ def test_pypi_release_metadata_404_falls_back_to_artifact() -> None:
 
         def get(self, url: str) -> HttpResponse:
             self.calls += 1
-            return HttpResponse(
-                status_code=404,
+            return make_response(
+                status=404,
                 reason="Not Found",
                 url=url,
                 headers={},
-                raw=io.BytesIO(),
+                body=b"",
             )
 
     session = Session()
@@ -703,14 +703,12 @@ def test_reads_detached_wheel_metadata_without_download(
     class Session:
         def get(self, url: str) -> HttpResponse:
             assert url.endswith("demo-1.0-py3-none-any.whl.metadata")
-            return HttpResponse(
-                status_code=200,
+            return make_response(
+                status=200,
                 reason="OK",
                 url=url,
                 headers={"Content-Type": "text/plain"},
-                raw=io.BytesIO(
-                    b"Name: demo\nVersion: 1.0\nRequires-Dist: requests>=2\n",
-                ),
+                body=(b"Name: demo\nVersion: 1.0\nRequires-Dist: requests>=2\n"),
             )
 
     materializer = CandidateMaterializer(dry_run=dry_run, session=Session())

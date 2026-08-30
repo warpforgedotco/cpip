@@ -92,7 +92,7 @@ def test_live_artifact_head(benchmark: BenchmarkFixture) -> None:
         except Exception as error:
             return len(type(error).__name__)
         try:
-            return response.status_code
+            return response.status
         finally:
             response.close()
 

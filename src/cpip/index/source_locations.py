@@ -284,7 +284,7 @@ class SimpleIndexSource:
         except Exception as exc:
             response = getattr(exc, "response", None)
 
-            if getattr(response, "status_code", None) == 404:
+            if getattr(response, "status", None) == 404:
                 self.page_fetch_outcomes[project_url] = ([],)
 
                 return None

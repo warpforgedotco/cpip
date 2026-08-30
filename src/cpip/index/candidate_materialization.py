@@ -19,6 +19,7 @@ from typing import NamedTuple
 from cpip.build.build import build_wheel_from_source, unpack_source_internal
 from cpip.core.errors import BuildError, InstallationError, UnsupportedWheel
 from cpip.core.hashes import file_hashes
+from cpip.core.http import raise_for_status, response_text
 from cpip.core.packaging import (
     Requirement,
     canonicalize_name,
@@ -1135,10 +1136,10 @@ class CandidateMaterializer:
             if response is None:
                 response = self.session.get(metadata_link.url)
 
-            response.raise_for_status()
+            raise_for_status(response)
 
             return self.metadata_from_headers(
-                parse_metadata_headers(response.text),
+                parse_metadata_headers(response_text(response)),
                 requested_extras,
             )
 
@@ -1262,14 +1263,14 @@ class CandidateMaterializer:
 
             response = self.session.get(url)
 
-            if getattr(response, "status_code", None) == 404:
+            if getattr(response, "status", None) == 404:
                 self.release_metadata_cache[release_key] = None
 
                 return None
 
-            response.raise_for_status()
+            raise_for_status(response)
 
-            data = json.loads(response.text)
+            data = json.loads(response_text(response))
 
             info = data["info"]
 

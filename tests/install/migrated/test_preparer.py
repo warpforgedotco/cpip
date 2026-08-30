@@ -11,7 +11,7 @@ from cpip.install.metadata import (
     check_sidecar_matches_wheel,
 )
 from cpip.network.download import Downloader
-from cpip_test_support.requests_mocks import MockResponse
+from cpip_test_support.transport_mocks import MockResponse
 
 
 @patch("cpip.network.download.raise_for_status")

@@ -8,6 +8,7 @@ import urllib.parse
 from collections.abc import Callable
 
 from cpip.core.errors import InstallationError
+from cpip.core.http import raise_for_status, response_text
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.catalog_cache import load_links, save_links
 from cpip.index.datetime import parse_iso_datetime
@@ -55,7 +56,7 @@ class IndexPageParser:
             return []
         except Exception as exc:
             response = getattr(exc, "response", None)
-            if getattr(response, "status_code", None) == 404:
+            if getattr(response, "status", None) == 404:
                 return []
             raise
         return self.links_from_content(content, url)
@@ -102,9 +103,9 @@ class IndexPageParser:
                 f"A configured HTTP session is required to read index page {url}",
             )
         response = self.session.get(url, headers=headers)
-        response.raise_for_status()
+        raise_for_status(response)
         return IndexContent(
-            response.text,
+            response_text(response),
             response.headers.get("Content-Type", "text/html").split(";", 1)[0],
             getattr(response, "from_cache", False),
         )

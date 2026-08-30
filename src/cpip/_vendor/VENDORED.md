@@ -18,10 +18,8 @@ record until a published release can be pinned with `==`.
 
 | Package | Version/source | License |
 | --- | --- | --- |
-| requests | 2.32.4 | Apache-2.0 |
 | urllib3 | 2.6.3 | MIT |
 | certifi | 2026.7.22 | MPL-2.0 |
-| charset-normalizer | 3.4.9 | MIT |
 | idna | 3.18 | BSD-3-Clause |
 | nab-resolver | 0.0.15.dev0 at `9d07d894` | MIT |
 | typing_extensions | 4.16.0 | PSF-2.0 |
@@ -39,7 +37,6 @@ the same tracked tree.
 
 | Distribution | Patch | Purpose |
 | --- | --- | --- |
-| requests | `requests.patch` | Prevent unrelated host `chardet` or `simplejson` installations from changing cpip's HTTP behavior and omit the compatibility `requests.packages` shim. |
 | certifi | `certifi.patch` | Resolve `cacert.pem` through the `cpip._vendor.certifi` resource package. |
 | nab-resolver | `nab-resolver.patch` | Preserve cpip's late-extras invalidation contract and provider priority invalidations; accelerate large discrete ranges, membership, dependency-clause construction, exact-parent clause dispatch, and backtracking; compare infinity bounds safely; and avoid importing `dataclasses` during ordinary cpip startup. Exact dispatch retains upstream contradiction-epoch stamps and falls back to exhaustive dispatch for undecided, widened, or unhashable parent versions. |
 

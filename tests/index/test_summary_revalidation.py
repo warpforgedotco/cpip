@@ -6,13 +6,13 @@ import json
 from pathlib import Path
 
 import pytest
+from cpip.core.http import HttpResponse
 from cpip.core.packaging import parse_requirement
 from cpip.index.catalog_cache import cache_key, catalog_generation
 from cpip.index.source_locations import SimpleIndexSource
-from cpip.network.exceptions import ConnectionFailedError, NetworkConnectionError
-from cpip.network.http import HttpRequest, HttpResponse, NetworkSession
-
-import io
+from cpip.network.exceptions import ConnectionFailedError
+from cpip.network.http import NetworkSession
+from cpip_test_support.transport_mocks import make_response
 
 INDEX_URL = "https://index.invalid/simple"
 PROJECT_URL = "https://index.invalid/simple/demo/"
@@ -47,7 +47,10 @@ class FakeIndexSession(NetworkSession):
 
     def open_internal(
         self,
-        request: HttpRequest,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes | None,
         timeout,
         *,
         stream: bool = False,
@@ -56,37 +59,31 @@ class FakeIndexSession(NetworkSession):
         if self.fail_with is not None:
             raise self.fail_with()
         if self.status_override is not None:
-            return HttpResponse(
-                status_code=self.status_override,
+            return make_response(
+                status=self.status_override,
                 reason="Not Found",
-                url=request.url,
+                url=url,
                 headers={"Content-Type": "text/plain"},
-                raw=io.BytesIO(b""),
-                content_internal=b"",
-                request=request,
+                body=b"",
             )
-        if request.headers.get("If-None-Match") == self.etag:
-            return HttpResponse(
-                status_code=304,
+        if headers.get("if-none-match") == self.etag:
+            return make_response(
+                status=304,
                 reason="Not Modified",
-                url=request.url,
+                url=url,
                 headers={"ETag": self.etag, "Cache-Control": "max-age=600"},
-                raw=io.BytesIO(b""),
-                content_internal=b"",
-                request=request,
+                body=b"",
             )
-        return HttpResponse(
-            status_code=200,
+        return make_response(
+            status=200,
             reason="OK",
-            url=request.url,
+            url=url,
             headers={
                 "Content-Type": JSON_TYPE,
                 "Cache-Control": "max-age=0",
                 "ETag": self.etag,
             },
-            raw=io.BytesIO(self.body),
-            content_internal=self.body,
-            request=request,
+            body=self.body,
         )
 
 
@@ -160,7 +157,7 @@ def test_network_error_propagates(tmp_path: Path) -> None:
     source, session = primed_source(tmp_path)
     session.fail_with = ConnectionError
 
-    with pytest.raises((ConnectionFailedError, NetworkConnectionError)):
+    with pytest.raises(ConnectionFailedError):
         source.collect_cached_catalog_summary(
             parse_requirement("demo"),
             allow_fetch=True,

@@ -8,6 +8,7 @@ __all__ = [
     "metadata_text_from_wheel_url",
 ]
 
+import shutil
 from bisect import bisect_left, bisect_right
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -15,10 +16,11 @@ from tempfile import NamedTemporaryFile
 from types import TracebackType
 from zipfile import BadZipFile, ZipFile
 
+from cpip._vendor.urllib3.exceptions import DecodeError
 from cpip.build.metadata import MetadataDistribution
-from cpip.network.exceptions import InvalidWheel, NetworkConnectionError
-from cpip.network.http import HttpResponse, NetworkSession
-from cpip.network.utils import HEADERS, raise_for_status, response_chunks
+from cpip.core.http import HttpResponse, HttpStatusError, raise_for_status
+from cpip.network.exceptions import InvalidWheel
+from cpip.network.http import NetworkSession
 
 CONTENT_CHUNK_SIZE = 10 * 1024
 
@@ -43,14 +45,8 @@ def dist_from_wheel_url(
         with LazyZipOverHTTP(url, session) as zf:
             with ZipFile(zf) as archive:
                 return MetadataDistribution.from_wheel_archive(archive, name, zf.name)
-    except BadZipFile as exc:
+    except (BadZipFile, DecodeError) as exc:
         raise InvalidWheel(url, name) from exc
-    except Exception as exc:
-        from cpip._vendor import requests
-
-        if isinstance(exc, requests.exceptions.ContentDecodingError):
-            raise InvalidWheel(url, name) from exc
-        raise
 
 
 def metadata_text_from_wheel_url(
@@ -93,9 +89,9 @@ class LazyZipOverHTTP:
         session: NetworkSession,
         chunk_size: int = CONTENT_CHUNK_SIZE,
     ) -> None:
-        head = session.head(url, headers=HEADERS)
+        head = session.head(url)
         raise_for_status(head)
-        assert head.status_code == 200
+        assert head.status == 200
         self.session_internal, self.url_internal, self.chunk_size_internal = (
             session,
             url,
@@ -209,8 +205,8 @@ class LazyZipOverHTTP:
         for start in reversed(range(0, end, self.chunk_size_internal)):
             try:
                 self.download_internal(start, end)
-            except NetworkConnectionError as exc:
-                if exc.response is not None and exc.response.status_code == 416:
+            except HttpStatusError as exc:
+                if exc.response is not None and exc.response.status == 416:
                     raise InvalidWheel(self.name, "unknown") from exc
                 raise
             with self.stay():
@@ -225,15 +221,14 @@ class LazyZipOverHTTP:
         self,
         start: int,
         end: int,
-        base_headers: dict[str, str] = HEADERS,
     ) -> HttpResponse:
         """Return HTTP response to a range request from start to end."""
-        headers = base_headers.copy()
-        headers["Range"] = f"bytes={start}-{end}"
-        headers["Cache-Control"] = "no-cache"
         return self.session_internal.get(
             self.url_internal,
-            headers=headers,
+            headers={
+                "Range": f"bytes={start}-{end}",
+                "Cache-Control": "no-cache",
+            },
             stream=True,
         )
 
@@ -271,7 +266,17 @@ class LazyZipOverHTTP:
             right = bisect_right(self.left_internal, end)
             for start, end in self.merge(start, end, left, right):
                 response = self.stream_response(start, end)
-                response.raise_for_status()
+                try:
+                    raise_for_status(response)
+                except HttpStatusError:
+                    # Streamed; unread data would keep the connection
+                    # checked out of the pool and the socket open.
+                    response.drain_conn()
+                    response.close()
+                    raise
                 self.seek(start)
-                for chunk in response_chunks(response, self.chunk_size_internal):
-                    self.file_internal.write(chunk)
+                shutil.copyfileobj(
+                    response,
+                    self.file_internal,
+                    self.chunk_size_internal,
+                )

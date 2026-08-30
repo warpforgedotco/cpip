@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import contextlib
 import functools
 import json
@@ -14,7 +13,8 @@ from unittest.mock import Mock
 import cpip.network.auth
 import pytest
 from cpip.network.auth import MultiDomainBasicAuth
-from cpip_test_support.requests_mocks import MockConnection, MockRequest, MockResponse
+from cpip.network.http import NetworkSession
+from cpip_test_support.transport_mocks import MockResponse
 
 
 @pytest.fixture(autouse=True)
@@ -307,25 +307,26 @@ def test_keyring_set_password(
         should_save_password_to_keyring,
     )
 
-    req = MockRequest("https://example.com")
+    url = "https://example.com"
     resp = MockResponse(b"")
-    resp.url = req.url
-    connection = MockConnection()
+    resp.url = url
+    resp.status = 401
+    session = NetworkSession()
+    session.auth = auth
 
-    def send_internal(sent_req: MockRequest, **kwargs: Any) -> MockResponse:
-        assert sent_req is req
-        assert "Authorization" in sent_req.headers
+    def request(method: str, url: str, **kwargs: Any) -> MockResponse:
+        assert method == "GET"
+        assert url == resp.url
+        assert "authorization" in kwargs["headers"]
+        assert kwargs["stream"] is True
         r = MockResponse(b"")
-        r.status_code = response_status
+        r.status = response_status
         return r
 
-    connection.send_internal = send_internal  # type: ignore[assignment]
+    monkeypatch.setattr(session, "request", request)
+    retry = session.retry_auth(resp, "GET", {}, None, None, stream=True)
 
-    resp.request = req
-    resp.status_code = 401
-    resp.connection = connection
-
-    auth.handle_401(resp)
+    assert retry is not None
 
     if expect_save:
         assert keyring.saved_passwords == [("example.com", creds[0], creds[1])]
@@ -667,25 +668,26 @@ def test_keyring_cli_set_password(
         should_save_password_to_keyring,
     )
 
-    req = MockRequest("https://example.com")
+    url = "https://example.com"
     resp = MockResponse(b"")
-    resp.url = req.url
-    connection = MockConnection()
+    resp.url = url
+    resp.status = 401
+    session = NetworkSession()
+    session.auth = auth
 
-    def send_internal(sent_req: MockRequest, **kwargs: Any) -> MockResponse:
-        assert sent_req is req
-        assert "Authorization" in sent_req.headers
+    def request(method: str, url: str, **kwargs: Any) -> MockResponse:
+        assert method == "GET"
+        assert url == resp.url
+        assert "authorization" in kwargs["headers"]
+        assert kwargs["stream"] is False
         r = MockResponse(b"")
-        r.status_code = response_status
+        r.status = response_status
         return r
 
-    connection.send_internal = send_internal  # type: ignore[assignment]
+    monkeypatch.setattr(session, "request", request)
+    retry = session.retry_auth(resp, "GET", {}, None, None, stream=False)
 
-    resp.request = req
-    resp.status_code = 401
-    resp.connection = connection
-
-    auth.handle_401(resp)
+    assert retry is not None
 
     if expect_save:
         assert keyring.saved_credential_by_username_by_system == {
@@ -752,17 +754,16 @@ def test_keyring_cli_outdated_version(
 
 
 @pytest.mark.parametrize("prompting", [True, False])
-def test_handle_401_extracts_credentials_embedded_in_url(
+def test_credentials_after_401_extracts_credentials_embedded_in_url(
     prompting: bool,
 ) -> None:
     """Credentials embedded in the (redirect) URL must be recovered on 401.
 
     When an index issues a cross-origin redirect whose ``Location`` carries
-    embedded Basic-auth credentials, the requests session strips the
-    ``Authorization`` header, so the upstream host answers ``401``. ``resp.url``
-    still contains the ``user:password@host`` credentials, and ``handle_401``
-    should extract them and retry -- this needs no user interaction, so it must
-    work even under ``--no-input`` (``prompting=False``).
+    embedded Basic-auth credentials, the redirect policy strips the
+    ``Authorization`` header, so the upstream host answers ``401``. The retry
+    URL still contains the ``user:password@host`` credentials, which must be
+    recovered without user interaction, even under ``--no-input``.
 
     Regression test: previously the extraction was gated behind ``use_keyring``,
     so ``--no-input`` with the default keyring provider returned the 401 without
@@ -771,27 +772,7 @@ def test_handle_401_extracts_credentials_embedded_in_url(
     auth = MultiDomainBasicAuth(prompting=prompting, keyring_provider="disabled")
 
     url_with_creds = "http://user:pass@example.com/simple/pkg/"
-    req = MockRequest(url_with_creds)
-    resp = MockResponse(b"")
-    resp.request = req
-    resp.url = url_with_creds
-    resp.status_code = 401
+    username, password, credentials = auth.credentials_after_401(url_with_creds)
 
-    sent_headers: dict[str, str] = {}
-    connection = MockConnection()
-
-    def send_internal(sent_req: MockRequest, **kwargs: Any) -> MockResponse:
-        sent_headers.update(sent_req.headers)
-        r = MockResponse(b"")
-        r.status_code = 200
-        return r
-
-    connection.send_internal = send_internal  # type: ignore[assignment]
-    resp.connection = connection
-
-    new_resp = auth.handle_401(resp)
-
-    assert new_resp.status_code == 200
-    scheme, _, encoded = sent_headers["Authorization"].partition(" ")
-    assert scheme == "Basic"
-    assert base64.b64decode(encoded).decode() == "user:pass"
+    assert (username, password) == ("user", "pass")
+    assert credentials is None

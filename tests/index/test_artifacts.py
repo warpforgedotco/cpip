@@ -12,15 +12,15 @@ from cpip.core.appdirs import http_cache_path
 
 
 class FakeResponse:
-    status_code = 200
+    status = 200
     reason = "OK"
 
     def __init__(self, body: bytes) -> None:
         self.body = body
         self.closed = False
 
-    def iter_content(self, chunk_size: int) -> list[bytes]:
-        del chunk_size
+    def stream(self, amt: int) -> list[bytes]:
+        del amt
         return [self.body]
 
     def close(self) -> None:

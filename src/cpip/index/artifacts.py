@@ -232,18 +232,18 @@ class ArtifactLocator:
         def request() -> Any:
             current = session.get(url, stream=True)
 
-            if current.status_code < 400:
+            if current.status < 400:
                 return current
 
             logger.critical(
                 "HTTP error %s while getting %s",
-                current.status_code,
+                current.status,
                 url,
             )
 
             try:
                 raise InstallationError(
-                    f"{current.status_code} Client Error: {current.reason} for url: {url}",
+                    f"{current.status} Client Error: {current.reason} for url: {url}",
                 )
 
             finally:
@@ -252,7 +252,7 @@ class ArtifactLocator:
         response = request()
 
         try:
-            chunks = response.iter_content(chunk_size=1024 * 1024)
+            chunks = response.stream(1024 * 1024)
 
             if artifact_cache is not None:
                 try:
@@ -270,7 +270,7 @@ class ArtifactLocator:
 
                     with open(target, "wb") as file:
                         file.writelines(
-                            response.iter_content(chunk_size=1024 * 1024),
+                            response.stream(1024 * 1024),
                         )
 
                 else:
