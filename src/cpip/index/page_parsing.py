@@ -154,9 +154,7 @@ class IndexPageParser:
                     else str(yanked)
                 ),
                 metadata_file=metadata_file_from_json(file_data),
-                upload_time=(
-                    parse_iso_datetime(upload_time) if upload_time else None
-                ),
+                upload_time=(parse_iso_datetime(upload_time) if upload_time else None),
             )
             # PEP 700: assigned after construction so custom link factories
             # keep their signature. bool is an int, hence the exact type check.
