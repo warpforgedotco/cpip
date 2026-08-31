@@ -637,6 +637,16 @@ class Resolver(Generic[PackageType, VersionType]):
         # ``self.provider`` mid-resolve is not this one and is sent the hint.
         self._hint_ignoring_provider = _provider_with_inherited_hint(provider)
 
+        # Optional provider hooks, bound here and again per resolve in _reset
+        # rather than probed with getattr on every decision.  A hook swapped
+        # onto the provider mid-resolve is not seen until the next resolve.
+        self._consume_dependency_invalidations: Callable[[], Any] | None = getattr(
+            provider, "consume_dependency_invalidations", None
+        )
+        self._consume_priority_invalidations: Callable[[], Any] | None = getattr(
+            provider, "consume_priority_invalidations", None
+        )
+
         self.observer: ResolverObserver[PackageType, VersionType] = (
             observer or ResolverObserver()
         )
@@ -927,7 +937,7 @@ class Resolver(Generic[PackageType, VersionType]):
 
     def _backtrack_dependency_invalidations(self) -> Any | None:
         """Revisit decisions whose dependency features expanded after selection."""
-        consume = getattr(self.provider, "consume_dependency_invalidations", None)
+        consume = self._consume_dependency_invalidations
         if consume is None:
             return None
 
@@ -1012,6 +1022,12 @@ class Resolver(Generic[PackageType, VersionType]):
 
         # Re-asked here, so a hook installed since the last resolve is honoured.
         self._hint_ignoring_provider = _provider_with_inherited_hint(self.provider)
+        self._consume_dependency_invalidations = getattr(
+            self.provider, "consume_dependency_invalidations", None
+        )
+        self._consume_priority_invalidations = getattr(
+            self.provider, "consume_priority_invalidations", None
+        )
 
     def _add_root_requirements(
         self, requirements: Sequence[RootRequirement[PackageType, VersionType]]

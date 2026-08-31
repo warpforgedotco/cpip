@@ -302,6 +302,9 @@ def test_a_provider_reported_change_rebuilds_the_key() -> None:
 def test_a_provider_that_cannot_report_rebuilds_every_key() -> None:
     resolver, stub = scan_resolver()
     stub.consume_priority_invalidations = lambda: None  # type: ignore[assignment]
+    # The resolver binds the hook at construction and per resolve; a swap on
+    # the live provider must be rebound explicitly when driving internals.
+    resolver._consume_priority_invalidations = stub.consume_priority_invalidations  # noqa: SLF001
     assert choose(resolver) == "alpha"
 
     stub.priorities["beta"] = -1
@@ -316,6 +319,7 @@ def test_a_provider_without_the_method_rebuilds_every_key() -> None:
     """A third-party provider predating the hook still resolves correctly."""
     resolver, stub = scan_resolver()
     del StubProvider.consume_priority_invalidations
+    resolver._consume_priority_invalidations = None  # noqa: SLF001
     try:
         assert choose(resolver) == "alpha"
         stub.priorities["beta"] = -1

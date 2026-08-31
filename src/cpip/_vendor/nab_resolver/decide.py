@@ -72,7 +72,7 @@ def choose_package_to_decide(resolver: Resolver[Any, Any]) -> Any | None:
         return (ready_penalty, priority, tiebreak)
 
     changed = resolver.solution.take_changed_packages()
-    reporter = getattr(resolver.provider, "consume_priority_invalidations", None)
+    reporter = resolver._consume_priority_invalidations  # noqa: SLF001
     reported = reporter() if reporter is not None else None
     if reported is None:
         changed.update(undecided)
