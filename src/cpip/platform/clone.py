@@ -248,7 +248,7 @@ def _clone_absent(
         source_mode = stat.S_IMODE(os.stat(source).st_mode)
 
         try:
-            os.mkdir(destination, source_mode)
+            os.mkdir(destination, source_mode | stat.S_IWUSR | stat.S_IXUSR)
 
         except FileExistsError:
             return clone_path(source, destination)
@@ -265,6 +265,11 @@ def _clone_absent(
                         entry.is_symlink(),
                     )
 
+            # Restores the source mode, including the owner write and search
+            # bits added above.  A read-only source directory cannot be
+            # created read-only up front: its own children could not then be
+            # written into it.  Only owner bits are added, so the directory is
+            # never briefly more permissive to anyone else.
             shutil.copystat(source, destination, follow_symlinks=False)
 
         except BaseException:
