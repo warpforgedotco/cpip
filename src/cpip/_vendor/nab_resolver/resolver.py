@@ -632,20 +632,7 @@ class Resolver(Generic[PackageType, VersionType]):
         """
         self.provider = provider
 
-        # Recording the provider rather than a flag keeps the answer tied to
-        # the object it was asked about, so a provider swapped into
-        # ``self.provider`` mid-resolve is not this one and is sent the hint.
-        self._hint_ignoring_provider = _provider_with_inherited_hint(provider)
-
-        # Optional provider hooks, bound here and again per resolve in _reset
-        # rather than probed with getattr on every decision.  A hook swapped
-        # onto the provider mid-resolve is not seen until the next resolve.
-        self._consume_dependency_invalidations: Callable[[], Any] | None = getattr(
-            provider, "consume_dependency_invalidations", None
-        )
-        self._consume_priority_invalidations: Callable[[], Any] | None = getattr(
-            provider, "consume_priority_invalidations", None
-        )
+        self._bind_provider_hooks()
 
         self.observer: ResolverObserver[PackageType, VersionType] = (
             observer or ResolverObserver()
@@ -704,10 +691,9 @@ class Resolver(Generic[PackageType, VersionType]):
         self.constraints: Mapping[PackageType, RangeProtocol[VersionType]] = {}
         self.root_package_order: dict[PackageType, tuple[int, int, str]] = {}
 
-        # Ordered queue of culprits plus a membership set kept in lock-step,
-        # so the per-conflict de-dupe check is O(1) instead of a list scan.
-        self.pending_targeted_backtrack: list[PackageType] = []
-        self.pending_targeted_backtrack_set: set[PackageType] = set()
+        # Dict-as-ordered-set: enqueue order stays deterministic while the
+        # per-conflict de-dupe is an O(1) key write instead of a list scan.
+        self.pending_targeted_backtrack: dict[PackageType, None] = {}
 
         # Memoises the tiebreak tuple in choose_package_to_decide.
         self.tiebreak_cache: dict[PackageType, tuple[int, int, str]] = {}
@@ -744,6 +730,23 @@ class Resolver(Generic[PackageType, VersionType]):
         # is why the two are wiped together.
         self.range_token_by_id: dict[int, int] = {}
         self.interned_ranges: list[RangeProtocol[Any]] = []
+
+    def _bind_provider_hooks(self) -> None:
+        """Bind the optional provider hooks, once per construction and resolve.
+
+        Bound rather than probed with getattr on every decision.  A hook
+        swapped onto the provider mid-resolve is not seen until the next
+        resolve; recording the hint answer per provider object keeps it tied
+        to the object it was asked about.
+        """
+        provider = self.provider
+        self._hint_ignoring_provider = _provider_with_inherited_hint(provider)
+        self._consume_dependency_invalidations: Callable[[], Any] | None = getattr(
+            provider, "consume_dependency_invalidations", None
+        )
+        self._consume_priority_invalidations: Callable[[], Any] | None = getattr(
+            provider, "consume_priority_invalidations", None
+        )
 
     def as_term_range(self, range_: RangeProtocol[Any]) -> RangeProtocol[VersionType]:
         """Return the term constraint to record for a supplied range.
@@ -1006,7 +1009,6 @@ class Resolver(Generic[PackageType, VersionType]):
         self.constraints = constraints or {}
         self.root_package_order.clear()
         self.pending_targeted_backtrack.clear()
-        self.pending_targeted_backtrack_set.clear()
         self.tiebreak_cache.clear()
         self.decision_queue.clear()
         self.priority_epoch = 0
@@ -1021,13 +1023,7 @@ class Resolver(Generic[PackageType, VersionType]):
         self.term_range_keepalive.clear()
 
         # Re-asked here, so a hook installed since the last resolve is honoured.
-        self._hint_ignoring_provider = _provider_with_inherited_hint(self.provider)
-        self._consume_dependency_invalidations = getattr(
-            self.provider, "consume_dependency_invalidations", None
-        )
-        self._consume_priority_invalidations = getattr(
-            self.provider, "consume_priority_invalidations", None
-        )
+        self._bind_provider_hooks()
 
     def _add_root_requirements(
         self, requirements: Sequence[RootRequirement[PackageType, VersionType]]

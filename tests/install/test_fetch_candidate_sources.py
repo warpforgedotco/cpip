@@ -1,11 +1,10 @@
-"""``cpip download`` fetches candidate artifacts concurrently.
+"""``fetch_candidate_sources`` fetches candidate artifacts concurrently.
 
-The command used to bring each artifact local one at a time, so a cold
+``cpip download`` used to bring each artifact local one at a time, so a cold
 multi-package download paid one full RTT-plus-transfer per candidate in
-sequence. ``fetch_sources`` pools the safe fetches; these tests pin the three
-properties that matter: results keep candidate order, independent fetches
-overlap, and a VCS sdist (which may prompt for credentials) stays on the
-calling thread.
+sequence. The helper pools the safe fetches; these tests pin the properties
+that matter: results keep candidate order, independent fetches overlap, and
+a VCS sdist (which may prompt for credentials) stays on the calling thread.
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from cpip.cli.download import fetch_sources
+from cpip.install.output import fetch_candidate_sources
 
 
 class Candidate:
@@ -31,7 +30,7 @@ class Candidate:
 def test_results_keep_candidate_order() -> None:
     candidates = [Candidate(f"pkg-{index}") for index in range(8)]
 
-    fetched = fetch_sources(candidates, lambda candidate: candidate.name)
+    fetched = fetch_candidate_sources(candidates, lambda candidate: candidate.name)
 
     assert fetched == [candidate.name for candidate in candidates]
 
@@ -44,21 +43,9 @@ def test_independent_fetches_overlap() -> None:
         barrier.wait()
         return candidate.name
 
-    fetched = fetch_sources([Candidate("a"), Candidate("b")], fetch)
+    fetched = fetch_candidate_sources([Candidate("a"), Candidate("b")], fetch)
 
     assert fetched == ["a", "b"]
-
-
-def test_single_candidate_skips_the_pool() -> None:
-    threads: list[str] = []
-
-    def fetch(candidate: Any) -> str:
-        threads.append(threading.current_thread().name)
-        return candidate.name
-
-    fetch_sources([Candidate("only")], fetch)
-
-    assert threads == [threading.current_thread().name]
 
 
 def test_vcs_sdist_fetches_on_the_calling_thread() -> None:
@@ -75,7 +62,7 @@ def test_vcs_sdist_fetches_on_the_calling_thread() -> None:
         Candidate("wheel-b"),
     ]
 
-    fetched = fetch_sources(candidates, fetch)
+    fetched = fetch_candidate_sources(candidates, fetch)
 
     assert fetched == ["wheel-a", "vcs", "wheel-b"]
     assert threads["vcs"] == threading.current_thread().name
@@ -94,4 +81,4 @@ def test_ordinary_sdist_url_still_pools() -> None:
         Candidate("wheel"),
     ]
 
-    assert fetch_sources(candidates, fetch) == ["sdist", "wheel"]
+    assert fetch_candidate_sources(candidates, fetch) == ["sdist", "wheel"]

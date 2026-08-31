@@ -781,47 +781,15 @@ def install_wheels_transactionally(
 ) -> tuple[WheelCandidate, ...]:
     """Install a wheel batch with rollback across every wheel in the batch.
 
-    The whole batch -- the existing-state scan included -- runs under an
-    advisory lock on the target, so concurrent cpip processes driving one
-    environment serialize instead of interleaving file writes.
+    The target-mutating phase -- the existing-state scan included -- runs
+    under an advisory lock on the target, so concurrent cpip processes
+    driving one environment serialize instead of interleaving file writes.
+    Candidate planning stays outside the lock: parsing each wheel's metadata
+    touches nothing in the target and would otherwise serialize too.
     """
     from cpip.platform.lock import environment_write_lock
 
-    with environment_write_lock(target.purelib):
-        return _install_wheels_transaction(
-            items,
-            target=target,
-            pycompile=pycompile,
-            force=force,
-            preserve_existing=preserve_existing,
-            script_executable=script_executable,
-            lookup_existing=lookup_existing,
-            candidates=candidates,
-            cache_dir=cache_dir,
-        )
-
-
-def _install_wheels_transaction(
-    items: Iterable[tuple[str, bool, DirectUrl | None]],
-    *,
-    target: InstallTarget,
-    pycompile: bool = True,
-    force: bool = False,
-    preserve_existing: bool = False,
-    script_executable: str | None = None,
-    lookup_existing: bool = True,
-    candidates: Iterable[WheelCandidate] | None = None,
-    cache_dir: str | None = None,
-) -> tuple[WheelCandidate, ...]:
     requests = tuple(items)
-    installer = WheelInstaller(
-        target,
-        pycompile=pycompile,
-        force=force,
-        preserve_existing=preserve_existing,
-        script_executable=script_executable,
-    )
-    destination_cache: DestinationCache = {}
     planned_candidates = (
         tuple(candidates)
         if candidates is not None
@@ -832,6 +800,41 @@ def _install_wheels_transaction(
     )
     if len(planned_candidates) != len(requests):
         raise ValueError("candidate count does not match wheel request count")
+
+    with environment_write_lock(target.purelib):
+        return _install_wheels_locked(
+            requests,
+            planned_candidates,
+            target=target,
+            pycompile=pycompile,
+            force=force,
+            preserve_existing=preserve_existing,
+            script_executable=script_executable,
+            lookup_existing=lookup_existing,
+            cache_dir=cache_dir,
+        )
+
+
+def _install_wheels_locked(
+    requests: tuple[tuple[str, bool, DirectUrl | None], ...],
+    planned_candidates: tuple[WheelCandidate, ...],
+    *,
+    target: InstallTarget,
+    pycompile: bool,
+    force: bool,
+    preserve_existing: bool,
+    script_executable: str | None,
+    lookup_existing: bool,
+    cache_dir: str | None,
+) -> tuple[WheelCandidate, ...]:
+    installer = WheelInstaller(
+        target,
+        pycompile=pycompile,
+        force=force,
+        preserve_existing=preserve_existing,
+        script_executable=script_executable,
+    )
+    destination_cache: DestinationCache = {}
     if cache_dir is not None and all(
         candidate.source_kind in {None, "wheel"} for candidate in planned_candidates
     ):

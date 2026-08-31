@@ -16,9 +16,8 @@ from cpip.index.links import Link
 
 
 def materializer_with_cache(cache: object) -> CandidateMaterializer:
-    materializer = CandidateMaterializer.__new__(CandidateMaterializer)
+    materializer = CandidateMaterializer()
     materializer.persistent_candidate_metadata_cache = cache  # type: ignore[assignment]
-    materializer.artifact_fingerprint_cache = {}
     return materializer
 
 

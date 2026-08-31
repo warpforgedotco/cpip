@@ -1,11 +1,11 @@
-"""The targeted-backtrack queue and its membership set stay in lock-step.
+"""The targeted-backtrack queue drains and re-fills correctly.
 
-The ordered queue got an O(1) membership set beside it; a drain that clears
-one but not the other quietly disables targeted backtracking -- a consumed
-culprit would read as still pending and never re-queue on a later threshold
-crossing. Every queue path is exercised: the two enqueue sites, the drain in
-``apply_targeted_backtrack``, its cap branch, the restart clear, and
-``_reset``.
+The queue is a dict-as-ordered-set: enqueue order stays deterministic while
+membership is one key write. A drain that fails to empty it would quietly
+disable targeted backtracking -- a consumed culprit reading as still pending
+never re-queues on a later threshold crossing. Every queue path is
+exercised, asserting the exact queue contents at drain time so a regression
+that skips enqueueing cannot pass.
 """
 
 from __future__ import annotations
@@ -33,13 +33,6 @@ class Provider(BaseProvider[str, int]):
         return None
 
 
-def queue_is_consistent(resolver: Resolver[str, int]) -> bool:
-    queue = resolver.pending_targeted_backtrack
-    return len(queue) == len(set(queue)) and set(queue) == set(
-        resolver.pending_targeted_backtrack_set,
-    )
-
-
 def drain_spy(
     monkeypatch: Any,
     drained: list[list[str]],
@@ -56,12 +49,11 @@ def drain_spy(
 
 def test_apply_drain_lets_a_culprit_requeue(monkeypatch: Any) -> None:
     resolver: Resolver[str, int] = Resolver(Provider())
-    resolver.pending_targeted_backtrack.append("culprit")
-    resolver.pending_targeted_backtrack_set.add("culprit")
+    resolver.pending_targeted_backtrack["culprit"] = None
 
     conflict.apply_targeted_backtrack(resolver)
 
-    assert queue_is_consistent(resolver)
+    assert not resolver.pending_targeted_backtrack
 
     drained: list[list[str]] = []
     drain_spy(monkeypatch, drained)
@@ -69,43 +61,36 @@ def test_apply_drain_lets_a_culprit_requeue(monkeypatch: Any) -> None:
 
     # The consumed culprit really re-entered the queue before the drain.
     assert drained == [["culprit"]]
-    assert resolver.pending_targeted_backtrack == []
-    assert queue_is_consistent(resolver)
+    assert not resolver.pending_targeted_backtrack
 
 
-def test_the_cap_branch_drains_both_collections() -> None:
+def test_the_cap_branch_drains_the_queue() -> None:
     resolver: Resolver[str, int] = Resolver(Provider())
     resolver.stats.targeted_backtracks = resolver.MAX_TARGETED_BACKTRACKS
-    resolver.pending_targeted_backtrack.append("culprit")
-    resolver.pending_targeted_backtrack_set.add("culprit")
+    resolver.pending_targeted_backtrack["culprit"] = None
 
     assert conflict.apply_targeted_backtrack(resolver) is None
 
-    assert resolver.pending_targeted_backtrack == []
-    assert queue_is_consistent(resolver)
+    assert not resolver.pending_targeted_backtrack
 
 
-def test_restart_and_reset_drain_both_collections() -> None:
+def test_restart_and_reset_drain_the_queue() -> None:
     resolver: Resolver[str, int] = Resolver(Provider())
-    resolver.pending_targeted_backtrack.append("culprit")
-    resolver.pending_targeted_backtrack_set.add("culprit")
+    resolver.pending_targeted_backtrack["culprit"] = None
     resolver.max_conflict_count = 99
 
     _, _, restarted = conflict.maybe_restart(resolver, 1, 1)
 
     assert restarted
-    assert resolver.pending_targeted_backtrack == []
-    assert queue_is_consistent(resolver)
+    assert not resolver.pending_targeted_backtrack
 
-    resolver.pending_targeted_backtrack.append("culprit")
-    resolver.pending_targeted_backtrack_set.add("culprit")
+    resolver.pending_targeted_backtrack["culprit"] = None
     resolver._reset(None)  # noqa: SLF001
 
-    assert resolver.pending_targeted_backtrack == []
-    assert queue_is_consistent(resolver)
+    assert not resolver.pending_targeted_backtrack
 
 
-def test_force_targeted_backtrack_enqueues_through_the_set(
+def test_force_targeted_backtrack_deduplicates_on_enqueue(
     monkeypatch: Any,
 ) -> None:
     resolver: Resolver[str, int] = Resolver(Provider())
@@ -114,7 +99,6 @@ def test_force_targeted_backtrack_enqueues_through_the_set(
 
     conflict.force_targeted_backtrack(resolver, ["a", "a", "b"])
 
-    # Duplicates collapse on enqueue; the drain leaves both collections empty.
+    # Duplicates collapse on enqueue; the drain leaves the queue empty.
     assert drained == [["a", "b"]]
-    assert resolver.pending_targeted_backtrack == []
-    assert queue_is_consistent(resolver)
+    assert not resolver.pending_targeted_backtrack

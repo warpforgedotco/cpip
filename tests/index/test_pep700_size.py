@@ -24,9 +24,7 @@ from cpip.index.page_parsing import IndexPageParser
 
 def parse_links(files: list[dict[str, Any]]) -> list[Link]:
     body = json.dumps({"meta": {"api-version": "1.1"}, "files": files})
-    parser = IndexPageParser.__new__(IndexPageParser)
-    parser.link_factory = Link.from_url
-    return parser.links_from_json(body, "https://index.invalid/demo/")
+    return IndexPageParser().links_from_json(body, "https://index.invalid/demo/")
 
 
 def test_json_size_lands_on_the_link() -> None:
@@ -75,13 +73,27 @@ def test_a_negative_cached_size_is_rejected_at_load_time() -> None:
 
     assert valid_record(record)
     assert not valid_record(negative)
-    assert link_from_record(negative).size is None
+
+
+def test_legacy_nine_tuple_records_still_load() -> None:
+    """Records written before the size field stay valid: no cache cold-start."""
+    from cpip.index.catalog_cache import valid_record
+
+    [link] = parse_links(
+        [{"url": "demo-1.0-py3-none-any.whl", "filename": "x", "size": 4096}],
+    )
+    legacy = link_record(link)[:9]
+
+    assert valid_record(legacy)
+    restored = link_from_record(legacy)
+    assert restored.size is None
+    assert restored.url == link.url
 
 
 def ranged_materializer(reader: Any) -> CandidateMaterializer:
-    materializer = CandidateMaterializer.__new__(CandidateMaterializer)
-    materializer.session = SimpleNamespace(wheel_metadata_text=reader)
-    return materializer
+    return CandidateMaterializer(
+        session=SimpleNamespace(wheel_metadata_text=reader),  # type: ignore[arg-type]
+    )
 
 
 def candidate_with_size(size: int | None) -> SimpleNamespace:

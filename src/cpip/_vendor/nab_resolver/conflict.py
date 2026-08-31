@@ -243,13 +243,9 @@ def update_culprit_counts(
         resolver.stats.package_culprit_counts[package] += 1
         resolver.priority_epoch += 1
         count = resolver.stats.package_culprit_counts[package]
-        if (
-            count >= threshold
-            and count % threshold == 0
-            and package not in resolver.pending_targeted_backtrack_set
-        ):
-            resolver.pending_targeted_backtrack.append(package)
-            resolver.pending_targeted_backtrack_set.add(package)
+        if count >= threshold and count % threshold == 0:
+            # Re-adding a queued package keeps its original position.
+            resolver.pending_targeted_backtrack[package] = None
 
 
 def conflict_credit_target(satisfier: Assignment[Any, Any]) -> Any:
@@ -488,7 +484,6 @@ def maybe_restart(
     resolver.solution.decide(ROOT, resolver.root_version)
     resolver.decision_queue.clear()
     resolver.pending_targeted_backtrack.clear()
-    resolver.pending_targeted_backtrack_set.clear()
     resolver.stats.targeted_backtracks = 0
 
     return restart_threshold * 2, restarts_remaining - 1, True
@@ -515,9 +510,7 @@ def force_targeted_backtrack(
         if current < threshold:
             resolver.stats.package_culprit_counts[package] = threshold
             resolver.priority_epoch += 1
-        if package not in resolver.pending_targeted_backtrack_set:
-            resolver.pending_targeted_backtrack.append(package)
-            resolver.pending_targeted_backtrack_set.add(package)
+        resolver.pending_targeted_backtrack[package] = None
 
     return apply_targeted_backtrack(resolver)
 
@@ -534,7 +527,6 @@ def apply_targeted_backtrack(resolver: Resolver[Any, Any]) -> Any | None:
     """
     if resolver.stats.targeted_backtracks >= resolver.MAX_TARGETED_BACKTRACKS:
         resolver.pending_targeted_backtrack.clear()
-        resolver.pending_targeted_backtrack_set.clear()
         return None
 
     target_level = resolver.solution.decision_level
@@ -554,7 +546,6 @@ def apply_targeted_backtrack(resolver: Resolver[Any, Any]) -> Any | None:
             break
 
     resolver.pending_targeted_backtrack.clear()
-    resolver.pending_targeted_backtrack_set.clear()
     if triggering_package is None or target_level >= resolver.solution.decision_level:
         return None
 

@@ -21,11 +21,11 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from typing import Any
 
-PREFIX = f"{versioned_bucket('cpip-index-catalog', 2)}:"
+PREFIX = f"{versioned_bucket('cpip-index-catalog', 1)}:"
 SUMMARY_PREFIX = f"{versioned_bucket('cpip-index-summary', 1)}:"
-CHOICE_PREFIX = f"{versioned_bucket('cpip-index-choice', 2)}:"
+CHOICE_PREFIX = f"{versioned_bucket('cpip-index-choice', 1)}:"
 SUMMARY_HEADER = versioned_bucket("cpip-index-summary", 1).encode() + b"\0"
-CHOICE_HEADER = versioned_bucket("cpip-index-choice", 2).encode() + b"\0"
+CHOICE_HEADER = versioned_bucket("cpip-index-choice", 1).encode() + b"\0"
 
 WHEEL_RECORD = 1
 SDIST_RECORD = 2
@@ -442,24 +442,19 @@ def valid_record(value: object) -> bool:
     Marshal only rebuilds exact built-in types, so ``type(...) is`` checks
     are equivalent to ``isinstance`` here and keep this loop cheap.
     """
-    if type(value) is not tuple or len(value) != 10:
+    # Records written before the PEP 700 size field are 9-tuples; accepting
+    # both widths keeps every warm catalog cache valid across the upgrade.
+    if type(value) is not tuple or len(value) not in {9, 10}:
         return False
-    (
-        url,
-        text,
-        hashes,
-        requires_python,
-        yanked,
-        metadata,
-        upload_time,
-        _,
-        parts,
-        size,
-    ) = value
+    (url, text, hashes, requires_python, yanked, metadata, upload_time, _, parts) = (
+        value[:9]
+    )
     if type(url) is not str or type(text) is not str:
         return False
-    if size is not None and (type(size) is not int or size < 0):
-        return False
+    if len(value) == 10:
+        size = value[9]
+        if size is not None and (type(size) is not int or size < 0):
+            return False
     if not valid_str_dict(hashes):
         return False
     if requires_python is not None and type(requires_python) is not str:
@@ -807,7 +802,7 @@ def link_record(
 
 def link_from_record(record: object, *, source_url: str | None = None) -> Link:
     """Materialize a record that ``valid_record`` accepted at load time."""
-    if not isinstance(record, tuple) or len(record) != 10:
+    if not isinstance(record, tuple) or len(record) not in {9, 10}:
         raise ValueError("invalid catalog record")
     (
         url,
@@ -819,8 +814,8 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
         upload_time,
         _wheel_identity,
         parts,
-        size,
-    ) = record
+    ) = record[:9]
+    size = record[9] if len(record) == 10 else None
     link = Link.from_cached_record(
         url,  # ty:ignore[invalid-argument-type]
         parsed_url=urllib.parse.SplitResult(*parts),  # ty:ignore[not-iterable]
@@ -836,6 +831,7 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
             parse_iso_datetime(upload_time) if upload_time is not None else None  # ty:ignore[invalid-argument-type]
         ),
     )
-    if type(size) is int and size >= 0:
+    # valid_record vetted the value; the type check narrows it for ty.
+    if type(size) is int:
         link.size = size
     return link

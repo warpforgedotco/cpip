@@ -1,5 +1,5 @@
 diff --git a/src/cpip/_vendor/nab_resolver/conflict.py b/src/cpip/_vendor/nab_resolver/conflict.py
-index e573c14..b612633 100644
+index e573c14..c7ad5d7 100644
 --- a/src/cpip/_vendor/nab_resolver/conflict.py
 +++ b/src/cpip/_vendor/nab_resolver/conflict.py
 @@ -164,9 +164,12 @@ def conflict_resolution(
@@ -18,19 +18,23 @@ index e573c14..b612633 100644
              resolver.priority_epoch += 1
  
              update_culprit_counts(
-@@ -243,9 +246,10 @@ def update_culprit_counts(
-         if (
-             count >= threshold
-             and count % threshold == 0
+@@ -240,12 +243,9 @@ def update_culprit_counts(
+         resolver.stats.package_culprit_counts[package] += 1
+         resolver.priority_epoch += 1
+         count = resolver.stats.package_culprit_counts[package]
+-        if (
+-            count >= threshold
+-            and count % threshold == 0
 -            and package not in resolver.pending_targeted_backtrack
-+            and package not in resolver.pending_targeted_backtrack_set
-         ):
-             resolver.pending_targeted_backtrack.append(package)
-+            resolver.pending_targeted_backtrack_set.add(package)
+-        ):
+-            resolver.pending_targeted_backtrack.append(package)
++        if count >= threshold and count % threshold == 0:
++            # Re-adding a queued package keeps its original position.
++            resolver.pending_targeted_backtrack[package] = None
  
  
  def conflict_credit_target(satisfier: Assignment[Any, Any]) -> Any:
-@@ -473,8 +477,7 @@ def maybe_restart(
+@@ -473,8 +473,7 @@ def maybe_restart(
      if restarts_remaining <= 0:
          return restart_threshold, restarts_remaining, False
  
@@ -40,40 +44,15 @@ index e573c14..b612633 100644
          return restart_threshold, restarts_remaining, False
  
      resolver.stats.restarts += 1
-@@ -485,6 +488,7 @@ def maybe_restart(
-     resolver.solution.decide(ROOT, resolver.root_version)
-     resolver.decision_queue.clear()
-     resolver.pending_targeted_backtrack.clear()
-+    resolver.pending_targeted_backtrack_set.clear()
-     resolver.stats.targeted_backtracks = 0
- 
-     return restart_threshold * 2, restarts_remaining - 1, True
-@@ -511,8 +515,9 @@ def force_targeted_backtrack(
+@@ -511,8 +510,7 @@ def force_targeted_backtrack(
          if current < threshold:
              resolver.stats.package_culprit_counts[package] = threshold
              resolver.priority_epoch += 1
 -        if package not in resolver.pending_targeted_backtrack:
-+        if package not in resolver.pending_targeted_backtrack_set:
-             resolver.pending_targeted_backtrack.append(package)
-+            resolver.pending_targeted_backtrack_set.add(package)
+-            resolver.pending_targeted_backtrack.append(package)
++        resolver.pending_targeted_backtrack[package] = None
  
      return apply_targeted_backtrack(resolver)
- 
-@@ -529,6 +534,7 @@ def apply_targeted_backtrack(resolver: Resolver[Any, Any]) -> Any | None:
-     """
-     if resolver.stats.targeted_backtracks >= resolver.MAX_TARGETED_BACKTRACKS:
-         resolver.pending_targeted_backtrack.clear()
-+        resolver.pending_targeted_backtrack_set.clear()
-         return None
- 
-     target_level = resolver.solution.decision_level
-@@ -548,6 +554,7 @@ def apply_targeted_backtrack(resolver: Resolver[Any, Any]) -> Any | None:
-             break
- 
-     resolver.pending_targeted_backtrack.clear()
-+    resolver.pending_targeted_backtrack_set.clear()
-     if triggering_package is None or target_level >= resolver.solution.decision_level:
-         return None
  
 diff --git a/src/cpip/_vendor/nab_resolver/decide.py b/src/cpip/_vendor/nab_resolver/decide.py
 index 9dd16ee..822a662 100644
@@ -1532,7 +1511,7 @@ index 4385af4..6de29ba 100644
      merged: list[Interval] = [intervals[0]]
      for lower, lower_inclusive, upper, upper_inclusive in intervals[1:]:
 diff --git a/src/cpip/_vendor/nab_resolver/resolver.py b/src/cpip/_vendor/nab_resolver/resolver.py
-index 2a881be..f81d83f 100644
+index 2a881be..f6f6d1b 100644
 --- a/src/cpip/_vendor/nab_resolver/resolver.py
 +++ b/src/cpip/_vendor/nab_resolver/resolver.py
 @@ -236,6 +236,14 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
@@ -1577,24 +1556,19 @@ index 2a881be..f81d83f 100644
      def receive_partial_solution_hint(
          self,
          positive_ranges: Mapping[PackageType, RangeProtocol[VersionType]],
-@@ -624,6 +637,16 @@ class Resolver(Generic[PackageType, VersionType]):
-         # ``self.provider`` mid-resolve is not this one and is sent the hint.
-         self._hint_ignoring_provider = _provider_with_inherited_hint(provider)
+@@ -619,10 +632,7 @@ class Resolver(Generic[PackageType, VersionType]):
+         """
+         self.provider = provider
  
-+        # Optional provider hooks, bound here and again per resolve in _reset
-+        # rather than probed with getattr on every decision.  A hook swapped
-+        # onto the provider mid-resolve is not seen until the next resolve.
-+        self._consume_dependency_invalidations: Callable[[], Any] | None = getattr(
-+            provider, "consume_dependency_invalidations", None
-+        )
-+        self._consume_priority_invalidations: Callable[[], Any] | None = getattr(
-+            provider, "consume_priority_invalidations", None
-+        )
-+
+-        # Recording the provider rather than a flag keeps the answer tied to
+-        # the object it was asked about, so a provider swapped into
+-        # ``self.provider`` mid-resolve is not this one and is sent the hint.
+-        self._hint_ignoring_provider = _provider_with_inherited_hint(provider)
++        self._bind_provider_hooks()
+ 
          self.observer: ResolverObserver[PackageType, VersionType] = (
              observer or ResolverObserver()
-         )
-@@ -649,6 +672,16 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -649,6 +659,16 @@ class Resolver(Generic[PackageType, VersionType]):
          self.package_to_incompatibilities: defaultdict[Any, list[int]] = defaultdict(
              list
          )
@@ -1611,7 +1585,7 @@ index 2a881be..f81d83f 100644
  
          # Per clause, the contradiction epoch in which one of its terms was
          # last seen contradicted; unit propagation skips a clause whose stamp
-@@ -664,9 +697,17 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -664,9 +684,16 @@ class Resolver(Generic[PackageType, VersionType]):
          )
          self.stats: ResolverStats[PackageType] = ResolverStats()
  
@@ -1621,15 +1595,15 @@ index 2a881be..f81d83f 100644
 +
          self.constraints: Mapping[PackageType, RangeProtocol[VersionType]] = {}
          self.root_package_order: dict[PackageType, tuple[int, int, str]] = {}
+-        self.pending_targeted_backtrack: list[PackageType] = []
 +
-+        # Ordered queue of culprits plus a membership set kept in lock-step,
-+        # so the per-conflict de-dupe check is O(1) instead of a list scan.
-         self.pending_targeted_backtrack: list[PackageType] = []
-+        self.pending_targeted_backtrack_set: set[PackageType] = set()
++        # Dict-as-ordered-set: enqueue order stays deterministic while the
++        # per-conflict de-dupe is an O(1) key write instead of a list scan.
++        self.pending_targeted_backtrack: dict[PackageType, None] = {}
  
          # Memoises the tiebreak tuple in choose_package_to_decide.
          self.tiebreak_cache: dict[PackageType, tuple[int, int, str]] = {}
-@@ -677,9 +718,11 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -677,9 +704,11 @@ class Resolver(Generic[PackageType, VersionType]):
          self.decision_queue: DecisionQueue[PackageType] = DecisionQueue()
          self.priority_epoch = 0
  
@@ -1644,7 +1618,31 @@ index 2a881be..f81d83f 100644
  
          # relation_cache_on goes off while the memo's hit rate does not pay for
          # the key it builds. A window of probes decides that: relation_gate_hits
-@@ -828,10 +871,10 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -702,6 +731,23 @@ class Resolver(Generic[PackageType, VersionType]):
+         self.range_token_by_id: dict[int, int] = {}
+         self.interned_ranges: list[RangeProtocol[Any]] = []
+ 
++    def _bind_provider_hooks(self) -> None:
++        """Bind the optional provider hooks, once per construction and resolve.
++
++        Bound rather than probed with getattr on every decision.  A hook
++        swapped onto the provider mid-resolve is not seen until the next
++        resolve; recording the hint answer per provider object keeps it tied
++        to the object it was asked about.
++        """
++        provider = self.provider
++        self._hint_ignoring_provider = _provider_with_inherited_hint(provider)
++        self._consume_dependency_invalidations: Callable[[], Any] | None = getattr(
++            provider, "consume_dependency_invalidations", None
++        )
++        self._consume_priority_invalidations: Callable[[], Any] | None = getattr(
++            provider, "consume_priority_invalidations", None
++        )
++
+     def as_term_range(self, range_: RangeProtocol[Any]) -> RangeProtocol[VersionType]:
+         """Return the term constraint to record for a supplied range.
+ 
+@@ -828,10 +874,10 @@ class Resolver(Generic[PackageType, VersionType]):
          # Provider-driven force back-track. When the provider returns
          # a tentative candidate and queues blockers, jump to the
          # blockers before the candidate is decided.
@@ -1657,7 +1655,7 @@ index 2a881be..f81d83f 100644
              if triggering is not None:
                  return triggering
  
-@@ -839,51 +882,96 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -839,51 +885,96 @@ class Resolver(Generic[PackageType, VersionType]):
              decide.record_no_versions(self, next_package, had_pending=had_pending)
              return next_package
  
@@ -1784,7 +1782,7 @@ index 2a881be..f81d83f 100644
      def _build_result(self) -> Solution[PackageType, VersionType]:
          """Build the final result, including only reachable packages.
  
-@@ -905,14 +993,20 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -905,10 +996,15 @@ class Resolver(Generic[PackageType, VersionType]):
          """Reset solver state for a new resolution."""
          self.incompatibilities.clear()
          self.package_to_incompatibilities.clear()
@@ -1800,21 +1798,12 @@ index 2a881be..f81d83f 100644
  
          self.constraints = constraints or {}
          self.root_package_order.clear()
-         self.pending_targeted_backtrack.clear()
-+        self.pending_targeted_backtrack_set.clear()
-         self.tiebreak_cache.clear()
-         self.decision_queue.clear()
-         self.priority_epoch = 0
-@@ -928,6 +1022,12 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -927,7 +1023,7 @@ class Resolver(Generic[PackageType, VersionType]):
+         self.term_range_keepalive.clear()
  
          # Re-asked here, so a hook installed since the last resolve is honoured.
-         self._hint_ignoring_provider = _provider_with_inherited_hint(self.provider)
-+        self._consume_dependency_invalidations = getattr(
-+            self.provider, "consume_dependency_invalidations", None
-+        )
-+        self._consume_priority_invalidations = getattr(
-+            self.provider, "consume_priority_invalidations", None
-+        )
+-        self._hint_ignoring_provider = _provider_with_inherited_hint(self.provider)
++        self._bind_provider_hooks()
  
      def _add_root_requirements(
          self, requirements: Sequence[RootRequirement[PackageType, VersionType]]

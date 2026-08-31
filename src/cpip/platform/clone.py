@@ -115,14 +115,17 @@ Keyed by ``st_dev`` from the ``fstat`` the mode read already pays for: a
 successful FICLONE implies source and destination share that device.
 """
 
-_reflink_probe: dict[int, tuple[int, int] | None] = {}
+_reflink_fast: set[int] = set()
 
-"""Per-device probe state while clone speed is undecided.
+"""Devices whose measured clone throughput proved FICLONE is metadata work."""
 
-``(bytes, ns)`` accumulated over timed clones; ``None`` once the device
-proved fast.  Installer threads race on these entries without a lock: a lost
-update only lengthens the probe, and ``_reflink_slow`` membership is the
-load-bearing outcome.
+_reflink_probe: dict[int, tuple[int, int]] = {}
+
+"""Per-device ``(bytes, ns)`` accumulated over timed clones while undecided.
+
+Installer threads race on these entries without a lock: a lost update only
+lengthens the probe, and ``_reflink_slow`` membership is the load-bearing
+outcome.
 """
 
 # Files below this size prove nothing: the fixed ioctl cost dominates, and a
@@ -145,24 +148,24 @@ _REFLINK_PROVE_FAST_BYTES = 64 * 1024 * 1024
 def _record_reflink_timing(device: int, size: int, elapsed_ns: int) -> None:
     """Fold one timed clone into the device's probe, deciding when ripe."""
 
-    totals = _reflink_probe.get(device, ())
-
-    if totals is None:
+    if device in _reflink_fast:
         return
 
-    bytes_total = (totals[0] if totals else 0) + size
+    bytes_total, ns_total = _reflink_probe.get(device, (0, 0))
 
-    ns_total = (totals[1] if totals else 0) + elapsed_ns
+    bytes_total += size
+
+    ns_total += elapsed_ns
 
     if ns_total >= _REFLINK_PROBE_MIN_NS:
         if bytes_total < ns_total * _REFLINK_MIN_BYTES_PER_NS:
             _reflink_slow.add(device)
 
         else:
-            _reflink_probe[device] = None
+            _reflink_fast.add(device)
 
     elif bytes_total >= _REFLINK_PROVE_FAST_BYTES:
-        _reflink_probe[device] = None
+        _reflink_fast.add(device)
 
     else:
         _reflink_probe[device] = (bytes_total, ns_total)
@@ -199,7 +202,7 @@ def _linux_reflink(source: str, destination: str) -> bool:
 
         probing = (
             source_stat.st_size >= _REFLINK_PROBE_MIN_FILE_BYTES
-            and _reflink_probe.get(device, ()) is not None
+            and device not in _reflink_fast
         )
 
         destination_fd = os.open(

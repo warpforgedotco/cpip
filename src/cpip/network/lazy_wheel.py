@@ -24,6 +24,11 @@ from cpip.network.http import NetworkSession
 
 CONTENT_CHUNK_SIZE = 10 * 1024
 
+# The opening suffix request reads more than the per-read chunk: a large
+# wheel's central directory routinely exceeds 10 KiB, and the extra tail
+# bytes are cheaper than the range round-trip they save.
+TAIL_CHUNK_SIZE = 64 * 1024
+
 
 class HTTPRangeRequestUnsupported(Exception):
     pass
@@ -105,7 +110,7 @@ class LazyZipOverHTTP:
         tail = session.get(
             url,
             headers={
-                "Range": f"bytes=-{chunk_size}",
+                "Range": f"bytes=-{TAIL_CHUNK_SIZE}",
                 "Cache-Control": "no-cache",
             },
             stream=True,
@@ -117,13 +122,13 @@ class LazyZipOverHTTP:
             if response is not None:
                 response.drain_conn()
                 response.close()
-            if response is not None and response.status == 416:
-                # The suffix asked for more bytes than the wheel holds, so
-                # the host serves ranges and the file is tiny: one plain GET
-                # fetches all of it.
-                self.load_entire_file()
-                self.check_zip()
-                return
+                if response.status == 416:
+                    # The suffix asked for more bytes than the wheel holds,
+                    # so the host serves ranges and the file is tiny: one
+                    # plain GET fetches all of it.
+                    self.load_entire_file()
+                    self.check_zip()
+                    return
             raise
 
         if tail.status != 206:
