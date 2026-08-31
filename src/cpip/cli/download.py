@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 from cpip.build.build import build_wheel_from_source
 from cpip.cli.config import load_source_config, resolve_sources
@@ -19,10 +22,59 @@ from cpip.cli.resolution_errors import resolution_error_message
 from cpip.core.appdirs import resolve_cache_dir
 from cpip.core.errors import DistributionNotFound, ResolutionError
 from cpip.core.format_control import FormatControl
+from cpip.core.utils import default_worker_count
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.provider import CandidateProvider
+from cpip.index.vcs import vcs_scheme
 from cpip.install.metadata import prepare_editable_source
 from cpip.resolution.api import ResolutionEngine
+
+
+def fetch_sources(
+    candidates: Sequence[Any],
+    fetch_source: Callable[[Any], str],
+) -> list[str]:
+    """Bring every candidate's artifact local, remote fetches in parallel.
+
+    A VCS sdist may prompt for credentials, so those fetch serially in
+    candidate order; everything else goes through a thread pool the way the
+    install path materializes wheels. Results keep candidate order.
+    """
+
+    sources: list[str] = [""] * len(candidates)
+
+    pooled: list[int] = []
+
+    for index, candidate in enumerate(candidates):
+        may_prompt = (
+            candidate.source_kind == "sdist"
+            and candidate.source_url is not None
+            and vcs_scheme(candidate.source_url) is not None
+        )
+
+        if may_prompt:
+            sources[index] = fetch_source(candidate)
+
+        else:
+            pooled.append(index)
+
+    if len(pooled) == 1:
+        sources[pooled[0]] = fetch_source(candidates[pooled[0]])
+
+    elif pooled:
+        with ThreadPoolExecutor(
+            max_workers=min(default_worker_count(), len(pooled)),
+            thread_name_prefix="cpip-download",
+        ) as pool:
+            fetched = pool.map(
+                lambda index: fetch_source(candidates[index]),
+                pooled,
+            )
+
+            for index, source in zip(pooled, fetched):
+                sources[index] = source
+
+    return sources
 
 
 def run_download(args: list[str]) -> int:
@@ -92,7 +144,7 @@ def run_download(args: list[str]) -> int:
 
     artifact_locator = ArtifactLocator(bundle.session, cache_dir=cache_dir)
 
-    for candidate in plan.candidates:
+    def fetch_source(candidate: Any) -> str:
         source = candidate.path
 
         if candidate.source_kind == "sdist" and candidate.source_url is not None:
@@ -101,8 +153,13 @@ def run_download(args: list[str]) -> int:
             if candidate.canonical_name == "setuptools":
                 source = candidate.path
 
-        source_text = os.fspath(source)
+        return os.fspath(source)
 
+    candidates = list(plan.candidates)
+
+    for candidate, source_text in zip(
+        candidates, fetch_sources(candidates, fetch_source)
+    ):
         shutil.copy2(
             source_text, os.path.join(destination, os.path.basename(source_text))
         )
