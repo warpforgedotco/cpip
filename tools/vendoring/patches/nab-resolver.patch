@@ -1,5 +1,5 @@
 diff --git a/src/cpip/_vendor/nab_resolver/conflict.py b/src/cpip/_vendor/nab_resolver/conflict.py
-index e573c14..770d7f9 100644
+index e573c14..b612633 100644
 --- a/src/cpip/_vendor/nab_resolver/conflict.py
 +++ b/src/cpip/_vendor/nab_resolver/conflict.py
 @@ -164,9 +164,12 @@ def conflict_resolution(
@@ -58,6 +58,22 @@ index e573c14..770d7f9 100644
 +            resolver.pending_targeted_backtrack_set.add(package)
  
      return apply_targeted_backtrack(resolver)
+ 
+@@ -529,6 +534,7 @@ def apply_targeted_backtrack(resolver: Resolver[Any, Any]) -> Any | None:
+     """
+     if resolver.stats.targeted_backtracks >= resolver.MAX_TARGETED_BACKTRACKS:
+         resolver.pending_targeted_backtrack.clear()
++        resolver.pending_targeted_backtrack_set.clear()
+         return None
+ 
+     target_level = resolver.solution.decision_level
+@@ -548,6 +554,7 @@ def apply_targeted_backtrack(resolver: Resolver[Any, Any]) -> Any | None:
+             break
+ 
+     resolver.pending_targeted_backtrack.clear()
++    resolver.pending_targeted_backtrack_set.clear()
+     if triggering_package is None or target_level >= resolver.solution.decision_level:
+         return None
  
 diff --git a/src/cpip/_vendor/nab_resolver/decide.py b/src/cpip/_vendor/nab_resolver/decide.py
 index 9dd16ee..822a662 100644

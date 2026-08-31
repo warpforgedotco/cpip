@@ -534,6 +534,7 @@ def apply_targeted_backtrack(resolver: Resolver[Any, Any]) -> Any | None:
     """
     if resolver.stats.targeted_backtracks >= resolver.MAX_TARGETED_BACKTRACKS:
         resolver.pending_targeted_backtrack.clear()
+        resolver.pending_targeted_backtrack_set.clear()
         return None
 
     target_level = resolver.solution.decision_level
@@ -553,6 +554,7 @@ def apply_targeted_backtrack(resolver: Resolver[Any, Any]) -> Any | None:
             break
 
     resolver.pending_targeted_backtrack.clear()
+    resolver.pending_targeted_backtrack_set.clear()
     if triggering_package is None or target_level >= resolver.solution.decision_level:
         return None
 
