@@ -17,13 +17,20 @@ from cpip.install.wheel_scripts import rewrite_shebang
 
 
 class _SplitTarget:
-    """A scheme whose purelib and platlib differ, as system layouts do."""
+    """A scheme whose purelib and platlib differ, as system layouts do.
 
-    purelib = "/usr/lib/python3/site-packages"
-    platlib = "/usr/lib64/python3/site-packages"
-    scripts = "/usr/bin"
-    data = "/usr"
-    headers = "/usr/include/python3"
+    The roots are synthetic rather than the real ``/usr`` ones: the
+    destination resolver calls ``realpath`` on them, and on a merged-``/usr``
+    distribution ``/usr/lib64`` is a symlink to ``/usr/lib``.  Borrowing the
+    system paths there collapses purelib and platlib onto each other and hides
+    the very distinction these tests exist to pin.
+    """
+
+    purelib = "/cpip-test-prefix/lib/python3/site-packages"
+    platlib = "/cpip-test-prefix/lib64/python3/site-packages"
+    scripts = "/cpip-test-prefix/bin"
+    data = "/cpip-test-prefix"
+    headers = "/cpip-test-prefix/include/python3"
     resolved_roots_internal = None
 
 
@@ -57,7 +64,7 @@ def test_wheel_root_follows_root_is_purelib() -> None:
             "pkg/mod.py",
             root_is_purelib=True,
         )
-        == "/usr/lib/python3/site-packages/pkg/mod.py"
+        == "/cpip-test-prefix/lib/python3/site-packages/pkg/mod.py"
     )
     assert (
         destination_internal_parts_text(
@@ -66,7 +73,7 @@ def test_wheel_root_follows_root_is_purelib() -> None:
             "pkg/_speedups.so",
             root_is_purelib=False,
         )
-        == "/usr/lib64/python3/site-packages/pkg/_speedups.so"
+        == "/cpip-test-prefix/lib64/python3/site-packages/pkg/_speedups.so"
     )
 
 
@@ -81,7 +88,7 @@ def test_data_directory_is_unaffected(root_is_purelib: bool) -> None:
             "pkg-1.0.data/scripts/tool",
             root_is_purelib=root_is_purelib,
         )
-        == "/usr/bin/tool"
+        == "/cpip-test-prefix/bin/tool"
     )
     assert (
         destination_internal_parts_text(
@@ -90,7 +97,7 @@ def test_data_directory_is_unaffected(root_is_purelib: bool) -> None:
             "pkg-1.0.data/platlib/ext.so",
             root_is_purelib=root_is_purelib,
         )
-        == "/usr/lib64/python3/site-packages/ext.so"
+        == "/cpip-test-prefix/lib64/python3/site-packages/ext.so"
     )
 
 
