@@ -21,11 +21,11 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from typing import Any
 
-PREFIX = f"{versioned_bucket('cpip-index-catalog', 1)}:"
+PREFIX = f"{versioned_bucket('cpip-index-catalog', 2)}:"
 SUMMARY_PREFIX = f"{versioned_bucket('cpip-index-summary', 1)}:"
-CHOICE_PREFIX = f"{versioned_bucket('cpip-index-choice', 1)}:"
+CHOICE_PREFIX = f"{versioned_bucket('cpip-index-choice', 2)}:"
 SUMMARY_HEADER = versioned_bucket("cpip-index-summary", 1).encode() + b"\0"
-CHOICE_HEADER = versioned_bucket("cpip-index-choice", 1).encode() + b"\0"
+CHOICE_HEADER = versioned_bucket("cpip-index-choice", 2).encode() + b"\0"
 
 WHEEL_RECORD = 1
 SDIST_RECORD = 2
@@ -442,12 +442,23 @@ def valid_record(value: object) -> bool:
     Marshal only rebuilds exact built-in types, so ``type(...) is`` checks
     are equivalent to ``isinstance`` here and keep this loop cheap.
     """
-    if type(value) is not tuple or len(value) != 9:
+    if type(value) is not tuple or len(value) != 10:
         return False
-    (url, text, hashes, requires_python, yanked, metadata, upload_time, _, parts) = (
-        value
-    )
+    (
+        url,
+        text,
+        hashes,
+        requires_python,
+        yanked,
+        metadata,
+        upload_time,
+        _,
+        parts,
+        size,
+    ) = value
     if type(url) is not str or type(text) is not str:
+        return False
+    if size is not None and type(size) is not int:
         return False
     if not valid_str_dict(hashes):
         return False
@@ -790,12 +801,13 @@ def link_record(
         None if upload_time is None else upload_time.isoformat(),
         wheel_identity(parsed_wheel),
         tuple(link.parsed_url_internal),
+        link.size,
     )
 
 
 def link_from_record(record: object, *, source_url: str | None = None) -> Link:
     """Materialize a record that ``valid_record`` accepted at load time."""
-    if not isinstance(record, tuple) or len(record) != 9:
+    if not isinstance(record, tuple) or len(record) != 10:
         raise ValueError("invalid catalog record")
     (
         url,
@@ -807,8 +819,9 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
         upload_time,
         _wheel_identity,
         parts,
+        size,
     ) = record
-    return Link.from_cached_record(
+    link = Link.from_cached_record(
         url,  # ty:ignore[invalid-argument-type]
         parsed_url=urllib.parse.SplitResult(*parts),  # ty:ignore[not-iterable]
         source_url=source_url,
@@ -823,3 +836,6 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
             parse_iso_datetime(upload_time) if upload_time is not None else None  # ty:ignore[invalid-argument-type]
         ),
     )
+    if type(size) is int:
+        link.size = size
+    return link

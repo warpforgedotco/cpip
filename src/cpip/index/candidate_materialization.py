@@ -84,6 +84,13 @@ _EXTRA_MARKER_RE = re.compile(r"extra\s*(?:==|in)\s*['\"]([^'\"]+)['\"]")
 _METADATA_WORKERS = 32
 _PREPARED_SDIST_LIMIT = 8
 
+# Below this artifact size (PEP 700 ``size``), metadata-over-ranges is not
+# worth it: the 2-3 range round-trips cost more than downloading the wheel
+# outright, and the full download lands in the artifact cache where an
+# eventual install reuses it.  pip's fast-deps was a net loss on small
+# wheels for exactly this reason (pypa/pip#8670).
+_RANGED_METADATA_MIN_WHEEL_BYTES = 1 * 1024 * 1024
+
 
 class _ArchiveMemberInfo(NamedTuple):
     compress_type: int
@@ -1165,6 +1172,11 @@ class CandidateMaterializer:
         session = self.session
 
         if session is None or candidate.link.is_file:
+            return None
+
+        size = candidate.link.size
+
+        if size is not None and size < _RANGED_METADATA_MIN_WHEEL_BYTES:
             return None
 
         reader = getattr(session, "wheel_metadata_text", None)

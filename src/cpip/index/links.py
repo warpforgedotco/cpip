@@ -81,6 +81,7 @@ class Link:
         "parsed_url_internal",
         "path_internal",
         "requires_python",
+        "size",
         "text",
         "upload_time",
         "url",
@@ -136,6 +137,9 @@ class Link:
         self.text = text
         self.local_identity_internal = local_identity_internal
         self.local_is_dir_internal = local_is_dir_internal
+        # PEP 700 artifact size in bytes, assigned after construction by the
+        # JSON index parser; None everywhere size is not published.
+        self.size: int | None = None
         self.kind = kind if kind is not None else self.artifact_kind()
 
     @property
@@ -244,6 +248,7 @@ class Link:
         link.text = text
         link.local_identity_internal = None
         link.local_is_dir_internal = None
+        link.size = None
         link.kind = cls.artifact_kind_from_filename(
             posixpath.basename(path.rstrip("/")),
         )
@@ -282,6 +287,7 @@ class Link:
         link.text = text
         link.local_identity_internal = None
         link.local_is_dir_internal = None
+        link.size = None
         link.kind = cls.artifact_kind_from_filename(
             posixpath.basename(link.path_internal.rstrip("/")),
         )
@@ -342,6 +348,7 @@ class Link:
         link.text = name
         link.local_identity_internal = local_identity
         link.local_is_dir_internal = False
+        link.size = None
         link.kind = cls.artifact_kind_from_filename(name)
         return link
 
