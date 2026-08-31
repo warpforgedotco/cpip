@@ -779,7 +779,40 @@ def install_wheels_transactionally(
     candidates: Iterable[WheelCandidate] | None = None,
     cache_dir: str | None = None,
 ) -> tuple[WheelCandidate, ...]:
-    """Install a wheel batch with rollback across every wheel in the batch."""
+    """Install a wheel batch with rollback across every wheel in the batch.
+
+    The whole batch -- the existing-state scan included -- runs under an
+    advisory lock on the target, so concurrent cpip processes driving one
+    environment serialize instead of interleaving file writes.
+    """
+    from cpip.platform.lock import environment_write_lock
+
+    with environment_write_lock(target.purelib):
+        return _install_wheels_transaction(
+            items,
+            target=target,
+            pycompile=pycompile,
+            force=force,
+            preserve_existing=preserve_existing,
+            script_executable=script_executable,
+            lookup_existing=lookup_existing,
+            candidates=candidates,
+            cache_dir=cache_dir,
+        )
+
+
+def _install_wheels_transaction(
+    items: Iterable[tuple[str, bool, DirectUrl | None]],
+    *,
+    target: InstallTarget,
+    pycompile: bool = True,
+    force: bool = False,
+    preserve_existing: bool = False,
+    script_executable: str | None = None,
+    lookup_existing: bool = True,
+    candidates: Iterable[WheelCandidate] | None = None,
+    cache_dir: str | None = None,
+) -> tuple[WheelCandidate, ...]:
     requests = tuple(items)
     installer = WheelInstaller(
         target,
