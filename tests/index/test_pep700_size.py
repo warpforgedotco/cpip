@@ -61,6 +61,23 @@ def test_size_survives_the_catalog_record_round_trip() -> None:
     assert restored.url == link.url
 
 
+def test_a_negative_cached_size_is_rejected_at_load_time() -> None:
+    from cpip.index.catalog_cache import valid_record
+
+    [link] = parse_links(
+        [{"url": "demo-1.0-py3-none-any.whl", "filename": "x", "size": 4096}],
+    )
+    record = link_record(link)
+
+    # A corrupted or hand-crafted record must not smuggle in a negative
+    # size, which would read as "small" and disable range metadata reads.
+    negative = (*record[:-1], -5)
+
+    assert valid_record(record)
+    assert not valid_record(negative)
+    assert link_from_record(negative).size is None
+
+
 def ranged_materializer(reader: Any) -> CandidateMaterializer:
     materializer = CandidateMaterializer.__new__(CandidateMaterializer)
     materializer.session = SimpleNamespace(wheel_metadata_text=reader)

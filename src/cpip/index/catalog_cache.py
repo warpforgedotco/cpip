@@ -458,7 +458,7 @@ def valid_record(value: object) -> bool:
     ) = value
     if type(url) is not str or type(text) is not str:
         return False
-    if size is not None and type(size) is not int:
+    if size is not None and (type(size) is not int or size < 0):
         return False
     if not valid_str_dict(hashes):
         return False
@@ -836,6 +836,6 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
             parse_iso_datetime(upload_time) if upload_time is not None else None  # ty:ignore[invalid-argument-type]
         ),
     )
-    if type(size) is int:
+    if type(size) is int and size >= 0:
         link.size = size
     return link
