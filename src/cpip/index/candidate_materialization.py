@@ -45,7 +45,10 @@ from cpip.index.candidate_cache import (
     cached_wheel_for_link,
     emit_build_message,
 )
-from cpip.index.candidate_metadata_cache import get_candidate_metadata_cache
+from cpip.index.candidate_metadata_cache import (
+    CandidateMetadataCache,
+    get_candidate_metadata_cache,
+)
 from cpip.index.candidate_stream import CandidateStream
 from cpip.index.metadata_cache import get_wheel_metadata_cache
 from cpip.index.prefetch import Prefetcher
@@ -83,6 +86,13 @@ _EXTRA_MARKER_RE = re.compile(r"extra\s*(?:==|in)\s*['\"]([^'\"]+)['\"]")
 
 _METADATA_WORKERS = 32
 _PREPARED_SDIST_LIMIT = 8
+
+# Below this artifact size (PEP 700 ``size``), metadata-over-ranges is not
+# worth it: the 2-3 range round-trips cost more than downloading the wheel
+# outright, and the full download lands in the artifact cache where an
+# eventual install reuses it.  pip's fast-deps was a net loss on small
+# wheels for exactly this reason (pypa/pip#8670).
+_RANGED_METADATA_MIN_WHEEL_BYTES = 1 * 1024 * 1024
 
 
 class _ArchiveMemberInfo(NamedTuple):
@@ -631,6 +641,31 @@ class CandidateMaterializer:
 
         return fingerprint
 
+    def persistent_metadata_cache_for(
+        self,
+        candidate: CandidateRecord,
+    ) -> CandidateMetadataCache | None:
+        """The persistent metadata cache, for artifacts whose identity can pin it.
+
+        Cached metadata never expires, which is sound only while the cache key
+        proves the artifact is the same one: a published hash, or a local
+        file's stat identity.  When the fingerprint falls back to the bare
+        URL -- an index that publishes no hashes -- a republished artifact
+        under the same name would be served the old metadata forever, so such
+        candidates keep to the per-process memory cache and are re-read on
+        the next run.
+        """
+
+        cache = self.persistent_candidate_metadata_cache
+
+        if cache is None:
+            return None
+
+        if self.artifact_fingerprint(candidate) == candidate.link.url:
+            return None
+
+        return cache
+
     def source_hashes_for(self, candidate: CandidateRecord) -> dict[str, str] | None:
         hashes = candidate.link.hashes
 
@@ -847,9 +882,13 @@ class CandidateMaterializer:
             requested_extras,
         )
 
-        return memory_key in self.metadata_cache or (
-            self.persistent_candidate_metadata_cache is not None
-            and self.persistent_candidate_metadata_cache.contains(persistent_key)
+        if memory_key in self.metadata_cache:
+            return True
+
+        persistent_cache = self.persistent_metadata_cache_for(candidate)
+
+        return persistent_cache is not None and persistent_cache.contains(
+            persistent_key,
         )
 
     def prefetch_metadata(
@@ -928,14 +967,16 @@ class CandidateMaterializer:
             requested_extras,
         )
 
+        persistent_cache = self.persistent_metadata_cache_for(candidate)
+
         def load() -> CandidateMetadata:
             cached = self.metadata_cache.get(key)
 
             if cached is not None:
                 return cached
 
-            if self.persistent_candidate_metadata_cache is not None:
-                cached = self.persistent_candidate_metadata_cache.get(persistent_key)
+            if persistent_cache is not None:
+                cached = persistent_cache.get(persistent_key)
 
                 if cached is not None:
                     self.metadata_cache[key] = cached
@@ -951,8 +992,8 @@ class CandidateMaterializer:
                 ):
                     self.metadata_cache[key] = metadata
 
-                    if self.persistent_candidate_metadata_cache is not None:
-                        self.persistent_candidate_metadata_cache.put(
+                    if persistent_cache is not None:
+                        persistent_cache.put(
                             persistent_key,
                             metadata,
                         )
@@ -975,8 +1016,8 @@ class CandidateMaterializer:
                 if metadata is not None:
                     self.metadata_cache[key] = metadata
 
-                    if self.persistent_candidate_metadata_cache is not None:
-                        self.persistent_candidate_metadata_cache.put(
+                    if persistent_cache is not None:
+                        persistent_cache.put(
                             persistent_key,
                             metadata,
                         )
@@ -989,8 +1030,8 @@ class CandidateMaterializer:
                 if metadata is not None:
                     self.metadata_cache[key] = metadata
 
-                    if self.persistent_candidate_metadata_cache is not None:
-                        self.persistent_candidate_metadata_cache.put(
+                    if persistent_cache is not None:
+                        persistent_cache.put(
                             persistent_key,
                             metadata,
                         )
@@ -1111,8 +1152,8 @@ class CandidateMaterializer:
 
             self.metadata_cache[key] = metadata
 
-            if self.persistent_candidate_metadata_cache is not None:
-                self.persistent_candidate_metadata_cache.put(persistent_key, metadata)
+            if persistent_cache is not None:
+                persistent_cache.put(persistent_key, metadata)
 
             return metadata
 
@@ -1165,6 +1206,11 @@ class CandidateMaterializer:
         session = self.session
 
         if session is None or candidate.link.is_file:
+            return None
+
+        size = candidate.link.size
+
+        if size is not None and size < _RANGED_METADATA_MIN_WHEEL_BYTES:
             return None
 
         reader = getattr(session, "wheel_metadata_text", None)

@@ -16,6 +16,7 @@ import errno
 import os
 import stat
 import sys
+import time
 
 TYPE_CHECKING = False
 
@@ -99,6 +100,77 @@ costs the stat this is trying to avoid.
 """
 
 
+_reflink_slow: set[int] = set()
+
+"""Devices whose FICLONE succeeds but moves data at copy speed.
+
+A working reflink is metadata work and finishes in microseconds regardless of
+file size; on some filesystems (network-backed block storage, XFS
+configurations) the ioctl succeeds but behaves like a full copy, which made
+uv's clone-by-default install ~30x slower than hardlinking on XFS-on-EBS
+(astral-sh/uv#18259).  Successful clones of probe-sized files are timed while
+a device is undecided, and a device whose measured throughput stays below
+what any metadata-only clone achieves is demoted to the plain-copy fallback.
+Keyed by ``st_dev`` from the ``fstat`` the mode read already pays for: a
+successful FICLONE implies source and destination share that device.
+"""
+
+_reflink_fast: set[int] = set()
+
+"""Devices whose measured clone throughput proved FICLONE is metadata work."""
+
+_reflink_probe: dict[int, tuple[int, int]] = {}
+
+"""Per-device ``(bytes, ns)`` accumulated over timed clones while undecided.
+
+Installer threads race on these entries without a lock: a lost update only
+lengthens the probe, and ``_reflink_slow`` membership is the load-bearing
+outcome.
+"""
+
+# Files below this size prove nothing: the fixed ioctl cost dominates, and a
+# genuinely instant clone of tiny files would read as slow throughput.
+_REFLINK_PROBE_MIN_FILE_BYTES = 128 * 1024
+
+# Judge a device once this much time went into its timed ioctls...
+_REFLINK_PROBE_MIN_NS = 25_000_000
+
+# ...demoting it when the bytes cloned in that time imply less than ~256
+# MB/s: no metadata-only clone is that slow, and a clone that behaves as a
+# full copy of cache-fresh files rarely exceeds it.
+_REFLINK_MIN_BYTES_PER_NS = 0.256
+
+# A device cloning this much before reaching the time threshold implies
+# multi-GB/s throughput, which no data copy explains; it is proven fast.
+_REFLINK_PROVE_FAST_BYTES = 64 * 1024 * 1024
+
+
+def _record_reflink_timing(device: int, size: int, elapsed_ns: int) -> None:
+    """Fold one timed clone into the device's probe, deciding when ripe."""
+
+    if device in _reflink_fast:
+        return
+
+    bytes_total, ns_total = _reflink_probe.get(device, (0, 0))
+
+    bytes_total += size
+
+    ns_total += elapsed_ns
+
+    if ns_total >= _REFLINK_PROBE_MIN_NS:
+        if bytes_total < ns_total * _REFLINK_MIN_BYTES_PER_NS:
+            _reflink_slow.add(device)
+
+        else:
+            _reflink_fast.add(device)
+
+    elif bytes_total >= _REFLINK_PROVE_FAST_BYTES:
+        _reflink_fast.add(device)
+
+    else:
+        _reflink_probe[device] = (bytes_total, ns_total)
+
+
 def _linux_reflink(source: str, destination: str) -> bool:
     """Clone one regular file with the Linux FICLONE ioctl when available."""
 
@@ -119,7 +191,19 @@ def _linux_reflink(source: str, destination: str) -> bool:
     source_fd = os.open(source, os.O_RDONLY)
 
     try:
-        mode = stat.S_IMODE(os.fstat(source_fd).st_mode)
+        source_stat = os.fstat(source_fd)
+
+        mode = stat.S_IMODE(source_stat.st_mode)
+
+        device = source_stat.st_dev
+
+        if device in _reflink_slow:
+            return False
+
+        probing = (
+            source_stat.st_size >= _REFLINK_PROBE_MIN_FILE_BYTES
+            and device not in _reflink_fast
+        )
 
         destination_fd = os.open(
             destination,
@@ -128,7 +212,17 @@ def _linux_reflink(source: str, destination: str) -> bool:
         )
 
         try:
+            if probing:
+                started = time.perf_counter_ns()
+
             fcntl.ioctl(destination_fd, _FICLONE, source_fd)
+
+            if probing:
+                _record_reflink_timing(
+                    device,
+                    source_stat.st_size,
+                    time.perf_counter_ns() - started,
+                )
 
         except OSError as exc:
             os.close(destination_fd)

@@ -137,28 +137,30 @@ class IndexPageParser:
             yanked = file_data.get("yanked")
             requires_python = file_data.get("requires-python")
             upload_time = file_data.get("upload-time")
-            append(
-                link_factory(
-                    join_index_url(base_url, file_url),
-                    source_url=url,
-                    text=str(filename or ""),
-                    hashes=hashes if isinstance(hashes, dict) else None,
-                    requires_python=requires_python
-                    if isinstance(requires_python, str)
-                    else None,
-                    yanked_reason=(
-                        None
-                        if yanked is False or yanked is None
-                        else ""
-                        if yanked is True
-                        else str(yanked)
-                    ),
-                    metadata_file=metadata_file_from_json(file_data),
-                    upload_time=(
-                        parse_iso_datetime(upload_time) if upload_time else None
-                    ),
+            size = file_data.get("size")
+            link = link_factory(
+                join_index_url(base_url, file_url),
+                source_url=url,
+                text=str(filename or ""),
+                hashes=hashes if isinstance(hashes, dict) else None,
+                requires_python=requires_python
+                if isinstance(requires_python, str)
+                else None,
+                yanked_reason=(
+                    None
+                    if yanked is False or yanked is None
+                    else ""
+                    if yanked is True
+                    else str(yanked)
                 ),
+                metadata_file=metadata_file_from_json(file_data),
+                upload_time=(parse_iso_datetime(upload_time) if upload_time else None),
             )
+            # PEP 700: assigned after construction so custom link factories
+            # keep their signature. bool is an int, hence the exact type check.
+            if type(size) is int and size >= 0:
+                link.size = size
+            append(link)
         return links
 
 

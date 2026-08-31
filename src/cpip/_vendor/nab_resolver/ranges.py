@@ -397,11 +397,15 @@ class Range(Generic[VersionType]):
             right_points = other._as_points()
             if left_points is not None and right_points is not None:
                 return self._from_points(left_points & right_points)
+        left_intervals = self._intervals
+        right_intervals = other._intervals
+        left_count = len(left_intervals)
+        right_count = len(right_intervals)
         result: list[Interval] = []
         left_index = right_index = 0
-        while left_index < len(self._intervals) and right_index < len(other._intervals):
-            left_interval = self._intervals[left_index]
-            right_interval = other._intervals[right_index]
+        while left_index < left_count and right_index < right_count:
+            left_interval = left_intervals[left_index]
+            right_interval = right_intervals[right_index]
 
             inter_lower, inter_lower_inc = _max_lower_bound(
                 left_interval, right_interval
@@ -453,8 +457,14 @@ class Range(Generic[VersionType]):
             right_points = other._as_points()
             if left_points is not None and right_points is not None:
                 return self._from_points(left_points | right_points)
-        all_intervals = list(self._intervals) + list(other._intervals)
-        return Range(_normalize_intervals(all_intervals))
+        left_intervals = self._intervals
+        right_intervals = other._intervals
+        # Union with an empty range is the other operand; both are immutable.
+        if not left_intervals:
+            return other
+        if not right_intervals:
+            return self
+        return Range(_normalize_intervals([*left_intervals, *right_intervals]))
 
     def __invert__(self) -> Range[VersionType]:
         """Complement (versions NOT in this range)."""
@@ -648,14 +658,23 @@ class Range(Generic[VersionType]):
                 return False
 
             right = right_intervals[right_index]
-            lower, lower_inclusive = _max_lower_bound(left, right)
-            upper, upper_inclusive = _min_upper_bound(left, right)
-
-            if (
-                lower_inclusive is not left[1]
-                or upper_inclusive is not left[3]
-                or not _same_bound(lower, left[0])
-                or not _same_bound(upper, left[2])
+            # Coverage check, written out; see Range.relation for the
+            # derivation from _max_lower_bound/_min_upper_bound.
+            right_lower = right[0]
+            if _same_bound(left_lower, right_lower):
+                if left_lower_inclusive and not right[1]:
+                    return False
+            elif left_lower is NEGATIVE_INFINITY or (
+                right_lower is not NEGATIVE_INFINITY and left_lower < right_lower
+            ):
+                return False
+            left_upper = left[2]
+            right_upper = right[2]
+            if _same_bound(left_upper, right_upper):
+                if left[3] and not right[3]:
+                    return False
+            elif left_upper is POSITIVE_INFINITY or (
+                right_upper is not POSITIVE_INFINITY and left_upper > right_upper
             ):
                 return False
 
@@ -764,13 +783,26 @@ class Range(Generic[VersionType]):
                 continue
 
             is_disjoint = False
-            lower, lower_inclusive = _max_lower_bound(left, right)
-            upper, upper_inclusive = _min_upper_bound(left, right)
-            if (
-                lower_inclusive is not left[1]
-                or upper_inclusive is not left[3]
-                or not _same_bound(lower, left[0])
-                or not _same_bound(upper, left[2])
+            # Coverage check, written out: ``right`` must reach at least as
+            # low and as high as ``left``, sharing an endpoint only when
+            # ``right`` includes it too.  Equivalent to comparing the
+            # _max_lower_bound/_min_upper_bound results against ``left``'s own
+            # bounds, without building two bound tuples per interval pair.
+            right_lower = right[0]
+            if _same_bound(left_lower, right_lower):
+                if left_lower_inclusive and not right[1]:
+                    return _OVERLAPPING_REL
+            elif left_lower is NEGATIVE_INFINITY or (
+                right_lower is not NEGATIVE_INFINITY and left_lower < right_lower
+            ):
+                return _OVERLAPPING_REL
+            left_upper = left[2]
+            right_upper = right[2]
+            if _same_bound(left_upper, right_upper):
+                if left[3] and not right[3]:
+                    return _OVERLAPPING_REL
+            elif left_upper is POSITIVE_INFINITY or (
+                right_upper is not POSITIVE_INFINITY and left_upper > right_upper
             ):
                 return _OVERLAPPING_REL
 
@@ -845,6 +877,14 @@ class Range(Generic[VersionType]):
         return not self.is_empty
 
 
+def _interval_sort_key(interval: Interval) -> tuple[Any, ...]:
+    """Order intervals by lower bound for :func:`_normalize_intervals`."""
+    lower, lower_inclusive, _upper, _upper_inclusive = interval
+    if lower is NEGATIVE_INFINITY:
+        return (0,)
+    return (1, lower, 0 if lower_inclusive else 1)
+
+
 def _normalize_intervals(intervals: list[Interval]) -> tuple[Interval, ...]:
     """Sort intervals by lower bound and merge overlapping or adjacent ones.
 
@@ -856,13 +896,7 @@ def _normalize_intervals(intervals: list[Interval]) -> tuple[Interval, ...]:
     if not intervals:
         return ()
 
-    def sort_key(interval: Interval) -> tuple[Any, ...]:
-        lower, lower_inclusive, _upper, _upper_inclusive = interval
-        if lower is NEGATIVE_INFINITY:
-            return (0,)
-        return (1, lower, 0 if lower_inclusive else 1)
-
-    intervals.sort(key=sort_key)
+    intervals.sort(key=_interval_sort_key)
 
     merged: list[Interval] = [intervals[0]]
     for lower, lower_inclusive, upper, upper_inclusive in intervals[1:]:

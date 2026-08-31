@@ -4,12 +4,60 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from typing import Any
 
+from cpip.core.utils import default_worker_count
 from cpip.core.wheel import WheelCandidate
-from cpip.install.wheel_archive_cache import INSTALL_WORKERS
 from cpip.index.candidate_materialization import LazyWheelCandidate
+from cpip.index.vcs import vcs_scheme
+from cpip.install.wheel_archive_cache import INSTALL_WORKERS
 
 _MATERIALIZATION_WORKERS = 32
+
+
+def fetch_candidate_sources(
+    candidates: Sequence[Any],
+    fetch_source: Callable[[Any], str],
+) -> list[str]:
+    """Bring every candidate's artifact local, remote fetches in parallel.
+
+    A VCS sdist may prompt for credentials, so those fetch serially in
+    candidate order before the pool starts; everything else goes through a
+    thread pool the way wheel materialization does. Results keep candidate
+    order.
+    """
+
+    sources: list[str] = [""] * len(candidates)
+
+    pooled: list[int] = []
+
+    for index, candidate in enumerate(candidates):
+        may_prompt = (
+            candidate.source_kind == "sdist"
+            and candidate.source_url is not None
+            and vcs_scheme(candidate.source_url) is not None
+        )
+
+        if may_prompt:
+            sources[index] = fetch_source(candidate)
+
+        else:
+            pooled.append(index)
+
+    if pooled:
+        with ThreadPoolExecutor(
+            max_workers=min(default_worker_count(), len(pooled)),
+            thread_name_prefix="cpip-download",
+        ) as pool:
+            fetched = pool.map(
+                lambda index: fetch_source(candidates[index]),
+                pooled,
+            )
+
+            for index, source in zip(pooled, fetched):
+                sources[index] = source
+
+    return sources
 
 
 def _run_candidate_operation(

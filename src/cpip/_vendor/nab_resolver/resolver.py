@@ -632,10 +632,7 @@ class Resolver(Generic[PackageType, VersionType]):
         """
         self.provider = provider
 
-        # Recording the provider rather than a flag keeps the answer tied to
-        # the object it was asked about, so a provider swapped into
-        # ``self.provider`` mid-resolve is not this one and is sent the hint.
-        self._hint_ignoring_provider = _provider_with_inherited_hint(provider)
+        self._bind_provider_hooks()
 
         self.observer: ResolverObserver[PackageType, VersionType] = (
             observer or ResolverObserver()
@@ -687,9 +684,16 @@ class Resolver(Generic[PackageType, VersionType]):
         )
         self.stats: ResolverStats[PackageType] = ResolverStats()
 
+        # Running maximum of stats.package_conflict_counts, so the restart
+        # gate reads one int per conflict instead of scanning every count.
+        self.max_conflict_count = 0
+
         self.constraints: Mapping[PackageType, RangeProtocol[VersionType]] = {}
         self.root_package_order: dict[PackageType, tuple[int, int, str]] = {}
-        self.pending_targeted_backtrack: list[PackageType] = []
+
+        # Dict-as-ordered-set: enqueue order stays deterministic while the
+        # per-conflict de-dupe is an O(1) key write instead of a list scan.
+        self.pending_targeted_backtrack: dict[PackageType, None] = {}
 
         # Memoises the tiebreak tuple in choose_package_to_decide.
         self.tiebreak_cache: dict[PackageType, tuple[int, int, str]] = {}
@@ -700,9 +704,11 @@ class Resolver(Generic[PackageType, VersionType]):
         self.decision_queue: DecisionQueue[PackageType] = DecisionQueue()
         self.priority_epoch = 0
 
-        # Memoises term_relation's pre-adjustment SetRelation, keyed by
-        # (positive, assignment token, constraint token). Cleared on overflow.
-        self.relation_cache: dict[tuple[bool, int, int], SetRelation] = {}
+        # Memoises term_relation's pre-adjustment SetRelation, keyed by the
+        # packed int ``assignment_token << 33 | constraint_token << 1 |
+        # positive`` so a probe hashes one small int instead of building and
+        # hashing a tuple. Cleared on overflow.
+        self.relation_cache: dict[int, SetRelation] = {}
 
         # relation_cache_on goes off while the memo's hit rate does not pay for
         # the key it builds. A window of probes decides that: relation_gate_hits
@@ -724,6 +730,23 @@ class Resolver(Generic[PackageType, VersionType]):
         # is why the two are wiped together.
         self.range_token_by_id: dict[int, int] = {}
         self.interned_ranges: list[RangeProtocol[Any]] = []
+
+    def _bind_provider_hooks(self) -> None:
+        """Bind the optional provider hooks, once per construction and resolve.
+
+        Bound rather than probed with getattr on every decision.  A hook
+        swapped onto the provider mid-resolve is not seen until the next
+        resolve; recording the hint answer per provider object keeps it tied
+        to the object it was asked about.
+        """
+        provider = self.provider
+        self._hint_ignoring_provider = _provider_with_inherited_hint(provider)
+        self._consume_dependency_invalidations: Callable[[], Any] | None = getattr(
+            provider, "consume_dependency_invalidations", None
+        )
+        self._consume_priority_invalidations: Callable[[], Any] | None = getattr(
+            provider, "consume_priority_invalidations", None
+        )
 
     def as_term_range(self, range_: RangeProtocol[Any]) -> RangeProtocol[VersionType]:
         """Return the term constraint to record for a supplied range.
@@ -851,10 +874,10 @@ class Resolver(Generic[PackageType, VersionType]):
         # Provider-driven force back-track. When the provider returns
         # a tentative candidate and queues blockers, jump to the
         # blockers before the candidate is decided.
-        force_targets = list(self.provider.consume_force_backtrack_targets())
+        force_targets = self.provider.consume_force_backtrack_targets()
         if force_targets:
             self.priority_epoch += 1
-            triggering = conflict.force_targeted_backtrack(self, force_targets)
+            triggering = conflict.force_targeted_backtrack(self, list(force_targets))
             if triggering is not None:
                 return triggering
 
@@ -917,7 +940,7 @@ class Resolver(Generic[PackageType, VersionType]):
 
     def _backtrack_dependency_invalidations(self) -> Any | None:
         """Revisit decisions whose dependency features expanded after selection."""
-        consume = getattr(self.provider, "consume_dependency_invalidations", None)
+        consume = self._consume_dependency_invalidations
         if consume is None:
             return None
 
@@ -925,10 +948,10 @@ class Resolver(Generic[PackageType, VersionType]):
         if not invalidations:
             return None
 
-        decisions = self.solution.decisions()
+        decided_version = self.solution.decided_version
         earliest: tuple[int, Any] | None = None
         for package in invalidations:
-            if package not in decisions:
+            if decided_version(package) is None:
                 continue
             decision = next(
                 (
@@ -981,6 +1004,7 @@ class Resolver(Generic[PackageType, VersionType]):
         self.dependency_index.clear()
         self.solution = PartialSolution(range_type=self.range_type)
         self.stats = ResolverStats()
+        self.max_conflict_count = 0
 
         self.constraints = constraints or {}
         self.root_package_order.clear()
@@ -999,7 +1023,7 @@ class Resolver(Generic[PackageType, VersionType]):
         self.term_range_keepalive.clear()
 
         # Re-asked here, so a hook installed since the last resolve is honoured.
-        self._hint_ignoring_provider = _provider_with_inherited_hint(self.provider)
+        self._bind_provider_hooks()
 
     def _add_root_requirements(
         self, requirements: Sequence[RootRequirement[PackageType, VersionType]]

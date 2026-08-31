@@ -24,6 +24,11 @@ from cpip.network.http import NetworkSession
 
 CONTENT_CHUNK_SIZE = 10 * 1024
 
+# The opening suffix request reads more than the per-read chunk: a large
+# wheel's central directory routinely exceeds 10 KiB, and the extra tail
+# bytes are cheaper than the range round-trip they save.
+TAIL_CHUNK_SIZE = 64 * 1024
+
 
 class HTTPRangeRequestUnsupported(Exception):
     pass
@@ -89,22 +94,97 @@ class LazyZipOverHTTP:
         session: NetworkSession,
         chunk_size: int = CONTENT_CHUNK_SIZE,
     ) -> None:
-        head = session.head(url)
-        raise_for_status(head)
-        assert head.status == 200
         self.session_internal, self.url_internal, self.chunk_size_internal = (
             session,
             url,
             chunk_size,
         )
-        self.length_internal = int(head.headers["Content-Length"])
-        self.file_internal = NamedTemporaryFile()
-        self.truncate(self.length_internal)
         self.left_internal: list[int] = []
         self.right_internal: list[int] = []
-        if "bytes" not in head.headers.get("Accept-Ranges", "none"):
+
+        # One suffix range request replaces the old HEAD-then-GET probe: a
+        # 206 both proves range support and delivers the tail holding the
+        # central directory, so the typical wheel costs one request here
+        # instead of two, and a host that serves ranges without advertising
+        # Accept-Ranges now works.
+        tail = session.get(
+            url,
+            headers={
+                "Range": f"bytes=-{TAIL_CHUNK_SIZE}",
+                "Cache-Control": "no-cache",
+            },
+            stream=True,
+        )
+        try:
+            raise_for_status(tail)
+        except HttpStatusError as exc:
+            response = exc.response
+            if response is not None:
+                response.drain_conn()
+                response.close()
+                if response.status == 416:
+                    # The suffix asked for more bytes than the wheel holds,
+                    # so the host serves ranges and the file is tiny: one
+                    # plain GET fetches all of it.
+                    self.load_entire_file()
+                    self.check_zip()
+                    return
+            raise
+
+        if tail.status != 206:
+            # The host ignored the Range header and is streaming the whole
+            # body; close without draining -- the body could be the entire
+            # wheel -- and report the host as range-less.
+            tail.close()
             raise HTTPRangeRequestUnsupported("range request is not supported")
+
+        self.load_tail_response(tail)
         self.check_zip()
+
+    def load_tail_response(self, tail: HttpResponse) -> None:
+        """Take total length and the tail bytes from a 206 suffix response."""
+        content_range = tail.headers.get("Content-Range", "")
+        spec = content_range.partition("bytes ")[2]
+        range_text, _, total_text = spec.partition("/")
+        start_text = range_text.partition("-")[0]
+        try:
+            length = int(total_text)
+            start = int(start_text)
+        except ValueError:
+            tail.close()
+            unparseable = f"could not parse Content-Range {content_range!r}"
+            raise HTTPRangeRequestUnsupported(unparseable) from None
+        self.length_internal = length
+        self.file_internal = NamedTemporaryFile()
+        self.truncate(length)
+        self.seek(start)
+        shutil.copyfileobj(tail, self.file_internal, self.chunk_size_internal)
+        end = self.tell() - 1
+        if end >= start:
+            self.left_internal = [start]
+            self.right_internal = [end]
+        self.seek(0)
+
+    def load_entire_file(self) -> None:
+        """Fetch the whole file with one plain GET (wheels below chunk size)."""
+        response = self.session_internal.get(
+            self.url_internal,
+            headers={"Cache-Control": "no-cache"},
+            stream=True,
+        )
+        try:
+            raise_for_status(response)
+        except HttpStatusError:
+            response.drain_conn()
+            response.close()
+            raise
+        self.file_internal = NamedTemporaryFile()
+        shutil.copyfileobj(response, self.file_internal, self.chunk_size_internal)
+        self.length_internal = self.tell()
+        if self.length_internal > 0:
+            self.left_internal = [0]
+            self.right_internal = [self.length_internal - 1]
+        self.seek(0)
 
     @property
     def mode(self) -> str:

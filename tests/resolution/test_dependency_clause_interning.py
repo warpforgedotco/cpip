@@ -506,6 +506,7 @@ def test_empty_dependency_invalidations_skip_decision_snapshot(
         raise AssertionError("empty invalidations must not snapshot decisions")
 
     monkeypatch.setattr(candidate.provider, "consume_dependency_invalidations", consume)
+    monkeypatch.setattr(candidate, "_consume_dependency_invalidations", consume)
     monkeypatch.setattr(candidate.solution, "decisions", reject_snapshot)
 
     assert candidate._backtrack_dependency_invalidations() is None
@@ -534,6 +535,7 @@ def test_leaf_skips_widening_but_still_consumes_invalidations(
 
     monkeypatch.setattr(candidate.provider, "widen_decision", reject_widen)
     monkeypatch.setattr(candidate.provider, "consume_dependency_invalidations", consume)
+    monkeypatch.setattr(candidate, "_consume_dependency_invalidations", consume)
 
     candidate._decide_next("leaf")
 

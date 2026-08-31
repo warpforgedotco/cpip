@@ -41,6 +41,11 @@ _NOT_CONTRADICTED = -1
 
 
 def _insert_sorted_unique(indices: list[int], index: int) -> None:
+    # Clause indices arrive in increasing order, so almost every insert is an
+    # append; the bisect path only covers out-of-order private callers.
+    if not indices or index > indices[-1]:
+        indices.append(index)
+        return
     position = bisect_left(indices, index)
     if position == len(indices) or indices[position] != index:
         indices.insert(position, index)

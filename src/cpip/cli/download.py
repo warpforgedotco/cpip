@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from typing import Any
 
 from cpip.build.build import build_wheel_from_source
 from cpip.cli.config import load_source_config, resolve_sources
@@ -22,6 +23,7 @@ from cpip.core.format_control import FormatControl
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.provider import CandidateProvider
 from cpip.install.metadata import prepare_editable_source
+from cpip.install.output import fetch_candidate_sources
 from cpip.resolution.api import ResolutionEngine
 
 
@@ -92,7 +94,7 @@ def run_download(args: list[str]) -> int:
 
     artifact_locator = ArtifactLocator(bundle.session, cache_dir=cache_dir)
 
-    for candidate in plan.candidates:
+    def fetch_source(candidate: Any) -> str:
         source = candidate.path
 
         if candidate.source_kind == "sdist" and candidate.source_url is not None:
@@ -101,8 +103,13 @@ def run_download(args: list[str]) -> int:
             if candidate.canonical_name == "setuptools":
                 source = candidate.path
 
-        source_text = os.fspath(source)
+        return os.fspath(source)
 
+    candidates = list(plan.candidates)
+
+    for candidate, source_text in zip(
+        candidates, fetch_candidate_sources(candidates, fetch_source)
+    ):
         shutil.copy2(
             source_text, os.path.join(destination, os.path.basename(source_text))
         )

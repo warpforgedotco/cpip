@@ -1499,15 +1499,20 @@ def run_local_fallback(args: list[str]) -> int | None:
     target = InstallTarget.from_options("cpip", target=options.target)
 
     if options.cache_dir is not None:
-        installed = install_wheels_from_archive_cache(
-            requests,
-            tuple(candidates),
-            target=target,
-            cache_dir=options.cache_dir,
-            force=options.ignore_installed,
-            preserve_existing=options.ignore_installed,
-            report=not options.quiet,
-        )
+        from cpip.platform.lock import environment_write_lock
+
+        # Same environment lock the normal transaction takes; this route
+        # writes the target directly from the archive cache.
+        with environment_write_lock(target.purelib):
+            installed = install_wheels_from_archive_cache(
+                requests,
+                tuple(candidates),
+                target=target,
+                cache_dir=options.cache_dir,
+                force=options.ignore_installed,
+                preserve_existing=options.ignore_installed,
+                report=not options.quiet,
+            )
 
         if installed is None:
             return None

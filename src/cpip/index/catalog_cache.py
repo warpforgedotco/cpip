@@ -442,13 +442,19 @@ def valid_record(value: object) -> bool:
     Marshal only rebuilds exact built-in types, so ``type(...) is`` checks
     are equivalent to ``isinstance`` here and keep this loop cheap.
     """
-    if type(value) is not tuple or len(value) != 9:
+    # Records written before the PEP 700 size field are 9-tuples; accepting
+    # both widths keeps every warm catalog cache valid across the upgrade.
+    if type(value) is not tuple or len(value) not in {9, 10}:
         return False
     (url, text, hashes, requires_python, yanked, metadata, upload_time, _, parts) = (
-        value
+        value[:9]
     )
     if type(url) is not str or type(text) is not str:
         return False
+    if len(value) == 10:
+        size = value[9]
+        if size is not None and (type(size) is not int or size < 0):
+            return False
     if not valid_str_dict(hashes):
         return False
     if requires_python is not None and type(requires_python) is not str:
@@ -790,12 +796,13 @@ def link_record(
         None if upload_time is None else upload_time.isoformat(),
         wheel_identity(parsed_wheel),
         tuple(link.parsed_url_internal),
+        link.size,
     )
 
 
 def link_from_record(record: object, *, source_url: str | None = None) -> Link:
     """Materialize a record that ``valid_record`` accepted at load time."""
-    if not isinstance(record, tuple) or len(record) != 9:
+    if not isinstance(record, tuple) or len(record) not in {9, 10}:
         raise ValueError("invalid catalog record")
     (
         url,
@@ -807,8 +814,9 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
         upload_time,
         _wheel_identity,
         parts,
-    ) = record
-    return Link.from_cached_record(
+    ) = record[:9]
+    size = record[9] if len(record) == 10 else None
+    link = Link.from_cached_record(
         url,  # ty:ignore[invalid-argument-type]
         parsed_url=urllib.parse.SplitResult(*parts),  # ty:ignore[not-iterable]
         source_url=source_url,
@@ -823,3 +831,7 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
             parse_iso_datetime(upload_time) if upload_time is not None else None  # ty:ignore[invalid-argument-type]
         ),
     )
+    # valid_record vetted the value; the type check narrows it for ty.
+    if type(size) is int:
+        link.size = size
+    return link
