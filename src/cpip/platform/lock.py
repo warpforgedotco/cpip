@@ -45,10 +45,21 @@ def lock_dir() -> str:
 
 
 def lock_path_for(directory: str) -> str:
-    """The rendezvous lock file for every installer targeting ``directory``."""
+    """The rendezvous lock file for every installer targeting ``directory``.
+
+    ``normcase`` is what makes two spellings of one Windows target meet:
+    ``ntpath.realpath`` canonicalizes case only for a path that already
+    exists, and falls back to ``abspath`` -- which keeps the caller's
+    casing -- for one that does not.  An install target usually does not
+    exist yet, so without the fold two installers naming it differently
+    would take two locks and interleave.
+    """
 
     digest = hashlib.sha256(
-        os.path.realpath(directory).encode("utf-8", "surrogatepass"),
+        os.path.normcase(os.path.realpath(directory)).encode(
+            "utf-8",
+            "surrogatepass",
+        ),
     ).hexdigest()[:16]
 
     return os.path.join(lock_dir(), f"cpip-install-{digest}.lock")

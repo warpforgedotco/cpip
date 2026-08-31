@@ -145,3 +145,22 @@ def test_an_uncreatable_lock_directory_still_runs_the_block(
         ran = True
 
     assert ran
+
+
+@pytest.mark.skipif(
+    os.path.normcase("A") == "A",
+    reason="only a case-folding platform can spell one target two ways",
+)
+def test_case_spellings_of_one_target_share_a_lock(tmp_path: Path) -> None:
+    """Two Windows spellings of an absent target must not take two locks.
+
+    ``ntpath.realpath`` canonicalizes case only for an existing path, so an
+    install target that does not exist yet reaches the digest exactly as the
+    caller spelled it.
+    """
+
+    target = str(tmp_path / "Lib" / "site-packages")
+
+    assert not os.path.exists(target)
+    assert lock_path_for(target) == lock_path_for(target.upper())
+    assert lock_path_for(target) == lock_path_for(target.lower())
