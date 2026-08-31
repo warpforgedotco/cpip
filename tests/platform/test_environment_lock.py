@@ -6,12 +6,15 @@ lock keyed by the target path. The lock must (a) exclude a second holder
 while held, (b) leave the target completely untouched -- a failed install
 must leave an absent target absent, and installed trees must not grow
 bookkeeping files -- and (c) degrade to running unlocked rather than failing
-an install it cannot protect.
+an install it cannot protect.  It must also stay out of the temp directory:
+the file outlives the transaction that created it, so a scratch directory
+(which callers and the OS are entitled to sweep) is the wrong home.
 """
 
 from __future__ import annotations
 
 import os
+import tempfile
 import threading
 from pathlib import Path
 
@@ -76,6 +79,66 @@ def test_an_uncreatable_lock_still_runs_the_block(
         raise OSError("no locks here")
 
     monkeypatch.setattr(lock.os, "open", refuse)
+
+    ran = False
+    with environment_write_lock(str(tmp_path / "site-packages")):
+        ran = True
+
+    assert ran
+
+
+def test_the_lock_lives_outside_the_temp_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller pointing TMPDIR at a scratch dir gets no lock file in it.
+
+    The functional harness runs cpip under a private ``TMPDIR`` and asserts
+    it is empty afterwards, so a lock left there fails every install test.
+    """
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "scratch"))
+    path = os.path.realpath(lock_path_for(str(tmp_path / "site-packages")))
+    temp_root = os.path.realpath(tempfile.gettempdir())
+
+    assert not path.startswith(temp_root + os.sep)
+
+
+def test_the_lock_path_ignores_the_configured_cache_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Installers that disagree about the cache still meet on one lock file."""
+
+    target = str(tmp_path / "site-packages")
+    monkeypatch.delenv("CPIP_CACHE_DIR", raising=False)
+    default = lock_path_for(target)
+
+    monkeypatch.setenv("CPIP_CACHE_DIR", str(tmp_path / "elsewhere"))
+
+    assert lock_path_for(target) == default
+
+
+def test_a_missing_lock_directory_is_created(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(lock, "lock_dir", lambda: str(tmp_path / "fresh" / "locks"))
+
+    with environment_write_lock(str(tmp_path / "site-packages")):
+        pass
+
+    assert os.path.isdir(str(tmp_path / "fresh" / "locks"))
+
+
+def test_an_uncreatable_lock_directory_still_runs_the_block(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise OSError("no directory here")
+
+    monkeypatch.setattr(lock.os, "makedirs", refuse)
 
     ran = False
     with environment_write_lock(str(tmp_path / "site-packages")):
