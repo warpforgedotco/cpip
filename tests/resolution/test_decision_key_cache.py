@@ -334,7 +334,10 @@ def test_a_restart_drops_every_key() -> None:
     assert choose(resolver) == "alpha"
     assert resolver.decision_queue._keys  # noqa: SLF001
 
+    # The credit path in conflict_resolution keeps max_conflict_count in
+    # lock-step with the counts; simulate both halves of that invariant.
     resolver.stats.package_conflict_counts["alpha"] = 99
+    resolver.max_conflict_count = 99
     threshold, remaining, restarted = conflict.maybe_restart(resolver, 1, 1)
 
     assert restarted

@@ -687,9 +687,17 @@ class Resolver(Generic[PackageType, VersionType]):
         )
         self.stats: ResolverStats[PackageType] = ResolverStats()
 
+        # Running maximum of stats.package_conflict_counts, so the restart
+        # gate reads one int per conflict instead of scanning every count.
+        self.max_conflict_count = 0
+
         self.constraints: Mapping[PackageType, RangeProtocol[VersionType]] = {}
         self.root_package_order: dict[PackageType, tuple[int, int, str]] = {}
+
+        # Ordered queue of culprits plus a membership set kept in lock-step,
+        # so the per-conflict de-dupe check is O(1) instead of a list scan.
         self.pending_targeted_backtrack: list[PackageType] = []
+        self.pending_targeted_backtrack_set: set[PackageType] = set()
 
         # Memoises the tiebreak tuple in choose_package_to_decide.
         self.tiebreak_cache: dict[PackageType, tuple[int, int, str]] = {}
@@ -700,9 +708,11 @@ class Resolver(Generic[PackageType, VersionType]):
         self.decision_queue: DecisionQueue[PackageType] = DecisionQueue()
         self.priority_epoch = 0
 
-        # Memoises term_relation's pre-adjustment SetRelation, keyed by
-        # (positive, assignment token, constraint token). Cleared on overflow.
-        self.relation_cache: dict[tuple[bool, int, int], SetRelation] = {}
+        # Memoises term_relation's pre-adjustment SetRelation, keyed by the
+        # packed int ``assignment_token << 33 | constraint_token << 1 |
+        # positive`` so a probe hashes one small int instead of building and
+        # hashing a tuple. Cleared on overflow.
+        self.relation_cache: dict[int, SetRelation] = {}
 
         # relation_cache_on goes off while the memo's hit rate does not pay for
         # the key it builds. A window of probes decides that: relation_gate_hits
@@ -851,10 +861,10 @@ class Resolver(Generic[PackageType, VersionType]):
         # Provider-driven force back-track. When the provider returns
         # a tentative candidate and queues blockers, jump to the
         # blockers before the candidate is decided.
-        force_targets = list(self.provider.consume_force_backtrack_targets())
+        force_targets = self.provider.consume_force_backtrack_targets()
         if force_targets:
             self.priority_epoch += 1
-            triggering = conflict.force_targeted_backtrack(self, force_targets)
+            triggering = conflict.force_targeted_backtrack(self, list(force_targets))
             if triggering is not None:
                 return triggering
 
@@ -925,10 +935,10 @@ class Resolver(Generic[PackageType, VersionType]):
         if not invalidations:
             return None
 
-        decisions = self.solution.decisions()
+        decided_version = self.solution.decided_version
         earliest: tuple[int, Any] | None = None
         for package in invalidations:
-            if package not in decisions:
+            if decided_version(package) is None:
                 continue
             decision = next(
                 (
@@ -981,10 +991,12 @@ class Resolver(Generic[PackageType, VersionType]):
         self.dependency_index.clear()
         self.solution = PartialSolution(range_type=self.range_type)
         self.stats = ResolverStats()
+        self.max_conflict_count = 0
 
         self.constraints = constraints or {}
         self.root_package_order.clear()
         self.pending_targeted_backtrack.clear()
+        self.pending_targeted_backtrack_set.clear()
         self.tiebreak_cache.clear()
         self.decision_queue.clear()
         self.priority_epoch = 0

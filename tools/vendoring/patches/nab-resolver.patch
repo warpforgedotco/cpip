@@ -1,3 +1,64 @@
+diff --git a/src/cpip/_vendor/nab_resolver/conflict.py b/src/cpip/_vendor/nab_resolver/conflict.py
+index e573c14..770d7f9 100644
+--- a/src/cpip/_vendor/nab_resolver/conflict.py
++++ b/src/cpip/_vendor/nab_resolver/conflict.py
+@@ -164,9 +164,12 @@ def conflict_resolution(
+             # Count only one package per conflict so it gets decided first
+             # after restart and its dependencies constrain the culprit.
+             affected_package = most_recent_satisfier.package
+-            resolver.stats.package_conflict_counts[
+-                conflict_credit_target(most_recent_satisfier)
+-            ] += 1
++            conflict_counts = resolver.stats.package_conflict_counts
++            credit_target = conflict_credit_target(most_recent_satisfier)
++            credited = conflict_counts[credit_target] + 1
++            conflict_counts[credit_target] = credited
++            if credited > resolver.max_conflict_count:
++                resolver.max_conflict_count = credited
+             resolver.priority_epoch += 1
+ 
+             update_culprit_counts(
+@@ -243,9 +246,10 @@ def update_culprit_counts(
+         if (
+             count >= threshold
+             and count % threshold == 0
+-            and package not in resolver.pending_targeted_backtrack
++            and package not in resolver.pending_targeted_backtrack_set
+         ):
+             resolver.pending_targeted_backtrack.append(package)
++            resolver.pending_targeted_backtrack_set.add(package)
+ 
+ 
+ def conflict_credit_target(satisfier: Assignment[Any, Any]) -> Any:
+@@ -473,8 +477,7 @@ def maybe_restart(
+     if restarts_remaining <= 0:
+         return restart_threshold, restarts_remaining, False
+ 
+-    max_count = max(resolver.stats.package_conflict_counts.values(), default=0)
+-    if max_count < restart_threshold:
++    if resolver.max_conflict_count < restart_threshold:
+         return restart_threshold, restarts_remaining, False
+ 
+     resolver.stats.restarts += 1
+@@ -485,6 +488,7 @@ def maybe_restart(
+     resolver.solution.decide(ROOT, resolver.root_version)
+     resolver.decision_queue.clear()
+     resolver.pending_targeted_backtrack.clear()
++    resolver.pending_targeted_backtrack_set.clear()
+     resolver.stats.targeted_backtracks = 0
+ 
+     return restart_threshold * 2, restarts_remaining - 1, True
+@@ -511,8 +515,9 @@ def force_targeted_backtrack(
+         if current < threshold:
+             resolver.stats.package_culprit_counts[package] = threshold
+             resolver.priority_epoch += 1
+-        if package not in resolver.pending_targeted_backtrack:
++        if package not in resolver.pending_targeted_backtrack_set:
+             resolver.pending_targeted_backtrack.append(package)
++            resolver.pending_targeted_backtrack_set.add(package)
+ 
+     return apply_targeted_backtrack(resolver)
+ 
 diff --git a/src/cpip/_vendor/nab_resolver/decide.py b/src/cpip/_vendor/nab_resolver/decide.py
 index 9dd16ee..835b0f6 100644
 --- a/src/cpip/_vendor/nab_resolver/decide.py
@@ -23,7 +84,7 @@ index 9dd16ee..835b0f6 100644
          key_inputs_arrived,
      )
 diff --git a/src/cpip/_vendor/nab_resolver/incompat_index.py b/src/cpip/_vendor/nab_resolver/incompat_index.py
-index c771106..6e9ea13 100644
+index c771106..eebbef5 100644
 --- a/src/cpip/_vendor/nab_resolver/incompat_index.py
 +++ b/src/cpip/_vendor/nab_resolver/incompat_index.py
 @@ -11,6 +11,7 @@ per-clause skip stamp.
@@ -51,33 +112,41 @@ index c771106..6e9ea13 100644
  
  # A dependency-style clause is exactly two terms (parent + dep).
  _DEPENDENCY_CLAUSE_TERMS = 2
-@@ -35,19 +40,136 @@ _DEPENDENCY_CLAUSE_TERMS = 2
+@@ -35,19 +40,141 @@ _DEPENDENCY_CLAUSE_TERMS = 2
  _NOT_CONTRADICTED = -1
  
  
 -def add_incompatibility(
+-    resolver: Resolver[Any, Any], incompatibility: Incompatibility[Any, Any]
+-) -> None:
+-    """Add an incompatibility, merging into an existing clause if possible."""
+-    if maybe_merge_dependency(resolver, incompatibility):
 +def _insert_sorted_unique(indices: list[int], index: int) -> None:
++    # Clause indices arrive in increasing order, so almost every insert is an
++    # append; the bisect path only covers out-of-order private callers.
++    if not indices or index > indices[-1]:
++        indices.append(index)
+         return
 +    position = bisect_left(indices, index)
 +    if position == len(indices) or indices[position] != index:
 +        indices.insert(position, index)
-+
+ 
 +
 +def _append_general(
-     resolver: Resolver[Any, Any], incompatibility: Incompatibility[Any, Any]
++    resolver: Resolver[Any, Any], incompatibility: Incompatibility[Any, Any]
 +) -> int:
-+    index = len(resolver.incompatibilities)
-+    resolver.incompatibilities.append(incompatibility)
-+    resolver.clause_contradicted_at.append(_NOT_CONTRADICTED)
-+    for term in incompatibility.terms:
-+        resolver.package_to_incompatibilities[term.package].append(index)
+     index = len(resolver.incompatibilities)
+     resolver.incompatibilities.append(incompatibility)
+     resolver.clause_contradicted_at.append(_NOT_CONTRADICTED)
+     for term in incompatibility.terms:
+         resolver.package_to_incompatibilities[term.package].append(index)
+-    index_dependency(resolver, incompatibility, index)
 +    return index
 +
 +
 +def _register_fallback_parent(
 +    resolver: Resolver[Any, Any], package: Any, index: int
- ) -> None:
--    """Add an incompatibility, merging into an existing clause if possible."""
--    if maybe_merge_dependency(resolver, incompatibility):
++) -> None:
 +    if index in resolver.dependency_parent_fallback_indices:
 +        return
 +    resolver.dependency_parent_fallback_indices.add(index)
@@ -91,9 +160,9 @@ index c771106..6e9ea13 100644
 +        bucket = resolver.dependency_parent_versions[package][version]
 +    except TypeError:
 +        _register_fallback_parent(resolver, package, index)
-         return
++        return
 +    _insert_sorted_unique(bucket, index)
- 
++
 +
 +def _append_dependency(
 +    resolver: Resolver[Any, Any],
@@ -101,12 +170,9 @@ index c771106..6e9ea13 100644
 +    *,
 +    exact_parent_version: Any = NO_EXACT_PARENT_VERSION,
 +) -> int:
-     index = len(resolver.incompatibilities)
-     resolver.incompatibilities.append(incompatibility)
-     resolver.clause_contradicted_at.append(_NOT_CONTRADICTED)
--    for term in incompatibility.terms:
--        resolver.package_to_incompatibilities[term.package].append(index)
--    index_dependency(resolver, incompatibility, index)
++    index = len(resolver.incompatibilities)
++    resolver.incompatibilities.append(incompatibility)
++    resolver.clause_contradicted_at.append(_NOT_CONTRADICTED)
 +    parent, dependency = incompatibility.terms
 +    resolver.dependency_parent_incompatibilities[parent.package].append(index)
 +    resolver.package_to_incompatibilities[dependency.package].append(index)
@@ -194,7 +260,7 @@ index c771106..6e9ea13 100644
  
  
  def dependency_merge_key(
-@@ -125,4 +247,5 @@ def maybe_merge_dependency(
+@@ -125,4 +252,5 @@ def maybe_merge_dependency(
      resolver.incompatibilities[existing_index] = merged
      # The union widens the package term, which can lift a contradiction.
      resolver.clause_contradicted_at[existing_index] = _NOT_CONTRADICTED
@@ -491,7 +557,7 @@ index c330a27..f2245b6 100644
          return term.satisfies(effective)
  
 diff --git a/src/cpip/_vendor/nab_resolver/propagate.py b/src/cpip/_vendor/nab_resolver/propagate.py
-index bc7edc0..9d1a08f 100644
+index bc7edc0..c5e99af 100644
 --- a/src/cpip/_vendor/nab_resolver/propagate.py
 +++ b/src/cpip/_vendor/nab_resolver/propagate.py
 @@ -11,6 +11,9 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propa
@@ -528,7 +594,7 @@ index bc7edc0..9d1a08f 100644
  def unit_propagation(
      resolver: Resolver[Any, Any], changed_package: Any
  ) -> Incompatibility[Any, Any] | None:
-@@ -64,58 +84,216 @@ def unit_propagation(
+@@ -64,58 +84,223 @@ def unit_propagation(
      contradiction epoch.  Each clause records the epoch it was last settled in,
      and is skipped while that stamp is current.
  
@@ -568,6 +634,8 @@ index bc7edc0..9d1a08f 100644
 +    stats = resolver.stats
 +    observer = resolver.observer
 +    cache = resolver.relation_cache
++    # Cleared in place on overflow, never rebound, so the hoist is sound.
++    id_tokens = resolver.range_token_by_id
 +    satisfied = SetRelation.SATISFIED
 +    contradicted = SetRelation.CONTRADICTED
  
@@ -658,14 +726,19 @@ index bc7edc0..9d1a08f 100644
 +                    key = None
 +                    relation = None
 +                    if resolver.relation_cache_on:
-+                        id_tokens = resolver.range_token_by_id
 +                        assignment_token = id_tokens.get(id(assignment))
 +                        if assignment_token is None:
 +                            assignment_token = _intern_range(resolver, assignment)
 +                        constraint_token = id_tokens.get(id(constraint))
 +                        if constraint_token is None:
 +                            constraint_token = _intern_range(resolver, constraint)
-+                        key = (positive, assignment_token, constraint_token)
++                        # Packed int key; see resolver.relation_cache.  Tokens
++                        # stay far below 2**32, so the fields cannot collide.
++                        key = (
++                            (assignment_token << 33)
++                            | (constraint_token << 1)
++                            | positive
++                        )
 +                        relation = cache.get(key)
 +
 +                    if relation is None:
@@ -779,7 +852,7 @@ index bc7edc0..9d1a08f 100644
  
      return None
  
-@@ -159,6 +337,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
+@@ -159,6 +344,8 @@ def _intern_range(resolver: Resolver[Any, Any], range_: RangeProtocol[Any]) -> i
      tokens = resolver.range_tokens
      token = tokens.get(range_)
      if token is None:
@@ -788,8 +861,18 @@ index bc7edc0..9d1a08f 100644
          token = resolver.next_range_token
          resolver.next_range_token = token + 1
          tokens[range_] = token
+@@ -222,7 +409,8 @@ def term_relation(resolver: Resolver[Any, Any], term: Term[Any, Any]) -> SetRela
+         if constraint_token is None:
+             constraint_token = _intern_range(resolver, constraint)
+ 
+-        key = (positive, assignment_token, constraint_token)
++        # Packed int key; see resolver.relation_cache.
++        key = (assignment_token << 33) | (constraint_token << 1) | positive
+         result = resolver.relation_cache.get(key)
+ 
+     if result is None:
 diff --git a/src/cpip/_vendor/nab_resolver/ranges.py b/src/cpip/_vendor/nab_resolver/ranges.py
-index 4385af4..a31a214 100644
+index 4385af4..6de29ba 100644
 --- a/src/cpip/_vendor/nab_resolver/ranges.py
 +++ b/src/cpip/_vendor/nab_resolver/ranges.py
 @@ -27,6 +27,8 @@ _EMPTY_REL = RangeRelation.EMPTY
@@ -929,7 +1012,7 @@ index 4385af4..a31a214 100644
  
      @property
      def is_empty(self) -> bool:
-@@ -284,23 +347,56 @@ class Range(Generic[VersionType]):
+@@ -284,28 +347,65 @@ class Range(Generic[VersionType]):
          return len(self._intervals) == 0
  
      def __contains__(self, version: object) -> bool:
@@ -994,10 +1077,22 @@ index 4385af4..a31a214 100644
 +            right_points = other._as_points()
 +            if left_points is not None and right_points is not None:
 +                return self._from_points(left_points & right_points)
++        left_intervals = self._intervals
++        right_intervals = other._intervals
++        left_count = len(left_intervals)
++        right_count = len(right_intervals)
          result: list[Interval] = []
          left_index = right_index = 0
-         while left_index < len(self._intervals) and right_index < len(other._intervals):
-@@ -333,7 +429,7 @@ class Range(Generic[VersionType]):
+-        while left_index < len(self._intervals) and right_index < len(other._intervals):
+-            left_interval = self._intervals[left_index]
+-            right_interval = other._intervals[right_index]
++        while left_index < left_count and right_index < right_count:
++            left_interval = left_intervals[left_index]
++            right_interval = right_intervals[right_index]
+ 
+             inter_lower, inter_lower_inc = _max_lower_bound(
+                 left_interval, right_interval
+@@ -333,7 +433,7 @@ class Range(Generic[VersionType]):
              # Advance the side with the smaller upper bound
              left_upper = left_interval[2]
              right_upper = right_interval[2]
@@ -1006,10 +1101,12 @@ index 4385af4..a31a214 100644
                  left_index += 1
                  right_index += 1
              elif left_upper is POSITIVE_INFINITY or (
-@@ -349,6 +445,14 @@ class Range(Generic[VersionType]):
+@@ -349,8 +449,22 @@ class Range(Generic[VersionType]):
          """Union of two ranges (versions in either)."""
          if not isinstance(other, Range):
              return NotImplemented
+-        all_intervals = list(self._intervals) + list(other._intervals)
+-        return Range(_normalize_intervals(all_intervals))
 +        if (
 +            len(self._intervals) >= _POINT_SET_MIN_INTERVALS
 +            or len(other._intervals) >= _POINT_SET_MIN_INTERVALS
@@ -1018,10 +1115,18 @@ index 4385af4..a31a214 100644
 +            right_points = other._as_points()
 +            if left_points is not None and right_points is not None:
 +                return self._from_points(left_points | right_points)
-         all_intervals = list(self._intervals) + list(other._intervals)
-         return Range(_normalize_intervals(all_intervals))
++        left_intervals = self._intervals
++        right_intervals = other._intervals
++        # Union with an empty range is the other operand; both are immutable.
++        if not left_intervals:
++            return other
++        if not right_intervals:
++            return self
++        return Range(_normalize_intervals([*left_intervals, *right_intervals]))
  
-@@ -411,48 +515,59 @@ class Range(Generic[VersionType]):
+     def __invert__(self) -> Range[VersionType]:
+         """Complement (versions NOT in this range)."""
+@@ -411,48 +525,59 @@ class Range(Generic[VersionType]):
          if not isinstance(other, Range):
              return NotImplemented
  
@@ -1102,7 +1207,7 @@ index 4385af4..a31a214 100644
                      and (
                          lower > right_lower
                          or (
-@@ -466,29 +581,22 @@ class Range(Generic[VersionType]):
+@@ -466,29 +591,22 @@ class Range(Generic[VersionType]):
                      )
  
                  if right_upper is POSITIVE_INFINITY:
@@ -1138,7 +1243,7 @@ index 4385af4..a31a214 100644
                  lower is not NEGATIVE_INFINITY
                  and upper is not POSITIVE_INFINITY
                  and (
-@@ -508,27 +616,31 @@ class Range(Generic[VersionType]):
+@@ -508,27 +626,31 @@ class Range(Generic[VersionType]):
          ``other`` always leave a gap, so an interval of self is covered only
          when a single interval of other holds all of it.
          """
@@ -1185,21 +1290,36 @@ index 4385af4..a31a214 100644
                      break
                  right_index += 1
  
-@@ -539,7 +651,12 @@ class Range(Generic[VersionType]):
-             lower, lower_inclusive = _max_lower_bound(left, right)
-             upper, upper_inclusive = _min_upper_bound(left, right)
+@@ -536,10 +658,24 @@ class Range(Generic[VersionType]):
+                 return False
  
+             right = right_intervals[right_index]
+-            lower, lower_inclusive = _max_lower_bound(left, right)
+-            upper, upper_inclusive = _min_upper_bound(left, right)
+-
 -            if (lower, lower_inclusive, upper, upper_inclusive) != left:
-+            if (
-+                lower_inclusive is not left[1]
-+                or upper_inclusive is not left[3]
-+                or not _same_bound(lower, left[0])
-+                or not _same_bound(upper, left[2])
++            # Coverage check, written out; see Range.relation for the
++            # derivation from _max_lower_bound/_min_upper_bound.
++            right_lower = right[0]
++            if _same_bound(left_lower, right_lower):
++                if left_lower_inclusive and not right[1]:
++                    return False
++            elif left_lower is NEGATIVE_INFINITY or (
++                right_lower is not NEGATIVE_INFINITY and left_lower < right_lower
++            ):
++                return False
++            left_upper = left[2]
++            right_upper = right[2]
++            if _same_bound(left_upper, right_upper):
++                if left[3] and not right[3]:
++                    return False
++            elif left_upper is POSITIVE_INFINITY or (
++                right_upper is not POSITIVE_INFINITY and left_upper > right_upper
 +            ):
                  return False
  
          return True
-@@ -554,6 +671,15 @@ class Range(Generic[VersionType]):
+@@ -554,6 +690,15 @@ class Range(Generic[VersionType]):
          Stops at the first shared version rather than building the whole
          intersection.
          """
@@ -1215,7 +1335,7 @@ index 4385af4..a31a214 100644
          left_intervals = self._intervals
          right_intervals = other._intervals
          left_count = len(left_intervals)
-@@ -586,84 +712,71 @@ class Range(Generic[VersionType]):
+@@ -586,84 +731,84 @@ class Range(Generic[VersionType]):
          return True
  
      def relation(self, other: Range[VersionType]) -> RangeRelation:
@@ -1321,16 +1441,31 @@ index 4385af4..a31a214 100644
                  continue
  
 -            disjoint = False
-+            is_disjoint = False
-             lower, lower_inclusive = _max_lower_bound(left, right)
-             upper, upper_inclusive = _min_upper_bound(left, right)
+-            lower, lower_inclusive = _max_lower_bound(left, right)
+-            upper, upper_inclusive = _min_upper_bound(left, right)
 -
 -            if (lower, lower_inclusive, upper, upper_inclusive) != left:
-+            if (
-+                lower_inclusive is not left[1]
-+                or upper_inclusive is not left[3]
-+                or not _same_bound(lower, left[0])
-+                or not _same_bound(upper, left[2])
++            is_disjoint = False
++            # Coverage check, written out: ``right`` must reach at least as
++            # low and as high as ``left``, sharing an endpoint only when
++            # ``right`` includes it too.  Equivalent to comparing the
++            # _max_lower_bound/_min_upper_bound results against ``left``'s own
++            # bounds, without building two bound tuples per interval pair.
++            right_lower = right[0]
++            if _same_bound(left_lower, right_lower):
++                if left_lower_inclusive and not right[1]:
++                    return _OVERLAPPING_REL
++            elif left_lower is NEGATIVE_INFINITY or (
++                right_lower is not NEGATIVE_INFINITY and left_lower < right_lower
++            ):
++                return _OVERLAPPING_REL
++            left_upper = left[2]
++            right_upper = right[2]
++            if _same_bound(left_upper, right_upper):
++                if left[3] and not right[3]:
++                    return _OVERLAPPING_REL
++            elif left_upper is POSITIVE_INFINITY or (
++                right_upper is not POSITIVE_INFINITY and left_upper > right_upper
 +            ):
                  return _OVERLAPPING_REL
  
@@ -1342,7 +1477,7 @@ index 4385af4..a31a214 100644
              return _DISJOINT_REL
          return _OVERLAPPING_REL
  
-@@ -703,6 +816,7 @@ class Range(Generic[VersionType]):
+@@ -703,6 +848,7 @@ class Range(Generic[VersionType]):
          """Restore from :meth:`__getstate__`, leaving the hash to be recomputed."""
          (self._intervals,) = state
          self._hash = 0
@@ -1350,8 +1485,38 @@ index 4385af4..a31a214 100644
  
      @override
      def __repr__(self) -> str:
+@@ -731,6 +877,14 @@ class Range(Generic[VersionType]):
+         return not self.is_empty
+ 
+ 
++def _interval_sort_key(interval: Interval) -> tuple[Any, ...]:
++    """Order intervals by lower bound for :func:`_normalize_intervals`."""
++    lower, lower_inclusive, _upper, _upper_inclusive = interval
++    if lower is NEGATIVE_INFINITY:
++        return (0,)
++    return (1, lower, 0 if lower_inclusive else 1)
++
++
+ def _normalize_intervals(intervals: list[Interval]) -> tuple[Interval, ...]:
+     """Sort intervals by lower bound and merge overlapping or adjacent ones.
+ 
+@@ -742,13 +896,7 @@ def _normalize_intervals(intervals: list[Interval]) -> tuple[Interval, ...]:
+     if not intervals:
+         return ()
+ 
+-    def sort_key(interval: Interval) -> tuple[Any, ...]:
+-        lower, lower_inclusive, _upper, _upper_inclusive = interval
+-        if lower is NEGATIVE_INFINITY:
+-            return (0,)
+-        return (1, lower, 0 if lower_inclusive else 1)
+-
+-    intervals.sort(key=sort_key)
++    intervals.sort(key=_interval_sort_key)
+ 
+     merged: list[Interval] = [intervals[0]]
+     for lower, lower_inclusive, upper, upper_inclusive in intervals[1:]:
 diff --git a/src/cpip/_vendor/nab_resolver/resolver.py b/src/cpip/_vendor/nab_resolver/resolver.py
-index c71fbef..d1e89fb 100644
+index 2a881be..b1a5b2c 100644
 --- a/src/cpip/_vendor/nab_resolver/resolver.py
 +++ b/src/cpip/_vendor/nab_resolver/resolver.py
 @@ -236,6 +236,14 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
@@ -1369,7 +1534,23 @@ index c71fbef..d1e89fb 100644
      def receive_partial_solution_hint(
          self,
          positive_ranges: Mapping[PackageType, RangeProtocol[VersionType]],
-@@ -340,6 +348,10 @@ class BaseProvider(Generic[PackageType, VersionType]):
+@@ -315,11 +323,12 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
+ 
+ 
+ class BaseProvider(Generic[PackageType, VersionType]):
+-    """Defaults for the six provider methods a synchronous provider does not need.
++    """Defaults for the seven provider methods a synchronous provider does not need.
+ 
+     Supplies ``begin_decision_scan``, ``is_ready``,
+-    ``receive_partial_solution_hint``, ``consume_pending_clauses``,
+-    ``consume_force_backtrack_targets`` and ``narrow_for_display``, the six
++    ``consume_priority_invalidations``, ``receive_partial_solution_hint``,
++    ``consume_pending_clauses``,
++    ``consume_force_backtrack_targets`` and ``narrow_for_display``, the
+     :class:`ResolverProvider` methods with nothing to do when there is no async
+     layer, no queued clauses and no widening.  A subclass still owes
+     ``choose_version``, ``has_satisfying_version``, ``get_dependencies``,
+@@ -339,6 +348,10 @@ class BaseProvider(Generic[PackageType, VersionType]):
          del package
          return True
  
@@ -1380,7 +1561,7 @@ index c71fbef..d1e89fb 100644
      def receive_partial_solution_hint(
          self,
          positive_ranges: Mapping[PackageType, RangeProtocol[VersionType]],
-@@ -650,6 +662,16 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -649,6 +662,16 @@ class Resolver(Generic[PackageType, VersionType]):
          self.package_to_incompatibilities: defaultdict[Any, list[int]] = defaultdict(
              list
          )
@@ -1397,7 +1578,53 @@ index c71fbef..d1e89fb 100644
  
          # Per clause, the contradiction epoch in which one of its terms was
          # last seen contradicted; unit propagation skips a clause whose stamp
-@@ -840,51 +862,96 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -664,9 +687,17 @@ class Resolver(Generic[PackageType, VersionType]):
+         )
+         self.stats: ResolverStats[PackageType] = ResolverStats()
+ 
++        # Running maximum of stats.package_conflict_counts, so the restart
++        # gate reads one int per conflict instead of scanning every count.
++        self.max_conflict_count = 0
++
+         self.constraints: Mapping[PackageType, RangeProtocol[VersionType]] = {}
+         self.root_package_order: dict[PackageType, tuple[int, int, str]] = {}
++
++        # Ordered queue of culprits plus a membership set kept in lock-step,
++        # so the per-conflict de-dupe check is O(1) instead of a list scan.
+         self.pending_targeted_backtrack: list[PackageType] = []
++        self.pending_targeted_backtrack_set: set[PackageType] = set()
+ 
+         # Memoises the tiebreak tuple in choose_package_to_decide.
+         self.tiebreak_cache: dict[PackageType, tuple[int, int, str]] = {}
+@@ -677,9 +708,11 @@ class Resolver(Generic[PackageType, VersionType]):
+         self.decision_queue: DecisionQueue[PackageType] = DecisionQueue()
+         self.priority_epoch = 0
+ 
+-        # Memoises term_relation's pre-adjustment SetRelation, keyed by
+-        # (positive, assignment token, constraint token). Cleared on overflow.
+-        self.relation_cache: dict[tuple[bool, int, int], SetRelation] = {}
++        # Memoises term_relation's pre-adjustment SetRelation, keyed by the
++        # packed int ``assignment_token << 33 | constraint_token << 1 |
++        # positive`` so a probe hashes one small int instead of building and
++        # hashing a tuple. Cleared on overflow.
++        self.relation_cache: dict[int, SetRelation] = {}
+ 
+         # relation_cache_on goes off while the memo's hit rate does not pay for
+         # the key it builds. A window of probes decides that: relation_gate_hits
+@@ -828,10 +861,10 @@ class Resolver(Generic[PackageType, VersionType]):
+         # Provider-driven force back-track. When the provider returns
+         # a tentative candidate and queues blockers, jump to the
+         # blockers before the candidate is decided.
+-        force_targets = list(self.provider.consume_force_backtrack_targets())
++        force_targets = self.provider.consume_force_backtrack_targets()
+         if force_targets:
+             self.priority_epoch += 1
+-            triggering = conflict.force_targeted_backtrack(self, force_targets)
++            triggering = conflict.force_targeted_backtrack(self, list(force_targets))
+             if triggering is not None:
+                 return triggering
+ 
+@@ -839,51 +872,96 @@ class Resolver(Generic[PackageType, VersionType]):
              decide.record_no_versions(self, next_package, had_pending=had_pending)
              return next_package
  
@@ -1494,10 +1721,10 @@ index c71fbef..d1e89fb 100644
 +        if not invalidations:
 +            return None
 +
-+        decisions = self.solution.decisions()
++        decided_version = self.solution.decided_version
 +        earliest: tuple[int, Any] | None = None
 +        for package in invalidations:
-+            if package not in decisions:
++            if decided_version(package) is None:
 +                continue
 +            decision = next(
 +                (
@@ -1524,7 +1751,7 @@ index c71fbef..d1e89fb 100644
      def _build_result(self) -> Solution[PackageType, VersionType]:
          """Build the final result, including only reachable packages.
  
-@@ -906,6 +973,10 @@ class Resolver(Generic[PackageType, VersionType]):
+@@ -905,14 +983,20 @@ class Resolver(Generic[PackageType, VersionType]):
          """Reset solver state for a new resolution."""
          self.incompatibilities.clear()
          self.package_to_incompatibilities.clear()
@@ -1535,3 +1762,13 @@ index c71fbef..d1e89fb 100644
          self.clause_contradicted_at.clear()
          self.dependency_index.clear()
          self.solution = PartialSolution(range_type=self.range_type)
+         self.stats = ResolverStats()
++        self.max_conflict_count = 0
+ 
+         self.constraints = constraints or {}
+         self.root_package_order.clear()
+         self.pending_targeted_backtrack.clear()
++        self.pending_targeted_backtrack_set.clear()
+         self.tiebreak_cache.clear()
+         self.decision_queue.clear()
+         self.priority_epoch = 0

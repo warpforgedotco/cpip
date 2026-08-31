@@ -119,6 +119,8 @@ def _unit_propagation_core(
     stats = resolver.stats
     observer = resolver.observer
     cache = resolver.relation_cache
+    # Cleared in place on overflow, never rebound, so the hoist is sound.
+    id_tokens = resolver.range_token_by_id
     satisfied = SetRelation.SATISFIED
     contradicted = SetRelation.CONTRADICTED
 
@@ -202,14 +204,19 @@ def _unit_propagation_core(
                     key = None
                     relation = None
                     if resolver.relation_cache_on:
-                        id_tokens = resolver.range_token_by_id
                         assignment_token = id_tokens.get(id(assignment))
                         if assignment_token is None:
                             assignment_token = _intern_range(resolver, assignment)
                         constraint_token = id_tokens.get(id(constraint))
                         if constraint_token is None:
                             constraint_token = _intern_range(resolver, constraint)
-                        key = (positive, assignment_token, constraint_token)
+                        # Packed int key; see resolver.relation_cache.  Tokens
+                        # stay far below 2**32, so the fields cannot collide.
+                        key = (
+                            (assignment_token << 33)
+                            | (constraint_token << 1)
+                            | positive
+                        )
                         relation = cache.get(key)
 
                     if relation is None:
@@ -402,7 +409,8 @@ def term_relation(resolver: Resolver[Any, Any], term: Term[Any, Any]) -> SetRela
         if constraint_token is None:
             constraint_token = _intern_range(resolver, constraint)
 
-        key = (positive, assignment_token, constraint_token)
+        # Packed int key; see resolver.relation_cache.
+        key = (assignment_token << 33) | (constraint_token << 1) | positive
         result = resolver.relation_cache.get(key)
 
     if result is None:

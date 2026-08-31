@@ -164,9 +164,12 @@ def conflict_resolution(
             # Count only one package per conflict so it gets decided first
             # after restart and its dependencies constrain the culprit.
             affected_package = most_recent_satisfier.package
-            resolver.stats.package_conflict_counts[
-                conflict_credit_target(most_recent_satisfier)
-            ] += 1
+            conflict_counts = resolver.stats.package_conflict_counts
+            credit_target = conflict_credit_target(most_recent_satisfier)
+            credited = conflict_counts[credit_target] + 1
+            conflict_counts[credit_target] = credited
+            if credited > resolver.max_conflict_count:
+                resolver.max_conflict_count = credited
             resolver.priority_epoch += 1
 
             update_culprit_counts(
@@ -243,9 +246,10 @@ def update_culprit_counts(
         if (
             count >= threshold
             and count % threshold == 0
-            and package not in resolver.pending_targeted_backtrack
+            and package not in resolver.pending_targeted_backtrack_set
         ):
             resolver.pending_targeted_backtrack.append(package)
+            resolver.pending_targeted_backtrack_set.add(package)
 
 
 def conflict_credit_target(satisfier: Assignment[Any, Any]) -> Any:
@@ -473,8 +477,7 @@ def maybe_restart(
     if restarts_remaining <= 0:
         return restart_threshold, restarts_remaining, False
 
-    max_count = max(resolver.stats.package_conflict_counts.values(), default=0)
-    if max_count < restart_threshold:
+    if resolver.max_conflict_count < restart_threshold:
         return restart_threshold, restarts_remaining, False
 
     resolver.stats.restarts += 1
@@ -485,6 +488,7 @@ def maybe_restart(
     resolver.solution.decide(ROOT, resolver.root_version)
     resolver.decision_queue.clear()
     resolver.pending_targeted_backtrack.clear()
+    resolver.pending_targeted_backtrack_set.clear()
     resolver.stats.targeted_backtracks = 0
 
     return restart_threshold * 2, restarts_remaining - 1, True
@@ -511,8 +515,9 @@ def force_targeted_backtrack(
         if current < threshold:
             resolver.stats.package_culprit_counts[package] = threshold
             resolver.priority_epoch += 1
-        if package not in resolver.pending_targeted_backtrack:
+        if package not in resolver.pending_targeted_backtrack_set:
             resolver.pending_targeted_backtrack.append(package)
+            resolver.pending_targeted_backtrack_set.add(package)
 
     return apply_targeted_backtrack(resolver)
 
