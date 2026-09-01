@@ -572,7 +572,7 @@ def _as_root_requirements(
     requirements: Mapping[PackageType, RangeProtocol[VersionType]]
     | Sequence[RootRequirement[PackageType, VersionType]],
 ) -> Sequence[RootRequirement[PackageType, VersionType]]:
-    """Accept either shape ``Resolver.resolve`` takes and return the sequence."""
+    """Accept either shape ``Resolver.solve`` takes and return the sequence."""
     if _is_root_sequence(requirements):
         return requirements
     # The parameters are spelled out because ``constraint`` is a contravariant
