@@ -572,6 +572,48 @@ def test_duplicate_root_ranges_are_still_intersected() -> None:
     assert roots["dep"].is_empty
 
 
+def test_conflicting_exact_roots_skip_catalog_work() -> None:
+    provider = FakeProvider()
+    adapter = NabProvider(provider, ResolutionConfig())
+
+    roots = adapter.add_roots(
+        [parse_requirement("dep==1"), parse_requirement("dep==2")]
+    )
+
+    assert roots == {"dep": Range.empty()}
+    assert provider.prefetch_calls == []
+    assert provider.available_calls == 0
+
+
+def test_public_and_local_exact_roots_keep_their_shared_candidate() -> None:
+    provider = FakeProvider()
+    provider.versions["dep"] = (Version("1+cpu"),)
+    adapter = NabProvider(provider, ResolutionConfig())
+
+    roots = adapter.add_roots(
+        [parse_requirement("dep==1"), parse_requirement("dep==1+cpu")]
+    )
+
+    assert roots["dep"] == Range.singleton(Version("1+cpu"))
+    assert provider.available_calls == 2
+
+
+def test_exact_root_preflight_checks_every_local_variant() -> None:
+    provider = FakeProvider()
+    adapter = NabProvider(provider, ResolutionConfig())
+
+    roots = adapter.add_roots(
+        [
+            parse_requirement("dep==1"),
+            parse_requirement("dep==1+cpu"),
+            parse_requirement("dep==1+gpu"),
+        ]
+    )
+
+    assert roots == {"dep": Range.empty()}
+    assert provider.available_calls == 0
+
+
 def test_conflicting_direct_url_roots_are_empty() -> None:
     adapter = NabProvider(FakeProvider(), ResolutionConfig())
 
