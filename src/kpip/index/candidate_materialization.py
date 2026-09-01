@@ -39,6 +39,7 @@ from kpip.core.wheel import (
 from kpip.core.wheel_metadata import parse_metadata_headers
 from kpip.index.artifacts import ArtifactLocator
 from kpip.index.candidate_cache import (
+    built_wheel_cache_key,
     cache_built_wheel as store_cached_wheel,
 )
 from kpip.index.candidate_cache import (
@@ -481,6 +482,7 @@ class CandidateMaterializer:
         build_options: dict[str, dict[str, object]] | None = None,
         build_constraints: list[str] | None = None,
         wheel_cache_dir: str | os.PathLike[str] | None = None,
+        target_key: str | None = None,
         build_isolation: bool = True,
         dry_run: bool = False,
         compute_source_hashes: bool = False,
@@ -491,6 +493,8 @@ class CandidateMaterializer:
         self.build_constraints = build_constraints
 
         self.wheel_cache_dir = wheel_cache_dir
+
+        self.target_key = target_key
 
         self.build_isolation = build_isolation
 
@@ -1047,6 +1051,20 @@ class CandidateMaterializer:
             if candidate.link.kind in SOURCE_ARTIFACT_KINDS:
                 from kpip.build.build_backend import prepare_project_metadata
 
+                cache_source_hashes = (
+                    self.source_hashes_for(candidate)
+                    if self.wheel_cache_dir is not None
+                    else None
+                )
+                metadata_wheel_cache_key = built_wheel_cache_key(
+                    candidate,
+                    source_hashes=cache_source_hashes,
+                    config_settings=None,
+                    build_constraints=self.build_constraints,
+                    build_isolation=self.build_isolation,
+                    target_key=self.target_key,
+                )
+
                 path = path_text
 
                 try:
@@ -1077,6 +1095,8 @@ class CandidateMaterializer:
                                     self.wheel_cache_dir,
                                     candidate,
                                     wheel_path,
+                                    metadata_wheel_cache_key,
+                                    source_hashes=cache_source_hashes,
                                 )
 
                         try:
@@ -1429,6 +1449,12 @@ class CandidateMaterializer:
 
             cache_hashes: dict[str, str] | None = None
 
+            cached_built: WheelCandidate | None = None
+
+            built_cache_key: str | None = None
+
+            cache_source_hashes: dict[str, str] | None = None
+
             local_path = self.local_path_for(candidate)
 
             path = self.ensure_local_text(candidate, local_path=local_path)
@@ -1481,10 +1507,32 @@ class CandidateMaterializer:
                 if requirement.name is None:
                     display_name = candidate.name
 
-                cached = cached_wheel_for_link(self.wheel_cache_dir, candidate.link.url)
+                config_settings = (self.build_options or {}).get(requirement.raw)
+
+                cache_source_hashes = (
+                    self.source_hashes_for(candidate)
+                    if self.wheel_cache_dir is not None
+                    else None
+                )
+
+                built_cache_key = built_wheel_cache_key(
+                    candidate,
+                    source_hashes=cache_source_hashes,
+                    config_settings=config_settings,
+                    build_constraints=self.build_constraints,
+                    build_isolation=self.build_isolation,
+                    target_key=self.target_key,
+                )
+
+                cached = cached_wheel_for_link(
+                    self.wheel_cache_dir,
+                    candidate,
+                    built_cache_key,
+                    requested_extras=requested_extras,
+                )
 
                 if cached is not None:
-                    path, cache_hashes = cached
+                    path, cache_hashes, cached_built = cached
 
                     from_cache = True
 
@@ -1500,8 +1548,6 @@ class CandidateMaterializer:
 
                 else:
                     emit_build_message("Preparing build dependencies")
-
-                    key = requirement.raw
 
                     prepared_sdist = (
                         self.take_prepared_sdist(candidate)
@@ -1524,7 +1570,7 @@ class CandidateMaterializer:
                         try:
                             path = build_wheel_from_source(
                                 path,
-                                config_settings=(self.build_options or {}).get(key),
+                                config_settings=config_settings,
                                 build_constraints=self.build_constraints,
                                 build_isolation=self.build_isolation,
                             )
@@ -1542,15 +1588,6 @@ class CandidateMaterializer:
                     emit_build_message(f"Created wheel for {display_name}")
 
                     emit_build_message(f"Successfully built {display_name}")
-
-                    if cache_built_wheel:
-                        logger.debug(
-                            "store cached built wheel for %s from %s",
-                            display_name,
-                            candidate.link.url,
-                        )
-
-                        store_cached_wheel(self.wheel_cache_dir, candidate, path)
 
             try:
                 if candidate.link.kind is ArtifactKind.WHEEL:
@@ -1595,7 +1632,11 @@ class CandidateMaterializer:
                         self.wheel_candidates[cache_key] = built
 
                 else:
-                    built = wheel_candidate_from_path(path, requested_extras)
+                    built = (
+                        cached_built
+                        if cached_built is not None
+                        else wheel_candidate_from_path(path, requested_extras)
+                    )
 
             except UnsupportedWheel as exc:
                 if ".dist-info directory" not in str(exc):
@@ -1634,6 +1675,21 @@ class CandidateMaterializer:
                 self.invalid_links.add(candidate.link.url)
 
                 continue
+
+            if cache_built_wheel and not from_cache:
+                logger.debug(
+                    "store cached built wheel for %s from %s",
+                    display_name,
+                    candidate.link.url,
+                )
+
+                store_cached_wheel(
+                    self.wheel_cache_dir,
+                    candidate,
+                    path,
+                    built_cache_key,
+                    source_hashes=cache_source_hashes,
+                )
 
             wheel = WheelCandidate(
                 name=built.name,
