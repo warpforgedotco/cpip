@@ -62,7 +62,14 @@ performance claim.
 
 ## Installation
 
-Install kpip from PyPI as an isolated tool with uv:
+Install kpip from PyPI with pip:
+
+```console
+pip install kpip
+kpip --version
+```
+
+Or install it as an isolated tool with uv:
 
 ```console
 uv tool install kpip
