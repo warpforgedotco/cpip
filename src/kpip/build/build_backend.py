@@ -5,6 +5,8 @@ import configparser
 import contextlib
 import csv
 import email.parser
+import email.utils
+import fnmatch
 import hashlib
 import importlib
 import io
@@ -409,14 +411,60 @@ def build_sdist(
 
     root_name = sdist_name.removesuffix(".tar.gz")
 
-    with tarfile.open(sdist_path, "w:gz") as archive:
-        for child, relative in iter_sdist_files(source_dir):
+    with tarfile.open(sdist_path, "w:gz", format=tarfile.PAX_FORMAT) as archive:
+        pkg_info = metadata_text(project, for_sdist=True).encode("utf-8")
+        pkg_info_entry = tarfile.TarInfo(f"{root_name}/PKG-INFO")
+        pkg_info_entry.mode = 0o644
+        pkg_info_entry.size = len(pkg_info)
+        archive.addfile(pkg_info_entry, io.BytesIO(pkg_info))
+
+        excluded = sdist_exclude_patterns(source_dir)
+        for child, relative in iter_sdist_files(source_dir, excluded=excluded):
+            if relative == "PKG-INFO":
+                continue
             archive.add(child, arcname=f"{root_name}/{relative}")
 
     return sdist_name
 
 
-def iter_sdist_files(source_dir: str) -> Iterable[tuple[str, str]]:
+def sdist_exclude_patterns(source_dir: str) -> tuple[str, ...]:
+    """Read project-specific source distribution exclusions."""
+    try:
+        with open(os.path.join(source_dir, "pyproject.toml"), encoding="utf-8") as file:
+            data = loads(file.read())
+    except OSError:
+        return ()
+
+    tool = data.get("tool", {})
+    kpip = tool.get("kpip", {}) if isinstance(tool, dict) else {}
+    backend = kpip.get("build-backend", {}) if isinstance(kpip, dict) else {}
+    patterns = backend.get("sdist-exclude", []) if isinstance(backend, dict) else []
+    if not isinstance(patterns, list) or not all(
+        isinstance(pattern, str) and pattern for pattern in patterns
+    ):
+        raise BuildError(
+            "tool.kpip.build-backend.sdist-exclude must be a list of strings",
+        )
+    return tuple(patterns)
+
+
+def _sdist_path_is_excluded(relative: str, patterns: tuple[str, ...]) -> bool:
+    for pattern in patterns:
+        directory = pattern.rstrip("/")
+        if (
+            relative == directory
+            or relative.startswith(directory + "/")
+            or fnmatch.fnmatchcase(relative, pattern)
+        ):
+            return True
+    return False
+
+
+def iter_sdist_files(
+    source_dir: str,
+    *,
+    excluded: tuple[str, ...] = (),
+) -> Iterable[tuple[str, str]]:
     """Yield source files while honoring the repository's ignore rules."""
 
     try:
@@ -443,9 +491,12 @@ def iter_sdist_files(source_dir: str) -> Iterable[tuple[str, str]]:
             {os.fsdecode(path) for path in tracked.stdout.split(b"\0") if path},
         )
         for relative in relative_paths:
+            relative = relative.replace(os.sep, "/")
+            if _sdist_path_is_excluded(relative, excluded):
+                continue
             child = os.path.join(source_dir, relative)
             if os.path.lexists(child):
-                yield child, relative.replace(os.sep, "/")
+                yield child, relative
         return
 
     excluded_directories = {
@@ -475,6 +526,8 @@ def iter_sdist_files(source_dir: str) -> Iterable[tuple[str, str]]:
                 continue
             child = os.path.join(current, name)
             relative = os.path.relpath(child, source_dir).replace(os.sep, "/")
+            if _sdist_path_is_excluded(relative, excluded):
+                continue
             yield child, relative
 
 
@@ -983,8 +1036,80 @@ class ProjectMetadata:
 
     license_files: tuple[str, ...] = ()
 
+    long_description: str | None = None
+
+    description_content_type: str | None = None
+
+    authors: tuple[tuple[str | None, str | None], ...] = ()
+
+    classifiers: tuple[str, ...] = ()
+
+    project_urls: tuple[tuple[str, str], ...] = ()
+
     def __post_init__(self) -> None:
         object.__setattr__(self, "version", str(Version(self.version)))
+
+
+def read_project_readme(
+    source_dir: str | os.PathLike[str],
+    configured: object,
+) -> tuple[str | None, str | None]:
+    """Read the PEP 621 project readme and determine its content type."""
+    if configured is None:
+        return None, None
+
+    readme_path: str | None = None
+    readme_text: str | None = None
+    content_type: str | None = None
+
+    if isinstance(configured, str):
+        readme_path = configured
+    elif isinstance(configured, dict):
+        file_value = configured.get("file")
+        text_value = configured.get("text")
+        content_value = configured.get("content-type")
+        if (
+            (file_value is None) == (text_value is None)
+            or (file_value is not None and not isinstance(file_value, str))
+            or (text_value is not None and not isinstance(text_value, str))
+            or (content_value is not None and not isinstance(content_value, str))
+        ):
+            raise BuildError("project.readme must specify exactly one of file or text")
+        readme_path = file_value
+        readme_text = text_value
+        content_type = content_value
+    else:
+        raise BuildError("project.readme must be a path or a table")
+
+    if readme_path is not None:
+        source = os.path.realpath(os.fspath(source_dir))
+        target = os.path.realpath(os.path.join(source, readme_path))
+        try:
+            contained = os.path.commonpath((source, target)) == source
+        except ValueError:
+            contained = False
+        if not contained or not os.path.isfile(target):
+            raise BuildError(
+                f"Project readme is missing or outside the source tree: {readme_path!r}",
+            )
+        try:
+            with open(target, encoding="utf-8") as file:
+                readme_text = file.read()
+        except OSError as exc:
+            raise BuildError(
+                f"Cannot read project readme {readme_path!r}: {exc}",
+            ) from exc
+
+        if content_type is None:
+            extension = os.path.splitext(readme_path)[1].lower()
+            content_type = {".md": "text/markdown", ".rst": "text/x-rst"}.get(
+                extension,
+            )
+
+    if content_type is None:
+        raise BuildError("project.readme requires a known extension or content-type")
+
+    return readme_text, content_type
 
 
 class ProjectMetadataReader:
@@ -1104,6 +1229,47 @@ class ProjectMetadataReader:
                 f"Cannot build {source_dir}: project.license-files is invalid",
             )
 
+        long_description, description_content_type = read_project_readme(
+            source_dir,
+            project.get("readme"),
+        )
+
+        authors_raw = project.get("authors", [])
+        if not isinstance(authors_raw, list):
+            raise BuildError(f"Cannot build {source_dir}: project.authors is invalid")
+        authors: list[tuple[str | None, str | None]] = []
+        for author in authors_raw:
+            if not isinstance(author, dict):
+                raise BuildError(
+                    f"Cannot build {source_dir}: project.authors is invalid",
+                )
+            author_name = author.get("name")
+            author_email = author.get("email")
+            if (
+                (author_name is not None and not isinstance(author_name, str))
+                or (author_email is not None and not isinstance(author_email, str))
+                or (author_name is None and author_email is None)
+            ):
+                raise BuildError(
+                    f"Cannot build {source_dir}: project.authors is invalid",
+                )
+            authors.append((author_name, author_email))
+
+        classifiers_raw = project.get("classifiers", [])
+        if not isinstance(classifiers_raw, list) or not all(
+            isinstance(classifier, str) for classifier in classifiers_raw
+        ):
+            raise BuildError(
+                f"Cannot build {source_dir}: project.classifiers is invalid",
+            )
+
+        urls_raw = project.get("urls", {})
+        if not isinstance(urls_raw, dict) or not all(
+            isinstance(label, str) and isinstance(url, str)
+            for label, url in urls_raw.items()
+        ):
+            raise BuildError(f"Cannot build {source_dir}: project.urls is invalid")
+
         optional_dependencies_raw = project.get("optional-dependencies", {})
 
         if not isinstance(optional_dependencies_raw, dict):
@@ -1137,6 +1303,11 @@ class ProjectMetadataReader:
             provided_extras=frozenset(optional_dependencies),
             license_expression=license_expression,
             license_files=tuple(license_files_raw),
+            long_description=long_description,
+            description_content_type=description_content_type,
+            authors=tuple(authors),
+            classifiers=tuple(classifiers_raw),
+            project_urls=tuple(urls_raw.items()),
         )
 
     def read_static(self) -> ProjectMetadata | None:
@@ -1713,11 +1884,11 @@ def _is_package_payload_text(
         return False
 
 
-def metadata_text(project: ProjectMetadata) -> str:
+def metadata_text(project: ProjectMetadata, *, for_sdist: bool = False) -> str:
     lines = [
         "Metadata-Version: 2.4"
         if project.license_expression or project.license_files
-        else "Metadata-Version: 2.1",
+        else f"Metadata-Version: {'2.2' if for_sdist else '2.1'}",
         f"Name: {project.name}",
         f"Version: {project.version}",
     ]
@@ -1729,6 +1900,26 @@ def metadata_text(project: ProjectMetadata) -> str:
 
     if project.summary:
         lines.append(f"Summary: {project.summary}")
+
+    author_names = [
+        name for name, author_email in project.authors if name and not author_email
+    ]
+    if author_names:
+        lines.append(f"Author: {', '.join(author_names)}")
+
+    author_emails = [
+        email.utils.formataddr((name or "", address))
+        for name, address in project.authors
+        if address
+    ]
+    if author_emails:
+        lines.append(f"Author-email: {', '.join(author_emails)}")
+
+    lines.extend(f"Classifier: {classifier}" for classifier in project.classifiers)
+    lines.extend(f"Project-URL: {label}, {url}" for label, url in project.project_urls)
+
+    if project.description_content_type:
+        lines.append(f"Description-Content-Type: {project.description_content_type}")
 
     if project.requires_python:
         lines.append(f"Requires-Python: {project.requires_python}")
@@ -1750,7 +1941,10 @@ def metadata_text(project: ProjectMetadata) -> str:
             else:
                 lines.append(f'Requires-Dist: {dependency}; extra == "{extra}"')
 
-    return "\n".join(lines) + "\n"
+    headers = "\n".join(lines) + "\n\n"
+    if project.long_description is None:
+        return headers
+    return headers + project.long_description.rstrip("\n") + "\n"
 
 
 def project_license_files(

@@ -3,6 +3,7 @@ name = "kpip"
 # Bump with `uv run scripts/bump_version.py --bump patch`; it syncs __version__.
 version = "0.0.1"
 description = "Pip Reimagined for Performance"
+readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE.txt"]
 classifiers = [
@@ -22,7 +23,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 authors = [
-    { name = "turcioskevinr@gmail.com", email = "turcioskevinr@gmail.com" },
+    { name = "Kevin Turcios", email = "turcioskevinr@gmail.com" },
 ]
 
 # NOTE: requires-python is duplicated in __kpip-runner__.py.
@@ -75,6 +76,9 @@ default-groups = ["typing"]
 
 [tool.uv.build-backend]
 module-name = "kpip"
+
+[tool.kpip.build-backend]
+sdist-exclude = ["tests/cli/data/**"]
 
 [tool.vendoring]
 destination = "src/kpip/_vendor/"
