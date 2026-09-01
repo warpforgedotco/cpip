@@ -1097,6 +1097,9 @@ class CandidateMaterializer:
                                     wheel_path,
                                     metadata_wheel_cache_key,
                                     source_hashes=cache_source_hashes,
+                                    candidate_name_is_authoritative=(
+                                        not requirement.is_unnamed_direct
+                                    ),
                                 )
 
                         try:
@@ -1529,6 +1532,7 @@ class CandidateMaterializer:
                     candidate,
                     built_cache_key,
                     requested_extras=requested_extras,
+                    candidate_name_is_authoritative=(not requirement.is_unnamed_direct),
                 )
 
                 if cached is not None:
@@ -1689,6 +1693,7 @@ class CandidateMaterializer:
                     path,
                     built_cache_key,
                     source_hashes=cache_source_hashes,
+                    candidate_name_is_authoritative=(not requirement.is_unnamed_direct),
                 )
 
             wheel = WheelCandidate(

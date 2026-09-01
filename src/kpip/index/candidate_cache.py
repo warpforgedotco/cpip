@@ -172,6 +172,7 @@ def cached_wheel_for_link(
     cache_key: str | None,
     *,
     requested_extras: frozenset[str] = frozenset(),
+    candidate_name_is_authoritative: bool = True,
 ) -> tuple[str, dict[str, str], WheelCandidate] | None:
     if wheel_cache_dir is None or cache_key is None:
         return None
@@ -230,9 +231,10 @@ def cached_wheel_for_link(
         _discard_invalid_entry(entry_dir_text)
         return None
 
-    if built.canonical_name != candidate.canonical_name or (
-        candidate.version != ZERO_VERSION and built.version != candidate.version
-    ):
+    if (
+        candidate_name_is_authoritative
+        and built.canonical_name != candidate.canonical_name
+    ) or (candidate.version != ZERO_VERSION and built.version != candidate.version):
         logger.warning(
             "Ignoring built-wheel cache entry %s for unexpected project %s==%s",
             wheel,
@@ -252,6 +254,7 @@ def cache_built_wheel(
     cache_key: str | None,
     *,
     source_hashes: dict[str, str] | None,
+    candidate_name_is_authoritative: bool = True,
 ) -> None:
     if wheel_cache_dir is None or cache_key is None:
         return
@@ -273,9 +276,10 @@ def cache_built_wheel(
             logger.warning("Not caching invalid built wheel %s: %s", wheel, exc)
             return
 
-        if built.canonical_name != candidate.canonical_name or (
-            candidate.version != ZERO_VERSION and built.version != candidate.version
-        ):
+        if (
+            candidate_name_is_authoritative
+            and built.canonical_name != candidate.canonical_name
+        ) or (candidate.version != ZERO_VERSION and built.version != candidate.version):
             logger.warning(
                 "Not caching built wheel %s for unexpected project %s==%s",
                 wheel,

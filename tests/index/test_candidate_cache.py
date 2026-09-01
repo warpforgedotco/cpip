@@ -79,6 +79,64 @@ def test_built_wheel_cache_publishes_and_loads_complete_entry(tmp_path: Path) ->
     ]
 
 
+def test_built_wheel_cache_uses_discovered_name_for_unnamed_direct_source(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "master.zip"
+    source.write_bytes(b"source archive")
+    candidate = CandidateRecord(
+        name="master.zip",
+        version=Version("0"),
+        link=Link.from_path(os.fspath(source), source_url=None),
+    )
+    hashes = file_hashes(source)
+    key = cache_key(candidate, hashes)
+    wheel = make_wheel(tmp_path, "pip-test-package", "pip_test_package", "0.1.1")
+    cache = tmp_path / "cache"
+
+    cache_built_wheel(
+        cache,
+        candidate,
+        os.fspath(wheel),
+        key,
+        source_hashes=hashes,
+        candidate_name_is_authoritative=False,
+    )
+
+    cached = cached_wheel_for_link(
+        cache,
+        candidate,
+        key,
+        candidate_name_is_authoritative=False,
+    )
+    assert cached is not None
+    _, _, built = cached
+    assert built.name == "pip-test-package"
+    assert built.version == Version("0.1.1")
+
+
+def test_built_wheel_cache_rejects_unexpected_authoritative_name(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "demo-1.0.tar.gz"
+    source.write_bytes(b"source archive")
+    candidate = source_candidate(source)
+    hashes = file_hashes(source)
+    key = cache_key(candidate, hashes)
+    wheel = make_wheel(tmp_path, "other", "other", "1.0")
+    cache = tmp_path / "cache"
+
+    cache_built_wheel(
+        cache,
+        candidate,
+        os.fspath(wheel),
+        key,
+        source_hashes=hashes,
+    )
+
+    assert not Path(wheel_cache_path(os.fspath(cache), key)).exists()
+
+
 def test_built_wheel_cache_key_covers_build_inputs(tmp_path: Path) -> None:
     source = tmp_path / "demo-1.0.tar.gz"
     source.write_bytes(b"first source")
