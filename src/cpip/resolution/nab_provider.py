@@ -43,6 +43,35 @@ _SELECTED_FORWARD_CHECK_MIN_VERSIONS = 16
 _TRANSITIVE_FORWARD_CHECK_MIN_VERSIONS = 256
 
 
+def _conflicting_exact_root(
+    requirements: list[Requirement],
+) -> tuple[str, Requirement] | None:
+    """Return one root whose exact requirements are provably disjoint.
+
+    A sole ``==`` clause names one PEP 440 equality class.  Two such clauses
+    can overlap when a public pin admits the other's local version, so compare
+    both exact witnesses instead of comparing their ``Version`` objects.
+    """
+    exact_roots: dict[str, list[tuple[SpecifierSet, Version]]] = {}
+    for requirement in requirements:
+        exact = requirement.specifier.exact_version
+        if exact is None:
+            continue
+        package = _key(requirement)
+        previous = exact_roots.setdefault(package, [])
+        for specifier, previous_exact in previous:
+            if not (
+                specifier.contains(exact, allow_prereleases=True)
+                or requirement.specifier.contains(
+                    previous_exact,
+                    allow_prereleases=True,
+                )
+            ):
+                return package, requirement
+        previous.append((requirement.specifier, exact))
+    return None
+
+
 class NabProvider:
     """Native NAB provider backed by cpip candidate discovery."""
 
@@ -1620,8 +1649,16 @@ class NabProvider:
 
     def add_roots(self, requirements: list[Requirement]) -> dict[str, Range[Version]]:
         """Register roots without speculatively materializing their candidates."""
-        self._prefetch_available_versions(tuple(requirements))
         merged = list(requirements)
+        conflict = _conflicting_exact_root(merged)
+        if conflict is not None:
+            package, requirement = conflict
+            self.requirements[package] = requirement
+            self._root_packages = {package}
+            self._constrained_root_packages = {package}
+            return {package: Range.empty()}
+
+        self._prefetch_available_versions(tuple(merged))
         roots: dict[str, Range[Version]] = {}
         for requirement in merged:
             package, requirement_range = self.add_root(requirement)
