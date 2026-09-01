@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 
-from cpip_test_support import CpipTestEnvironment, create_test_package_with_setup
+from kpip_test_support import KpipTestEnvironment, create_test_package_with_setup
 
 
 def assert_contains_expected_lines(string: str, expected_lines: Iterable[str]) -> None:
@@ -8,7 +8,7 @@ def assert_contains_expected_lines(string: str, expected_lines: Iterable[str]) -
         assert (expected_line + "\n") in string
 
 
-def test_check_install_canonicalization(script: CpipTestEnvironment) -> None:
+def test_check_install_canonicalization(script: KpipTestEnvironment) -> None:
     pkga_path = create_test_package_with_setup(
         script,
         name="pkgA",
@@ -26,7 +26,7 @@ def test_check_install_canonicalization(script: CpipTestEnvironment) -> None:
         version="0.1",
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -35,7 +35,7 @@ def test_check_install_canonicalization(script: CpipTestEnvironment) -> None:
     )
     assert "Successfully installed pkgA-1.0" in result.stdout, str(result)
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -49,7 +49,7 @@ def test_check_install_canonicalization(script: CpipTestEnvironment) -> None:
     assert_contains_expected_lines(result.stderr, expected_lines)
     assert result.returncode == 0
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -59,7 +59,7 @@ def test_check_install_canonicalization(script: CpipTestEnvironment) -> None:
     assert "requires" not in result.stderr
     assert result.returncode == 0
 
-    result = script.cpip("check")
+    result = script.kpip("check")
     expected_lines = [
         "No broken requirements found.",
     ]
@@ -68,7 +68,7 @@ def test_check_install_canonicalization(script: CpipTestEnvironment) -> None:
 
 
 def test_check_install_does_not_warn_for_out_of_graph_issues(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     pkg_broken_path = create_test_package_with_setup(
         script,
@@ -87,7 +87,7 @@ def test_check_install_does_not_warn_for_out_of_graph_issues(
         version="1.0",
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -96,7 +96,7 @@ def test_check_install_does_not_warn_for_out_of_graph_issues(
     )
     assert "requires" not in result.stderr
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -112,7 +112,7 @@ def test_check_install_does_not_warn_for_out_of_graph_issues(
         ],
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -121,7 +121,7 @@ def test_check_install_does_not_warn_for_out_of_graph_issues(
     )
     assert "requires" not in result.stderr
 
-    result = script.cpip("check", expect_error=True)
+    result = script.kpip("check", expect_error=True)
     expected_lines = [
         "broken 1.0 requires missing, which is not installed.",
         "broken 1.0 has requirement conflict<1.0, but you have conflict 1.0.",

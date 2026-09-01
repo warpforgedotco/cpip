@@ -1,11 +1,11 @@
 import pytest
-from cpip.core.http import (
+from kpip.core.http import (
     HttpResponse,
     HttpStatusError,
     raise_for_status,
     response_text,
 )
-from cpip_test_support.transport_mocks import make_response
+from kpip_test_support.transport_mocks import make_response
 
 
 def response(status: int = 200, body: bytes = b"downloaded") -> HttpResponse:
@@ -33,7 +33,7 @@ def test_response_text_falls_back_for_unknown_charset() -> None:
         status=200,
         reason="OK",
         url="https://example.com/file",
-        headers={"Content-Type": "text/plain; charset=unknown-cpip-charset"},
+        headers={"Content-Type": "text/plain; charset=unknown-kpip-charset"},
         body=b"caf\xc3\xa9",
     )
 

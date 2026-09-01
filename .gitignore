@@ -9,9 +9,9 @@ __pycache__/
 .venv/
 /build/
 # The package's build module is source code, not the root build output.
-!src/cpip/build/
+!src/kpip/build/
 dist/
 *.egg-info/
 
-# Recorded cpip-bench baselines (cpip-bench-record).
+# Recorded kpip-bench baselines (kpip-bench-record).
 benchmark-runs/

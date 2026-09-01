@@ -3,7 +3,7 @@ import sys
 import urllib.parse
 
 import pytest
-from cpip.core.urls import path_to_url, url_to_path
+from kpip.core.urls import path_to_url, url_to_path
 
 
 @pytest.mark.skipif("sys.platform == 'win32'")

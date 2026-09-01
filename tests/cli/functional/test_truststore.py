@@ -2,17 +2,17 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from cpip_test_support import CpipTestEnvironment, TestCpipResult
+from kpip_test_support import KpipTestEnvironment, TestKpipResult
 
-CpipRunner = Callable[..., TestCpipResult]
+KpipRunner = Callable[..., TestKpipResult]
 
 
 @pytest.fixture
-def cpip_no_truststore(script: CpipTestEnvironment) -> CpipRunner:
-    def cpip(*args: str, **kwargs: Any) -> TestCpipResult:
-        return script.cpip(*args, "--use-deprecated=legacy-certs", **kwargs)
+def kpip_no_truststore(script: KpipTestEnvironment) -> KpipRunner:
+    def kpip(*args: str, **kwargs: Any) -> TestKpipResult:
+        return script.kpip(*args, "--use-deprecated=legacy-certs", **kwargs)
 
-    return cpip
+    return kpip
 
 
 @pytest.mark.network
@@ -25,9 +25,9 @@ def cpip_no_truststore(script: CpipTestEnvironment) -> CpipRunner:
     ids=["PyPI", "GitHub"],
 )
 def test_no_truststore_can_install(
-    script: CpipTestEnvironment,
-    cpip_no_truststore: CpipRunner,
+    script: KpipTestEnvironment,
+    kpip_no_truststore: KpipRunner,
     package: str,
 ) -> None:
-    result = cpip_no_truststore("install", package)
+    result = kpip_no_truststore("install", package)
     assert "Successfully installed" in result.stdout

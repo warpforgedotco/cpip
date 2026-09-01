@@ -19,7 +19,7 @@ The live PyPI benchmarks are intentionally skipped by default. Enable them
 explicitly when network variability is acceptable:
 
 ```console
-CPIP_RUN_LIVE_BENCHMARKS=1 uv run --all-groups pytest tests/benchmarks/test_benchmark_live_index.py -q
+KPIP_RUN_LIVE_BENCHMARKS=1 uv run --all-groups pytest tests/benchmarks/test_benchmark_live_index.py -q
 ```
 
 They cover cold index requests, warm HTTP-cache reads, a missing-project

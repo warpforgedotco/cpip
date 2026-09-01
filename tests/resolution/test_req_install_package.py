@@ -8,15 +8,15 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from cpip.core.errors import InstallationError, InvalidWheelFilename
-from cpip.core.packaging import Requirement, SpecifierSet
-from cpip.resolution.input_paths import get_url_from_path_with_mode, looks_like_path
-from cpip.resolution.input_requirements import (
+from kpip.core.errors import InstallationError, InvalidWheelFilename
+from kpip.core.packaging import Requirement, SpecifierSet
+from kpip.resolution.input_paths import get_url_from_path_with_mode, looks_like_path
+from kpip.resolution.input_requirements import (
     install_req_from_editable,
     install_req_from_line,
     parse_editable,
 )
-from cpip.resolution.req_install import InstallRequirement
+from kpip.resolution.req_install import InstallRequirement
 
 
 def test_url_with_query_preserves_query_and_fragment() -> None:
@@ -318,7 +318,7 @@ def test_unidentifiable_name() -> None:
 
 def test_requirement_file(tmp_path: Path) -> None:
     req_file_path = tmp_path / "test.txt"
-    req_file_path.write_text("cpip\nsetuptools")
+    req_file_path.write_text("kpip\nsetuptools")
     with pytest.raises(InstallationError) as exc:
         install_req_from_line(os.fspath(req_file_path))
     error = str(exc.value)
@@ -348,9 +348,9 @@ def test_parse_editable_local(tmp_path: Path) -> None:
     assert parse_editable(".")[0] is None
     child = tmp_path / "foo"
     child.mkdir()
-    with mock.patch("cpip.resolution.req_install.os.path.exists", return_value=True):
+    with mock.patch("kpip.resolution.req_install.os.path.exists", return_value=True):
         with mock.patch(
-            "cpip.resolution.req_install.os.path.abspath",
+            "kpip.resolution.req_install.os.path.abspath",
             return_value=os.fspath(child),
         ):
             assert parse_editable("foo") == (None, child.resolve().as_uri(), set())
@@ -379,11 +379,11 @@ def test_parse_editable_local_extras(tmp_path: Path) -> None:
     child.mkdir()
     with (
         mock.patch(
-            "cpip.resolution.req_install.os.path.abspath",
+            "kpip.resolution.req_install.os.path.abspath",
             return_value=os.fspath(root),
         ),
         mock.patch(
-            "cpip.resolution.req_install.os.path.exists",
+            "kpip.resolution.req_install.os.path.exists",
             return_value=True,
         ),
     ):
@@ -394,11 +394,11 @@ def test_parse_editable_local_extras(tmp_path: Path) -> None:
         )
     with (
         mock.patch(
-            "cpip.resolution.req_install.os.path.abspath",
+            "kpip.resolution.req_install.os.path.abspath",
             return_value=os.fspath(child),
         ),
         mock.patch(
-            "cpip.resolution.req_install.os.path.exists",
+            "kpip.resolution.req_install.os.path.exists",
             return_value=True,
         ),
     ):
@@ -487,7 +487,7 @@ def test_get_url_from_path(
     expected: None,
 ) -> None:
     with mock.patch(
-        "cpip.resolution.input_paths._stat_mode",
+        "kpip.resolution.input_paths._stat_mode",
         return_value=None,
     ):
         assert get_url_from_path_with_mode(args[0])[0] is expected
@@ -523,7 +523,7 @@ def test_get_url_from_path_installable_error(tmp_path: Path) -> None:
 )
 def test_tmp_build_directory() -> None:
     requirement = InstallRequirement(None, None)
-    tmp_dir = tempfile.mkdtemp("-build", "cpip-")
+    tmp_dir = tempfile.mkdtemp("-build", "kpip-")
     try:
         tmp_build_dir = requirement.ensure_build_location(tmp_dir)
         assert os.path.dirname(tmp_build_dir) == os.path.realpath(

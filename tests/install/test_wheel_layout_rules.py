@@ -9,11 +9,11 @@ pseudo-shebang, missing ``#!pythonw`` and the CRLF form.
 from __future__ import annotations
 
 import pytest
-from cpip.core.direct_url import ArchiveInfo, DirectUrl
-from cpip.core.errors import UnsupportedWheel
-from cpip.core.wheel import root_is_purelib_from_text
-from cpip.install.wheel_archive import destination_internal_parts_text
-from cpip.install.wheel_scripts import rewrite_shebang
+from kpip.core.direct_url import ArchiveInfo, DirectUrl
+from kpip.core.errors import UnsupportedWheel
+from kpip.core.wheel import root_is_purelib_from_text
+from kpip.install.wheel_archive import destination_internal_parts_text
+from kpip.install.wheel_scripts import rewrite_shebang
 
 
 class _SplitTarget:
@@ -26,11 +26,11 @@ class _SplitTarget:
     the very distinction these tests exist to pin.
     """
 
-    purelib = "/cpip-test-prefix/lib/python3/site-packages"
-    platlib = "/cpip-test-prefix/lib64/python3/site-packages"
-    scripts = "/cpip-test-prefix/bin"
-    data = "/cpip-test-prefix"
-    headers = "/cpip-test-prefix/include/python3"
+    purelib = "/kpip-test-prefix/lib/python3/site-packages"
+    platlib = "/kpip-test-prefix/lib64/python3/site-packages"
+    scripts = "/kpip-test-prefix/bin"
+    data = "/kpip-test-prefix"
+    headers = "/kpip-test-prefix/include/python3"
     resolved_roots_internal = None
 
 
@@ -64,7 +64,7 @@ def test_wheel_root_follows_root_is_purelib() -> None:
             "pkg/mod.py",
             root_is_purelib=True,
         )
-        == "/cpip-test-prefix/lib/python3/site-packages/pkg/mod.py"
+        == "/kpip-test-prefix/lib/python3/site-packages/pkg/mod.py"
     )
     assert (
         destination_internal_parts_text(
@@ -73,7 +73,7 @@ def test_wheel_root_follows_root_is_purelib() -> None:
             "pkg/_speedups.so",
             root_is_purelib=False,
         )
-        == "/cpip-test-prefix/lib64/python3/site-packages/pkg/_speedups.so"
+        == "/kpip-test-prefix/lib64/python3/site-packages/pkg/_speedups.so"
     )
 
 
@@ -88,7 +88,7 @@ def test_data_directory_is_unaffected(root_is_purelib: bool) -> None:
             "pkg-1.0.data/scripts/tool",
             root_is_purelib=root_is_purelib,
         )
-        == "/cpip-test-prefix/bin/tool"
+        == "/kpip-test-prefix/bin/tool"
     )
     assert (
         destination_internal_parts_text(
@@ -97,7 +97,7 @@ def test_data_directory_is_unaffected(root_is_purelib: bool) -> None:
             "pkg-1.0.data/platlib/ext.so",
             root_is_purelib=root_is_purelib,
         )
-        == "/cpip-test-prefix/lib64/python3/site-packages/ext.so"
+        == "/kpip-test-prefix/lib64/python3/site-packages/ext.so"
     )
 
 
@@ -153,7 +153,7 @@ def test_rewrite_shebang(tmp_path, contents: bytes, expected: bytes) -> None:
 def test_root_is_purelib_default_is_shared_by_both_readers() -> None:
     """A wheel with no Root-Is-Purelib has already passed validation by the
     time either install path asks, so both take the same lenient answer."""
-    from cpip.install.wheel_transaction import root_is_purelib_or_default
+    from kpip.install.wheel_transaction import root_is_purelib_or_default
 
     assert root_is_purelib_or_default("Wheel-Version: 1.0\n") is True
     assert (
@@ -182,6 +182,6 @@ def test_record_paths_are_confined_to_the_distribution(
 ) -> None:
     """RECORD is whatever the wheel shipped, so a row naming a file outside
     this distribution and its script directory is refused, not followed."""
-    from cpip.install.uninstall import _inside_distribution
+    from kpip.install.uninstall import _inside_distribution
 
     assert _inside_distribution(path, "/env/lib/python3.12/site-packages") is expected

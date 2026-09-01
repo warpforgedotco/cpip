@@ -1,6 +1,6 @@
 """Opt-in live PyPI benchmarks.
 
-Run with ``CPIP_RUN_LIVE_BENCHMARKS=1``.  These tests are intentionally not
+Run with ``KPIP_RUN_LIVE_BENCHMARKS=1``.  These tests are intentionally not
 part of the default benchmark run because network latency and PyPI state are
 external inputs.
 """
@@ -11,16 +11,16 @@ import os
 from pathlib import Path
 
 import pytest
-from cpip.core.packaging import parse_requirement
-from cpip.index.provider import CandidateProvider
-from cpip.network.http import NetworkSession
+from kpip.core.packaging import parse_requirement
+from kpip.index.provider import CandidateProvider
+from kpip.network.http import NetworkSession
 from pytest_codspeed import BenchmarkFixture
 
 pytestmark = [
     pytest.mark.network,
     pytest.mark.skipif(
-        os.environ.get("CPIP_RUN_LIVE_BENCHMARKS") != "1",
-        reason="set CPIP_RUN_LIVE_BENCHMARKS=1 to enable live PyPI benchmarks",
+        os.environ.get("KPIP_RUN_LIVE_BENCHMARKS") != "1",
+        reason="set KPIP_RUN_LIVE_BENCHMARKS=1 to enable live PyPI benchmarks",
     ),
 ]
 
@@ -70,7 +70,7 @@ def test_live_index_failure_path(benchmark: BenchmarkFixture) -> None:
         try:
             return len(
                 provider.collect_links(
-                    parse_requirement("cpip-benchmark-does-not-exist"),
+                    parse_requirement("kpip-benchmark-does-not-exist"),
                 ),
             )
         finally:

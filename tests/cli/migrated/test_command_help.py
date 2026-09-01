@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from cpip.cli.main import main
+from kpip.cli.main import main
 
 
 @pytest.mark.parametrize(
@@ -17,7 +17,7 @@ from cpip.cli.main import main
         ("show", "--files"),
         ("inspect", "--local"),
         ("hash", "--algorithm"),
-        ("check", "usage: cpip check"),
+        ("check", "usage: kpip check"),
         ("cache", "--cache-dir"),
         ("lock", "--output"),
     ],

@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from cpip._vendor.nab_resolver import conflict
-from cpip._vendor.nab_resolver.resolver import BaseProvider, Resolver
+from kpip._vendor.nab_resolver import conflict
+from kpip._vendor.nab_resolver.resolver import BaseProvider, Resolver
 
 
 class Provider(BaseProvider[str, int]):

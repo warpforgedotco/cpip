@@ -24,16 +24,16 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-import cpip.resolution.nab_provider as nab_provider
-from cpip._vendor.nab_resolver import propagate
-from cpip._vendor.nab_resolver.ranges import Range
-from cpip.core.errors import ResolutionError
-from cpip.core.packaging import parse_requirement
-from cpip.core.versions import Version
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.api import ResolutionEngine
-from cpip.resolution.models import ResolutionConfig
-from cpip.resolution.nab_provider import NabProvider
+import kpip.resolution.nab_provider as nab_provider
+from kpip._vendor.nab_resolver import propagate
+from kpip._vendor.nab_resolver.ranges import Range
+from kpip.core.errors import ResolutionError
+from kpip.core.packaging import parse_requirement
+from kpip.core.versions import Version
+from kpip.index.provider import CandidateProvider
+from kpip.resolution.api import ResolutionEngine
+from kpip.resolution.models import ResolutionConfig
+from kpip.resolution.nab_provider import NabProvider
 
 _HAS_EXACT_CLAUSE_DISPATCH = hasattr(propagate, "_related_incompatibility_groups")
 
@@ -160,7 +160,7 @@ def test_forward_check_never_changes_the_answer(
 @pytest.mark.parametrize("seed", range(20))
 @pytest.mark.skipif(
     not _HAS_EXACT_CLAUSE_DISPATCH,
-    reason="requires cpip's exact-parent clause dispatch patch",
+    reason="requires kpip's exact-parent clause dispatch patch",
 )
 def test_exact_clause_dispatch_matches_exhaustive_propagation(
     seed: int,
@@ -738,8 +738,8 @@ def test_finite_range_matches_a_union_of_singletons() -> None:
     which is quadratic in a package's release count. The one-pass form has to
     produce the identical range, including for duplicate and unsorted input.
     """
-    from cpip._vendor.nab_resolver.ranges import Range
-    from cpip.resolution.nab_provider import NabProvider
+    from kpip._vendor.nab_resolver.ranges import Range
+    from kpip.resolution.nab_provider import NabProvider
 
     def by_union(versions: list[Version]) -> Range:
         result: Range = Range.empty()

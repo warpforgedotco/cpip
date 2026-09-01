@@ -6,7 +6,7 @@ necessarily update an mtime -- it can carry the source's -- so an installer
 built on it can leave a live interpreter unable to see what it just wrote.
 uv hit exactly this and bumps site-packages explicitly afterwards.
 
-cpip's clone route stages a whole tree and renames it over the target, which
+kpip's clone route stages a whole tree and renames it over the target, which
 is a different shape, so whether the hazard reaches it is a question about
 this code rather than about cloning in general. These tests answer it by
 importing across a real install rather than by reasoning about mtimes.
@@ -21,9 +21,9 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from cpip.core.wheel import wheel_candidate
-from cpip.install.target import InstallTarget
-from cpip.install.wheel_transaction import install_wheels_transactionally
+from kpip.core.wheel import wheel_candidate
+from kpip.install.target import InstallTarget
+from kpip.install.wheel_transaction import install_wheels_transactionally
 
 
 def _wheel(directory: Path, name: str, module: str, body: str) -> Path:
@@ -44,7 +44,7 @@ def _wheel(directory: Path, name: str, module: str, body: str) -> Path:
 
 def _install(wheel: Path, name: str, target: Path, cache_dir: Path) -> None:
     """Install one wheel, asserting the clone route is what handled it."""
-    from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
+    from kpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
 
     candidate = wheel_candidate(wheel).copy_with(
         source_hashes={"sha256": hashlib.sha256(wheel.read_bytes()).hexdigest()},
@@ -177,7 +177,7 @@ def test_the_visibility_tests_would_notice_a_stale_mtime(tmp_path: Path) -> None
     They assert an import succeeds, which a passing run alone cannot
     distinguish from ``FileFinder`` never having cached anything. Putting the
     target's mtime back to what it was before the second install reproduces
-    the state cpip would be in if cloning carried the source's timestamp --
+    the state kpip would be in if cloning carried the source's timestamp --
     and the import must then fail.
     """
     import os

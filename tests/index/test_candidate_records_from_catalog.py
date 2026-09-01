@@ -10,17 +10,17 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from cpip.core.versions import Version
-from cpip.index.catalog_cache import (
+from kpip.core.versions import Version
+from kpip.index.catalog_cache import (
     cache_key,
     catalog_generation,
     load_choices,
     save_links,
 )
-from cpip.index.links import Link
-from cpip.index.provider import CandidateProvider
-from cpip.index.source_models import CandidateRecord, MetadataFile
-from cpip.network.cache import SafeFileCache
+from kpip.index.links import Link
+from kpip.index.provider import CandidateProvider
+from kpip.index.source_models import CandidateRecord, MetadataFile
+from kpip.network.cache import SafeFileCache
 
 
 def _generation(cache: SafeFileCache, source_url: str) -> str:

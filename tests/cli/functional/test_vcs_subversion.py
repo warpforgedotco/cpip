@@ -1,13 +1,13 @@
 from pathlib import Path
 
 import pytest
-from cpip.vcs.subversion import Subversion
-from cpip.vcs.versioncontrol import RemoteNotFoundError
-from cpip_test_support import CpipTestEnvironment, create_svn_repo, need_svn
+from kpip.vcs.subversion import Subversion
+from kpip.vcs.versioncontrol import RemoteNotFoundError
+from kpip_test_support import KpipTestEnvironment, create_svn_repo, need_svn
 
 
 @need_svn
-def test_get_remote_url__no_remote(script: CpipTestEnvironment, tmpdir: Path) -> None:
+def test_get_remote_url__no_remote(script: KpipTestEnvironment, tmpdir: Path) -> None:
     repo_path = tmpdir / "temp-repo"
     repo_path.mkdir()
     repo_dir = str(repo_path)
@@ -20,7 +20,7 @@ def test_get_remote_url__no_remote(script: CpipTestEnvironment, tmpdir: Path) ->
 
 @need_svn
 def test_get_remote_url__no_remote_with_setup(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmpdir: Path,
 ) -> None:
     repo_path = tmpdir / "temp-repo"

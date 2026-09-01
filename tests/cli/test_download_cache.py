@@ -1,4 +1,4 @@
-"""``cpip download`` must actually reach the caches it advertises.
+"""``kpip download`` must actually reach the caches it advertises.
 
 ``--no-cache-dir`` was accepted and then never read: ``run_download`` passed no
 cache directory to anything, so downloads never cached and the flag happened to
@@ -12,8 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from cpip.cli import download
-from cpip.core.appdirs import resolve_cache_dir
+from kpip.cli import download
+from kpip.core.appdirs import resolve_cache_dir
 
 
 class Stop(Exception):

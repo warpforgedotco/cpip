@@ -4,7 +4,7 @@
 ``_decided_versions`` and ``_undecided`` incrementally, and ``backtrack``
 rebuilds them from the ``cum_*`` snapshot carried by the surviving top entry
 of each package's trail.  That is a local patch to a vendored package (see
-``src/cpip/_vendor/VENDORED.md``) replacing a rescan of the whole trail, so
+``src/kpip/_vendor/VENDORED.md``) replacing a rescan of the whole trail, so
 these tests pin the equivalence rather than the implementation: they compare
 the incremental state against a replay of the surviving assignments after
 randomized decide/derive/backtrack sequences.
@@ -16,13 +16,13 @@ import random
 from typing import Any, cast
 
 import pytest
-from cpip._vendor.nab_resolver import partial_solution
-from cpip._vendor.nab_resolver.partial_solution import (
+from kpip._vendor.nab_resolver import partial_solution
+from kpip._vendor.nab_resolver.partial_solution import (
     Assignment,
     PartialSolution,
 )
-from cpip._vendor.nab_resolver.ranges import Range
-from cpip._vendor.nab_resolver.types import (
+from kpip._vendor.nab_resolver.ranges import Range
+from kpip._vendor.nab_resolver.types import (
     Incompatibility,
     IncompatibilityCause,
     Term,
@@ -183,7 +183,7 @@ def test_backtrack_to_zero_clears_every_package() -> None:
 
 @pytest.mark.skipif(
     not _HAS_PARTIAL_SOLUTION_FAST_PATHS,
-    reason="requires cpip's partial-solution optimization patch",
+    reason="requires kpip's partial-solution optimization patch",
 )
 def test_decision_snapshot_tracks_later_derivations() -> None:
     """Derivations recorded after a decision carry that decision forward."""
@@ -229,7 +229,7 @@ def test_first_derivations_retain_their_range_objects() -> None:
 
 @pytest.mark.skipif(
     not _HAS_PARTIAL_SOLUTION_FAST_PATHS,
-    reason="requires cpip's partial-solution optimization patch",
+    reason="requires kpip's partial-solution optimization patch",
 )
 def test_derive_returns_the_cached_effective_range() -> None:
     solution: PartialSolution[str, int] = PartialSolution()
@@ -266,7 +266,7 @@ def test_derive_returns_the_cached_effective_range() -> None:
 
 @pytest.mark.skipif(
     not _HAS_PARTIAL_SOLUTION_FAST_PATHS,
-    reason="requires cpip's partial-solution optimization patch",
+    reason="requires kpip's partial-solution optimization patch",
 )
 def test_decide_returns_exact_range_after_recording_trails() -> None:
     solution: PartialSolution[str, int] = PartialSolution()
@@ -351,7 +351,7 @@ def test_range_operation_memo_cap_clears_operands_with_entries(
 
 @pytest.mark.skipif(
     not _HAS_PARTIAL_SOLUTION_FAST_PATHS,
-    reason="requires cpip's partial-solution optimization patch",
+    reason="requires kpip's partial-solution optimization patch",
 )
 def test_subtraction_and_assignment_effective_ranges_are_reused() -> None:
     """Both the solution memo and the trail-entry cache reuse subtraction."""

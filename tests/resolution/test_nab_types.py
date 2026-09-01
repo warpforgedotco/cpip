@@ -4,10 +4,10 @@ import inspect
 
 import pytest
 
-import cpip.resolution.nab_types
-from cpip._vendor.nab_resolver.ranges import Range
-from cpip.core.packaging import SpecifierSet
-from cpip.core.versions import Version
+import kpip.resolution.nab_types
+from kpip._vendor.nab_resolver.ranges import Range
+from kpip.core.packaging import SpecifierSet
+from kpip.core.versions import Version
 
 _BOUNDED_RANGE_INTERSECTIONS = (
     0 if "lower_inclusive" in inspect.signature(Range.between).parameters else 1
@@ -61,5 +61,5 @@ def test_implied_range_uses_expected_intersections(
 
     monkeypatch.setattr(Range, "__and__", counting_and)
 
-    assert cpip.resolution.nab_types._implied_range(SpecifierSet(specifier)) == expected
+    assert kpip.resolution.nab_types._implied_range(SpecifierSet(specifier)) == expected
     assert intersections == expected_intersections

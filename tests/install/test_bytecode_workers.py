@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from cpip.install import bytecode
+from kpip.install import bytecode
 
 
 @pytest.fixture(autouse=True)

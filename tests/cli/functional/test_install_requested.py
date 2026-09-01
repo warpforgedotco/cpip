@@ -1,10 +1,10 @@
 import pytest
-from cpip_test_support import CpipTestEnvironment, TestCpipResult, TestData
+from kpip_test_support import KpipTestEnvironment, TestKpipResult, TestData
 
 
 def assert_requested_present(
-    script: CpipTestEnvironment,
-    result: TestCpipResult,
+    script: KpipTestEnvironment,
+    result: TestKpipResult,
     name: str,
     version: str,
 ) -> None:
@@ -15,8 +15,8 @@ def assert_requested_present(
 
 
 def assert_requested_absent(
-    script: CpipTestEnvironment,
-    result: TestCpipResult,
+    script: KpipTestEnvironment,
+    result: TestKpipResult,
     name: str,
     version: str,
 ) -> None:
@@ -26,8 +26,8 @@ def assert_requested_absent(
     assert requested not in result.files_created
 
 
-def test_install_requested_basic(script: CpipTestEnvironment, data: TestData) -> None:
-    result = script.cpip(
+def test_install_requested_basic(script: KpipTestEnvironment, data: TestData) -> None:
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -40,11 +40,11 @@ def test_install_requested_basic(script: CpipTestEnvironment, data: TestData) ->
 
 
 def test_install_requested_requirements(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("requirements.txt").write_text("require_simple\n")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -58,13 +58,13 @@ def test_install_requested_requirements(
 
 
 def test_install_requested_dep_in_requirements(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("requirements.txt").write_text(
         "require_simple\nsimple<3\n",
     )
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -78,12 +78,12 @@ def test_install_requested_dep_in_requirements(
 
 
 def test_install_requested_reqs_and_constraints(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("requirements.txt").write_text("require_simple\n")
     script.scratch_path.joinpath("constraints.txt").write_text("simple<3\n")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -99,14 +99,14 @@ def test_install_requested_reqs_and_constraints(
 
 
 def test_install_requested_in_reqs_and_constraints(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("requirements.txt").write_text(
         "require_simple\nsimple\n",
     )
     script.scratch_path.joinpath("constraints.txt").write_text("simple<3\n")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -122,11 +122,11 @@ def test_install_requested_in_reqs_and_constraints(
 
 
 def test_install_requested_from_cli_with_constraint(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("constraints.txt").write_text("simple<3\n")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -141,13 +141,13 @@ def test_install_requested_from_cli_with_constraint(
 
 @pytest.mark.network
 def test_install_requested_from_cli_with_url_constraint(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("constraints.txt").write_text(
         "pip-test-package @ git+https://github.com/pypa/pip-test-package@0.1.1\n",
     )
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",

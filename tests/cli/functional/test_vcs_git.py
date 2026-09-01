@@ -8,17 +8,17 @@ import pathlib
 from unittest.mock import Mock, patch
 
 import pytest
-from cpip.vcs.git import Git, RemoteNotFoundError
-from cpip.vcs.support import HiddenText
-from cpip.vcs.versioncontrol import vcs
-from cpip_test_support import CpipTestEnvironment, create_test_package, git_commit
+from kpip.vcs.git import Git, RemoteNotFoundError
+from kpip.vcs.support import HiddenText
+from kpip.vcs.versioncontrol import vcs
+from kpip_test_support import KpipTestEnvironment, create_test_package, git_commit
 
 
 def test_get_backend_for_scheme() -> None:
     assert vcs.get_backend_for_scheme("git+https") is vcs.get_backend("Git")
 
 
-def get_head_sha(script: CpipTestEnvironment, dest: str) -> str:
+def get_head_sha(script: KpipTestEnvironment, dest: str) -> str:
     """Return the HEAD sha."""
     result = script.run("git", "rev-parse", "HEAD", cwd=dest)
     sha = result.stdout.strip()
@@ -26,12 +26,12 @@ def get_head_sha(script: CpipTestEnvironment, dest: str) -> str:
     return sha
 
 
-def checkout_ref(script: CpipTestEnvironment, repo_dir: str, ref: str) -> None:
+def checkout_ref(script: KpipTestEnvironment, repo_dir: str, ref: str) -> None:
     script.run("git", "checkout", ref, cwd=repo_dir)
 
 
 def checkout_new_branch(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     repo_dir: str,
     branch: str,
 ) -> None:
@@ -44,12 +44,12 @@ def checkout_new_branch(
     )
 
 
-def do_commit(script: CpipTestEnvironment, dest: str) -> str:
+def do_commit(script: KpipTestEnvironment, dest: str) -> str:
     git_commit(dest, message="test commit", allow_empty=True)
     return get_head_sha(script, dest)
 
 
-def add_commits(script: CpipTestEnvironment, dest: str, count: int) -> list[str]:
+def add_commits(script: KpipTestEnvironment, dest: str, count: int) -> list[str]:
     """Return a list of the commit hashes from oldest to newest."""
     shas = []
     for _ in range(count):
@@ -85,7 +85,7 @@ def test_git_work_tree_ignored(tmpdir: pathlib.Path) -> None:
     Git.run_command(["status", repo_dir], extra_environ=env, cwd=repo_dir)
 
 
-def test_get_remote_url(script: CpipTestEnvironment, tmpdir: pathlib.Path) -> None:
+def test_get_remote_url(script: KpipTestEnvironment, tmpdir: pathlib.Path) -> None:
     source_path = tmpdir / "source"
     source_path.mkdir()
     source_url = source_path.as_uri()
@@ -102,7 +102,7 @@ def test_get_remote_url(script: CpipTestEnvironment, tmpdir: pathlib.Path) -> No
 
 
 def test_get_remote_url__no_remote(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmpdir: pathlib.Path,
 ) -> None:
     """Test a repo with no remote."""
@@ -116,7 +116,7 @@ def test_get_remote_url__no_remote(
         Git.get_remote_url(repo_dir)
 
 
-def test_get_current_branch(script: CpipTestEnvironment) -> None:
+def test_get_current_branch(script: KpipTestEnvironment) -> None:
     repo_dir = str(script.scratch_path)
 
     script.run("git", "init", cwd=repo_dir)
@@ -132,7 +132,7 @@ def test_get_current_branch(script: CpipTestEnvironment) -> None:
 
 
 def test_get_current_branch__branch_and_tag_same_name(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmpdir: pathlib.Path,
 ) -> None:
     """Check calling get_current_branch() from a branch or tag when the branch
@@ -150,7 +150,7 @@ def test_get_current_branch__branch_and_tag_same_name(
     assert Git.get_current_branch(repo_dir) is None
 
 
-def test_get_revision_sha(script: CpipTestEnvironment) -> None:
+def test_get_revision_sha(script: KpipTestEnvironment) -> None:
     repo_dir = str(script.scratch_path)
 
     script.run("git", "init", cwd=repo_dir)
@@ -197,7 +197,7 @@ def test_get_revision_sha(script: CpipTestEnvironment) -> None:
         check_rev(repo_dir, name, (None, False))
 
 
-def test_is_commit_id_equal(script: CpipTestEnvironment) -> None:
+def test_is_commit_id_equal(script: KpipTestEnvironment) -> None:
     """Test Git.is_commit_id_equal()."""
     version_pkg_path = os.fspath(create_test_package(script.scratch_path))
     script.run("git", "branch", "branch0.1", cwd=version_pkg_path)
@@ -210,7 +210,7 @@ def test_is_commit_id_equal(script: CpipTestEnvironment) -> None:
     assert not Git.is_commit_id_equal(version_pkg_path, None)
 
 
-def test_is_immutable_rev_checkout(script: CpipTestEnvironment) -> None:
+def test_is_immutable_rev_checkout(script: KpipTestEnvironment) -> None:
     version_pkg_path = os.fspath(create_test_package(script.scratch_path))
     commit = script.run("git", "rev-parse", "HEAD", cwd=version_pkg_path).stdout.strip()
     assert Git().is_immutable_rev_checkout(
@@ -224,7 +224,7 @@ def test_is_immutable_rev_checkout(script: CpipTestEnvironment) -> None:
     )
 
 
-def test_get_repository_root(script: CpipTestEnvironment) -> None:
+def test_get_repository_root(script: KpipTestEnvironment) -> None:
     version_pkg_path = create_test_package(script.scratch_path)
     tests_path = version_pkg_path.joinpath("tests")
     tests_path.mkdir()
@@ -239,7 +239,7 @@ def test_get_repository_root(script: CpipTestEnvironment) -> None:
 
 
 def test_resolve_commit_not_on_branch(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmp_path: pathlib.Path,
 ) -> None:
     repo_path = tmp_path / "repo"
@@ -274,7 +274,7 @@ def test_resolve_commit_not_on_branch(
 
 def initialize_clonetest_server(
     repo_path: pathlib.Path,
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     enable_partial_clone: bool,
 ) -> pathlib.Path:
     repo_path.mkdir()
@@ -305,7 +305,7 @@ def initialize_clonetest_server(
         ("git ver. 2.25.1", "Can't parse git version: git ver. 2.25.1"),
     ],
 )
-@patch("cpip.vcs.versioncontrol.VersionControl.run_command")
+@patch("kpip.vcs.versioncontrol.VersionControl.run_command")
 def test_git_parse_fail_warning(
     mock_run_command: Mock,
     caplog: pytest.LogCaptureFixture,
@@ -324,7 +324,7 @@ def test_git_parse_fail_warning(
 
 
 @pytest.mark.skipif(Git().get_git_version() < (2, 17), reason="git too old")
-def test_partial_clone(script: CpipTestEnvironment, tmp_path: pathlib.Path) -> None:
+def test_partial_clone(script: KpipTestEnvironment, tmp_path: pathlib.Path) -> None:
     """Test partial clone w/ a git-server that supports it"""
     repo_path = tmp_path / "repo"
     repo_file = initialize_clonetest_server(
@@ -365,7 +365,7 @@ def test_partial_clone(script: CpipTestEnvironment, tmp_path: pathlib.Path) -> N
 
 @pytest.mark.skipif(Git().get_git_version() < (2, 17), reason="git too old")
 def test_partial_clone_without_server_support(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmp_path: pathlib.Path,
 ) -> None:
     """Test partial clone w/ a git-server that does not support it"""
@@ -407,7 +407,7 @@ def test_partial_clone_without_server_support(
 
 
 def test_clone_without_partial_clone_support(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmp_path: pathlib.Path,
 ) -> None:
     """Older git clients don't support partial clone. Test the fallback path"""
@@ -419,7 +419,7 @@ def test_clone_without_partial_clone_support(
     )
     clone_path = repo_path / "clone1"
 
-    with patch("cpip.vcs.git.Git.get_git_version", return_value=(2, 16)):
+    with patch("kpip.vcs.git.Git.get_git_version", return_value=(2, 16)):
         Git().fetch_new(
             str(clone_path),
             HiddenText(repo_path.as_uri(), redacted="*"),
@@ -436,7 +436,7 @@ def test_clone_without_partial_clone_support(
     )
 
 
-def test_git_has_commit(script: CpipTestEnvironment) -> None:
+def test_git_has_commit(script: KpipTestEnvironment) -> None:
     """Test Git.has_commit()."""
     repo_dir = str(script.scratch_path)
 

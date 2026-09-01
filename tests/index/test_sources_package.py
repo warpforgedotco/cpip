@@ -5,24 +5,24 @@ import os
 from pathlib import Path
 
 import pytest
-from cpip.cli.main import main
-from cpip.core.http import HttpResponse
-from cpip.core.packaging import Requirement, parse_requirement
-from cpip.core.versions import Version
-from cpip.core.wheel import TargetContext
-from cpip.index.cache import origin_hashes
-from cpip.index.candidate_evaluators import CandidateEvaluator
-from cpip.index.candidate_materialization import CandidateMaterializer
-from cpip.index.candidates import InstallationCandidate
-from cpip.index.catalog_cache import save_links
-from cpip.index.directory_index import (
+from kpip.cli.main import main
+from kpip.core.http import HttpResponse
+from kpip.core.packaging import Requirement, parse_requirement
+from kpip.core.versions import Version
+from kpip.core.wheel import TargetContext
+from kpip.index.cache import origin_hashes
+from kpip.index.candidate_evaluators import CandidateEvaluator
+from kpip.index.candidate_materialization import CandidateMaterializer
+from kpip.index.candidates import InstallationCandidate
+from kpip.index.catalog_cache import save_links
+from kpip.index.directory_index import (
     local_source_snapshot,
     project_version_from_filename,
 )
-from cpip.index.links import Link
-from cpip.index.provider import CandidateProvider
-from cpip.index.source_locations import FindLinksSource, SimpleIndexSource
-from cpip.index.source_models import (
+from kpip.index.links import Link
+from kpip.index.provider import CandidateProvider
+from kpip.index.source_locations import FindLinksSource, SimpleIndexSource
+from kpip.index.source_models import (
     ArtifactKind,
     CandidateMetadata,
     CandidateRecord,
@@ -30,9 +30,9 @@ from cpip.index.source_models import (
     MetadataFile,
     RejectionReason,
 )
-from cpip.index.vcs import is_immutable_vcs_link, vcs_reference
-from cpip.network.cache import SafeFileCache
-from cpip_test_support.transport_mocks import make_response
+from kpip.index.vcs import is_immutable_vcs_link, vcs_reference
+from kpip.network.cache import SafeFileCache
+from kpip_test_support.transport_mocks import make_response
 from ..wheel_helpers import make_sdist, make_wheel
 
 
@@ -105,7 +105,7 @@ def test_find_links_reuses_local_artifact_identity_until_refresh(
     artifact = tmp_path / "demo-1.0.tar.gz"
     artifact.write_bytes(b"artifact")
     source = FindLinksSource((str(tmp_path),))
-    from cpip.index import directory_index
+    from kpip.index import directory_index
 
     scan = directory_index.os.scandir
     calls = 0
@@ -135,7 +135,7 @@ def test_find_links_caches_local_file_discovery(
     artifact = tmp_path / "demo-1.0.tar.gz"
     artifact.write_bytes(b"artifact")
     source = FindLinksSource((str(artifact),))
-    from cpip.index import source_locations
+    from kpip.index import source_locations
 
     stat = source_locations.os.stat
     calls = 0
@@ -602,7 +602,7 @@ def test_pypi_metadata_precedes_sdist_build(
     def fail_build(*args: object, **kwargs: object) -> None:
         pytest.fail("dry-run should not invoke the source build backend")
 
-    monkeypatch.setattr("cpip.build.build_backend.prepare_project_metadata", fail_build)
+    monkeypatch.setattr("kpip.build.build_backend.prepare_project_metadata", fail_build)
 
     metadata = materializer.metadata_loader(candidate, parse_requirement("demo")).load()
 
@@ -847,7 +847,7 @@ def test_origin_hashes_with_invalid_json(
     origin_file = tmp_path / "origin.json"
     origin_file.write_text("{", encoding="utf-8")
 
-    with caplog.at_level(logging.WARNING, logger="cpip.index.candidate_evaluators"):
+    with caplog.at_level(logging.WARNING, logger="kpip.index.candidate_evaluators"):
         hashes = origin_hashes(origin_file)
 
     assert hashes is None
@@ -877,7 +877,7 @@ def test_evaluate_links_propagates_unexpected_source_tree_error(
 
     provider = CandidateProvider.from_options(no_index=True)
     monkeypatch.setattr(
-        "cpip.build.build_backend.prepare_project_metadata",
+        "kpip.build.build_backend.prepare_project_metadata",
         lambda *args_internal: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
@@ -1218,7 +1218,7 @@ def test_candidate_provider_defers_sdist_build_when_matching_wheel_exists(
     def fail_build(*args_internal, **kwargs_internal):
         raise AssertionError("sdist build should be skipped when a wheel exists")
 
-    monkeypatch.setattr("cpip.build.build.build_wheel_from_source", fail_build)
+    monkeypatch.setattr("kpip.build.build.build_wheel_from_source", fail_build)
 
     provider = CandidateProvider.from_options(index_url=index.as_uri())
     candidates = provider.find_candidates(parse_requirement("demo-pkg"))
@@ -1240,7 +1240,7 @@ def test_candidate_provider_only_builds_highest_ranked_source_candidate(
 
     built: list[str] = []
     real_build = __import__(
-        "cpip.build.build",
+        "kpip.build.build",
         fromlist=["build_wheel_from_source"],
     ).build_wheel_from_source
 
@@ -1249,7 +1249,7 @@ def test_candidate_provider_only_builds_highest_ranked_source_candidate(
         return real_build(path, *args, **kwargs)
 
     monkeypatch.setattr(
-        "cpip.build.build.build_wheel_from_source",
+        "kpip.build.build.build_wheel_from_source",
         tracking_build,
     )
 
@@ -1392,10 +1392,10 @@ def test_find_links_scan_defers_the_stat_to_the_first_fingerprint(
     """Scanning a wheelhouse must not stat every entry: the identity is
     computed when an artifact's metadata is first fingerprinted, in the
     same ``stat:dev:ino:size:mtime`` form, and remembered on the link."""
-    from cpip.index import candidate_materialization
-    from cpip.core.versions import Version
-    from cpip.index.candidate_materialization import candidate_metadata_fingerprint
-    from cpip.index.source_models import CandidateRecord
+    from kpip.index import candidate_materialization
+    from kpip.core.versions import Version
+    from kpip.index.candidate_materialization import candidate_metadata_fingerprint
+    from kpip.index.source_models import CandidateRecord
 
     wheel = tmp_path / "demo-1.0-py3-none-any.whl"
     wheel.write_bytes(b"artifact")

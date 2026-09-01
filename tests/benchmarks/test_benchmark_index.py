@@ -16,18 +16,18 @@ from benchmark_support import (
     simple_index_json,
     wheel_filenames,
 )
-from cpip.core.packaging import SpecifierSet, parse_requirement
-from cpip.core.wheel import (
+from kpip.core.packaging import SpecifierSet, parse_requirement
+from kpip.core.wheel import (
     TargetContext,
     parse_wheel_file,
     supported_wheel_tags,
     wheel_tag_rank,
 )
-from cpip.index.candidate_evaluators import CandidateEvaluator
-from cpip.index.candidates import BestCandidateResult, InstallationCandidate
-from cpip.index.links import Link
-from cpip.index.page_parsing import IndexPageParser
-from cpip.index.provider import CandidateProvider
+from kpip.index.candidate_evaluators import CandidateEvaluator
+from kpip.index.candidates import BestCandidateResult, InstallationCandidate
+from kpip.index.links import Link
+from kpip.index.page_parsing import IndexPageParser
+from kpip.index.provider import CandidateProvider
 from pytest_codspeed import BenchmarkFixture
 
 PAGE_URL = "https://example.invalid/simple/package/"
@@ -427,8 +427,8 @@ def test_catalog_links_from_cache(
     Sized to a large real project (boto3's page holds ~2000 artifacts); every
     warm resolve pays this materialization once per project page.
     """
-    from cpip.index.catalog_cache import load_links, save_links
-    from cpip.network.cache import SafeFileCache
+    from kpip.index.catalog_cache import load_links, save_links
+    from kpip.network.cache import SafeFileCache
 
     cache = SafeFileCache(str(tmp_path_factory.mktemp("catalog-links-cache")))
     page_url = "https://example.invalid/simple/package/"

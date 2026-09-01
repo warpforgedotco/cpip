@@ -7,8 +7,8 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from cpip.core.errors import InstallationError
-from cpip.platform import unpacking
+from kpip.core.errors import InstallationError
+from kpip.platform import unpacking
 
 
 def _write_zip(

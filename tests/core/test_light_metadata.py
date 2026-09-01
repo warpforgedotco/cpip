@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cpip.core.light_metadata import LightDistributionStore
+from kpip.core.light_metadata import LightDistributionStore
 
 
 def _install(site: Path, name: str, version: str) -> Path:
@@ -16,20 +16,20 @@ def _install(site: Path, name: str, version: str) -> Path:
 
 def test_installer_and_direct_url_are_read_once(tmp_path: Path) -> None:
     info = _install(tmp_path, "pkg", "1.0")
-    (info / "INSTALLER").write_text("cpip\n")
+    (info / "INSTALLER").write_text("kpip\n")
     (info / "direct_url.json").write_text(
         '{"url": "file:///src/pkg", "dir_info": {"editable": true}}'
     )
     [dist] = LightDistributionStore(paths=[str(tmp_path)]).iter()
 
-    assert dist.installer == "cpip"
+    assert dist.installer == "kpip"
     assert dist.direct_url is not None
     assert dist.editable
     assert dist.editable_project_location == "/src/pkg"
 
     (info / "INSTALLER").write_text("other\n")
     (info / "direct_url.json").unlink()
-    assert dist.installer == "cpip"
+    assert dist.installer == "kpip"
     assert dist.direct_url is not None
     assert dist.editable
 

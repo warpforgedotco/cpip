@@ -6,13 +6,13 @@ import json
 from pathlib import Path
 
 import pytest
-from cpip.core.http import HttpResponse
-from cpip.core.packaging import parse_requirement
-from cpip.index.catalog_cache import cache_key, catalog_generation
-from cpip.index.source_locations import SimpleIndexSource
-from cpip.network.exceptions import ConnectionFailedError
-from cpip.network.http import NetworkSession
-from cpip_test_support.transport_mocks import make_response
+from kpip.core.http import HttpResponse
+from kpip.core.packaging import parse_requirement
+from kpip.index.catalog_cache import cache_key, catalog_generation
+from kpip.index.source_locations import SimpleIndexSource
+from kpip.network.exceptions import ConnectionFailedError
+from kpip.network.http import NetworkSession
+from kpip_test_support.transport_mocks import make_response
 
 INDEX_URL = "https://index.invalid/simple"
 PROJECT_URL = "https://index.invalid/simple/demo/"
@@ -175,7 +175,7 @@ def test_no_fetch_by_default(tmp_path: Path) -> None:
 
 def test_provider_stays_in_record_world_after_revalidation(tmp_path: Path) -> None:
     _source, session = primed_source(tmp_path)
-    from cpip.index.provider import CandidateProvider
+    from kpip.index.provider import CandidateProvider
 
     provider = CandidateProvider.from_options(
         index_url=INDEX_URL,

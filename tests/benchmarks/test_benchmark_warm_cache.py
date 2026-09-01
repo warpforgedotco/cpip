@@ -2,7 +2,7 @@
 
 Every other benchmark measures a cold process: ``reset_caches`` drops the
 in-memory state and ``cold_metadata_cache_dir`` hands out an empty cache
-directory. These measure the opposite -- the second ``cpip install`` on a
+directory. These measure the opposite -- the second ``kpip install`` on a
 machine, where every persistent store under ``<cache root>/v0`` is already
 populated and the work is reading, validating and reusing it. Each iteration
 still drops the in-memory state, so what it measures is the disk-backed
@@ -18,25 +18,25 @@ from types import SimpleNamespace
 
 import pytest
 from benchmark_support import flush_persistent_caches, make_wheel, reset_caches
-from cpip.cli.fast_install import FastInstallMetadataCache, resolve_simple_wheelhouse
-from cpip.core.packaging import parse_requirement
-from cpip.core.urls import path_to_url
-from cpip.core.wheel import parse_wheel_file, wheel_candidate
-from cpip.index.catalog_cache import save_links
-from cpip.index.links import Link
-from cpip.index.provider import CandidateProvider
-from cpip.index.source_locations import SimpleIndexSource
-from cpip.install.output import materialize_candidates
-from cpip.install.target import InstallTarget
-from cpip.install.wheel_archive_cache import prepare_cached_wheels
-from cpip.install.wheel_archive_installer import install_wheels_from_archive_cache
-from cpip.install.wheel_install_plan_cache import (
+from kpip.cli.fast_install import FastInstallMetadataCache, resolve_simple_wheelhouse
+from kpip.core.packaging import parse_requirement
+from kpip.core.urls import path_to_url
+from kpip.core.wheel import parse_wheel_file, wheel_candidate
+from kpip.index.catalog_cache import save_links
+from kpip.index.links import Link
+from kpip.index.provider import CandidateProvider
+from kpip.index.source_locations import SimpleIndexSource
+from kpip.install.output import materialize_candidates
+from kpip.install.target import InstallTarget
+from kpip.install.wheel_archive_cache import prepare_cached_wheels
+from kpip.install.wheel_archive_installer import install_wheels_from_archive_cache
+from kpip.install.wheel_install_plan_cache import (
     exact_install_plan_key,
     load_cached_install_plan,
     save_cached_install_plan,
 )
-from cpip.network.cache import SafeFileCache
-from cpip.resolution.api import ResolutionEngine
+from kpip.network.cache import SafeFileCache
+from kpip.resolution.api import ResolutionEngine
 from pytest_codspeed import BenchmarkFixture
 
 ROOT = "application"
@@ -182,7 +182,7 @@ def test_warm_archive_install_compiled(
     tmp_path: Path,
 ) -> None:
     """The same cached install with bytecode compilation on -- what a default
-    `cpip install` takes -- compiling each wheel in the staged tree."""
+    `kpip install` takes -- compiling each wheel in the staged tree."""
     candidates = tuple(
         materialize_candidates(
             resolve_graph(graph_wheelhouse, warm_cache_dir).candidates
@@ -370,12 +370,12 @@ def test_warm_installed_state_scan(
     """The default install's scan of an unchanged environment: every
     distribution's headers come from the persistent store after one
     priming run, so the scan is a listing plus one stat per entry."""
-    from cpip.core.metadata import (
+    from kpip.core.metadata import (
         clear_installed_index,
         installed_index,
         use_header_cache,
     )
-    from cpip.index.metadata_cache import get_wheel_metadata_cache
+    from kpip.index.metadata_cache import get_wheel_metadata_cache
 
     cache_dir = str(tmp_path_factory.mktemp("installed-cache"))
     use_header_cache(get_wheel_metadata_cache(cache_dir))
@@ -404,10 +404,10 @@ def stale_index(
     """warm_index, but every page's HTTP entry is stale with a matching ETag:
     each resolve must revalidate (304 answered offline) before the summary
     world opens. This is the everyday case -- PyPI pages outlive their
-    max-age between two cpip runs while their content stays unchanged."""
-    from cpip.core.http import HttpResponse
-    from cpip.network.http import NetworkSession
-    from cpip_test_support.transport_mocks import make_response
+    max-age between two kpip runs while their content stays unchanged."""
+    from kpip.core.http import HttpResponse
+    from kpip.network.http import NetworkSession
+    from kpip_test_support.transport_mocks import make_response
 
     class Stale304Session(NetworkSession):
         def open_internal(

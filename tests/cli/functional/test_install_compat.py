@@ -3,8 +3,8 @@
 import os
 from pathlib import Path
 
-from cpip_test_support import (
-    CpipTestEnvironment,
+from kpip_test_support import (
+    KpipTestEnvironment,
     TestData,
     assert_all_changes,
     pyversion,
@@ -12,7 +12,7 @@ from cpip_test_support import (
 
 
 def test_debian_egg_name_workaround(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     shared_data: TestData,
     tmp_path: Path,
 ) -> None:
@@ -22,7 +22,7 @@ def test_debian_egg_name_workaround(
     Refs:
     http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=618367
     https://bugs.launchpad.net/ubuntu/+source/distribute/+bug/725178
-    https://bitbucket.org/ianb/cpip/issue/104/cpip-uninstall-on-ubuntu-linux
+    https://bitbucket.org/ianb/kpip/issue/104/kpip-uninstall-on-ubuntu-linux
 
     """
     result = script.run(
@@ -50,17 +50,17 @@ def test_debian_egg_name_workaround(
     os.renames(full_egg_info, full_mangled)
     assert os.path.isdir(full_mangled)
 
-    result2 = script.cpip("uninstall", "simplewheel", "-y")
+    result2 = script.kpip("uninstall", "simplewheel", "-y")
     assert_all_changes(result, result2, [script.venv / "build", "cache"])
 
 
 def test_setup_py_with_dos_line_endings(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     """It doesn't choke on a setup.py file that uses DOS line endings (\\r\\n).
 
-    Refs https://github.com/pypa/cpip/issues/237
+    Refs https://github.com/pypa/pip/issues/237
     """
     to_install = data.packages.joinpath("LineEndings")
-    script.cpip("install", "--no-build-isolation", to_install)
+    script.kpip("install", "--no-build-isolation", to_install)

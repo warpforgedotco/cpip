@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 
-VENDOR_ROOT = Path(__file__).parents[2] / "src" / "cpip" / "_vendor"
-LAUNCHER_ROOT = Path(__file__).parents[2] / "src" / "cpip" / "_launchers"
+VENDOR_ROOT = Path(__file__).parents[2] / "src" / "kpip" / "_vendor"
+LAUNCHER_ROOT = Path(__file__).parents[2] / "src" / "kpip" / "_launchers"
 
 LICENSE_PATHS = (
     "certifi/LICENSE",

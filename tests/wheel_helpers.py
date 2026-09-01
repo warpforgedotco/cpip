@@ -3,7 +3,7 @@
 Consolidated from what were three near-identical copies
 (tests/cli/functional/wheel_helpers.py, tests/index/wheel_helpers.py,
 tests/resolution/wheel_helpers.py) that had drifted via independent small
-feature additions: wheel_version and a standalone (non-cpip) fake PEP 517
+feature additions: wheel_version and a standalone (non-kpip) fake PEP 517
 backend, both needed by tests/index/'s tests; an unused provides_extra
 parameter and an entirely unused copy in tests/resolution/ -- nothing
 imported it, tests/resolution/test_forward_check.py gets make_wheel from
@@ -78,11 +78,11 @@ def make_sdist(
 ) -> Path:
     """Write a source distribution.
 
-    ``backend=True`` declares a build backend that imports cpip's own
-    ``build_wheel`` entry point (exercising cpip's PEP 517 entry point as
+    ``backend=True`` declares a build backend that imports kpip's own
+    ``build_wheel`` entry point (exercising kpip's PEP 517 entry point as
     an external backend). ``standalone_backend=True`` instead writes a
-    fully self-contained fake backend with no cpip dependency at all
-    (exercising cpip's *client* side against an arbitrary third-party
+    fully self-contained fake backend with no kpip dependency at all
+    (exercising kpip's *client* side against an arbitrary third-party
     backend). The two are mutually exclusive.
     """
     dist_name = project.replace("-", "_")
@@ -129,7 +129,7 @@ def make_sdist(
             )
         else:
             backend_dir.joinpath("local_backend.py").write_text(
-                "from cpip.build.build_backend import build_wheel\n",
+                "from kpip.build.build_backend import build_wheel\n",
                 encoding="utf-8",
             )
         pyproject_lines.extend(

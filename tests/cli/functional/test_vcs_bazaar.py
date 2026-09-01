@@ -6,9 +6,9 @@ import sysconfig
 from pathlib import Path
 
 import pytest
-from cpip.vcs.bazaar import Bazaar
-from cpip.vcs.versioncontrol import RemoteNotFoundError
-from cpip_test_support import CpipTestEnvironment, is_bzr_installed, need_bzr
+from kpip.vcs.bazaar import Bazaar
+from kpip.vcs.versioncontrol import RemoteNotFoundError
+from kpip_test_support import KpipTestEnvironment, is_bzr_installed, need_bzr
 
 
 @pytest.mark.skipif(
@@ -25,7 +25,7 @@ def test_ensure_bzr_available() -> None:
 
 
 @need_bzr
-def test_get_remote_url__no_remote(script: CpipTestEnvironment, tmpdir: Path) -> None:
+def test_get_remote_url__no_remote(script: KpipTestEnvironment, tmpdir: Path) -> None:
     repo_dir = tmpdir / "temp-repo"
     repo_dir.mkdir()
 

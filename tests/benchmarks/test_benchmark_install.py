@@ -9,7 +9,7 @@ installed distribution.
 (``crates/uv-bench/benches/uv.rs``) at the same 10,000-file scale. One uv
 benchmark was deliberately not ported: ``prepare_wheel_many_files`` measures
 extract-then-``validate_and_heal_record`` as a step distinct from a full
-install, but cpip has no isolated equivalent -- RECORD writing happens
+install, but kpip has no isolated equivalent -- RECORD writing happens
 inline during install (``wheel_transaction.py``), not as a separate
 heal-a-shipped-RECORD pass, so there is no matching production code path to
 benchmark in isolation.
@@ -22,20 +22,20 @@ import zipfile
 from pathlib import Path
 
 from benchmark_support import reset_caches
-from cpip.core.hashes import Hashes, hash_file
-from cpip.core.wheel import (
+from kpip.core.hashes import Hashes, hash_file
+from kpip.core.wheel import (
     read_metadata_message,
     validate_wheel,
     wheel_candidate_from_path,
 )
-from cpip.install.output import materialize_candidates
-from cpip.install.target import InstallTarget
-from cpip.platform.unpacking import untar_file, unzip_file
-from cpip.install.wheel_transaction import (
+from kpip.install.output import materialize_candidates
+from kpip.install.target import InstallTarget
+from kpip.platform.unpacking import untar_file, unzip_file
+from kpip.install.wheel_transaction import (
     WheelInstaller,
     install_wheels_transactionally,
 )
-from cpip.resolution.api import ResolutionEngine
+from kpip.resolution.api import ResolutionEngine
 from pytest_codspeed import BenchmarkFixture
 
 
@@ -163,7 +163,7 @@ def test_unpack_sdist_many_files(
     many_files_sdist: Path,
     tmp_path: Path,
 ) -> None:
-    """Port of uv's ``unpack_sdist_many_files``. cpip had no many-files sdist
+    """Port of uv's ``unpack_sdist_many_files``. kpip had no many-files sdist
     unpack benchmark at all before this -- ``test_sdist_metadata_build*``
     only exercise small, build-backend-driven sdists.
     """

@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from cpip.core.packaging import parse_requirement
-from cpip.index.provider import CandidateProvider
+from kpip.core.packaging import parse_requirement
+from kpip.index.provider import CandidateProvider
 
 _BENCHMARKS = Path(__file__).resolve().parents[1] / "benchmarks"
 if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect

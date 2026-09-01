@@ -6,9 +6,9 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from cpip.core.errors import InstallationError
-from cpip.core.utils import CURRENT_PYTHON_VERSION_DIGITS
-from cpip.core.wheel import (
+from kpip.core.errors import InstallationError
+from kpip.core.utils import CURRENT_PYTHON_VERSION_DIGITS
+from kpip.core.wheel import (
     TargetContext,
     WheelTag,
     parse_wheel_file,
@@ -257,7 +257,7 @@ def test_wheel_candidate_reuses_metadata_across_extras(
         )
     base = wheel_candidate(wheel)
     monkeypatch.setattr(
-        "cpip.core.wheel.read_metadata_message_internal",
+        "kpip.core.wheel.read_metadata_message_internal",
         lambda *args_internal, **kwargs_internal: pytest.fail("metadata was reparsed"),
     )
 
@@ -358,9 +358,9 @@ def test_parse_wheel_file_bare_name_matches_path(tmp_path: Path) -> None:
 
 
 def test_project_wheel_dependencies_marker_filtering() -> None:
-    from cpip.core.packaging import parse_requirement
-    from cpip.core.versions import Version
-    from cpip.core.wheel import WheelResolutionMetadata, project_wheel_dependencies
+    from kpip.core.packaging import parse_requirement
+    from kpip.core.versions import Version
+    from kpip.core.wheel import WheelResolutionMetadata, project_wheel_dependencies
 
     plain = WheelResolutionMetadata(
         name="pkg",
@@ -396,8 +396,8 @@ def test_project_wheel_dependencies_marker_filtering() -> None:
 
 
 def test_lazy_wheel_layout_is_read_once_and_shared_by_copies() -> None:
-    from cpip.core.versions import Version
-    from cpip.core.wheel import LazyWheelLayout, WheelCandidate
+    from kpip.core.versions import Version
+    from kpip.core.wheel import LazyWheelLayout, WheelCandidate
 
     reads: list[None] = []
 
@@ -454,7 +454,7 @@ def test_wheel_filename_validation_matches_packaging(
 ) -> None:
     from packaging.utils import InvalidWheelFilename, parse_wheel_filename
 
-    from cpip.core.wheel import _parse_wheel_filename
+    from kpip.core.wheel import _parse_wheel_filename
 
     try:
         parse_wheel_filename(filename)
@@ -467,7 +467,7 @@ def test_wheel_filename_validation_matches_packaging(
 
 
 def test_build_tag_keeps_its_number_and_suffix() -> None:
-    from cpip.core.wheel import legacy_build_tag
+    from kpip.core.wheel import legacy_build_tag
 
     assert legacy_build_tag(None) == ()
     assert legacy_build_tag("1") == (1, "")

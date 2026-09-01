@@ -9,10 +9,10 @@ import sys
 import textwrap
 from pathlib import Path
 
-import cpip
+import kpip
 import pytest
-from cpip.vcs.git import Git
-from cpip.vcs.versioncontrol import BUILTIN_BACKENDS, VersionControl, vcs
+from kpip.vcs.git import Git
+from kpip.vcs.versioncontrol import BUILTIN_BACKENDS, VersionControl, vcs
 
 
 @pytest.fixture
@@ -117,7 +117,7 @@ def test_builtin_backend_table_matches_the_backend_classes() -> None:
     for name, backend in vcs.registry_internal.items():
         module_name, dirname = table[name]
         assert dirname == backend.dirname
-        assert type(backend).__module__ == f"cpip.vcs.{module_name}"
+        assert type(backend).__module__ == f"kpip.vcs.{module_name}"
 
 
 def test_marker_detection_imports_only_the_matching_backend(tmp_path: Path) -> None:
@@ -132,19 +132,19 @@ def test_marker_detection_imports_only_the_matching_backend(tmp_path: Path) -> N
     program = textwrap.dedent(
         """
         import sys
-        from cpip.vcs.versioncontrol import vcs
+        from kpip.vcs.versioncontrol import vcs
 
         backend = vcs.get_backend_for_dir(sys.argv[1])
         loaded = sorted(
             name.rpartition(".")[2]
             for name in sys.modules
-            if name.startswith("cpip.vcs.")
+            if name.startswith("kpip.vcs.")
         )
         print(backend.name)
         print(" ".join(loaded))
         """
     )
-    source = Path(cpip.__file__).resolve().parents[1]
+    source = Path(kpip.__file__).resolve().parents[1]
 
     result = subprocess.run(
         [sys.executable, "-c", program, str(tmp_path)],

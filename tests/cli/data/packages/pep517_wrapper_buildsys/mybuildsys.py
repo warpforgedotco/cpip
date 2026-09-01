@@ -10,10 +10,10 @@ from setuptools.build_meta import (
 
 
 def build_wheel(*a, **kw):
-    if os.environ.get("CPIP_TEST_FAIL_BUILD_WHEEL"):
+    if os.environ.get("KPIP_TEST_FAIL_BUILD_WHEEL"):
         raise RuntimeError("Failing build_wheel, as requested.")
 
-    with open(os.environ["CPIP_TEST_MARKER_FILE"], "wb"):
+    with open(os.environ["KPIP_TEST_MARKER_FILE"], "wb"):
         pass
 
     return build_meta.build_wheel(*a, **kw)

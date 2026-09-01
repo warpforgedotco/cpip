@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import pytest
-from cpip_test_support import (
-    CpipTestEnvironment,
+from kpip_test_support import (
+    KpipTestEnvironment,
     TestData,
     create_basic_sdist_for_package,
     create_basic_wheel_for_package,
@@ -15,7 +15,7 @@ from cpip_test_support import (
     need_svn,
     requirements_file,
 )
-from cpip_test_support.local_repos import local_checkout
+from kpip_test_support.local_repos import local_checkout
 
 
 class ArgRecordingSdist:
@@ -33,7 +33,7 @@ class ArgRecordingSdistMaker(Protocol):
 
 @pytest.fixture
 def arg_recording_sdist_maker(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> ArgRecordingSdistMaker:
     arg_writing_setup_py_prelude = textwrap.dedent("""
         import io
@@ -66,7 +66,7 @@ def arg_recording_sdist_maker(
     return arg_recording_sdist_maker_internal
 
 
-def test_requirements_file(script: CpipTestEnvironment, data: TestData) -> None:
+def test_requirements_file(script: KpipTestEnvironment, data: TestData) -> None:
     """Test installing from a requirements file."""
     file = script.temporary_multiline_file(
         "initools-req.txt",
@@ -76,7 +76,7 @@ def test_requirements_file(script: CpipTestEnvironment, data: TestData) -> None:
         six>=1.0.0
         """,
     )
-    script.cpip_install_local(
+    script.kpip_install_local(
         "-r",
         file,
         find_links=[data.pypi_packages, data.common_wheels],
@@ -94,7 +94,7 @@ def test_requirements_file(script: CpipTestEnvironment, data: TestData) -> None:
     ],
 )
 def test_dependency_group(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     path: Any,
     groupname: str,
 ) -> None:
@@ -115,11 +115,11 @@ def test_dependency_group(
         if callable(path):
             path = path(pyproject)
         arg = f"{path}:{groupname}"
-    script.cpip_install_local("--group", arg)
+    script.kpip_install_local("--group", arg)
     script.assert_installed(**{"simple.dist": "0.1", "simplewheel": "1.0"})
 
 
-def test_multiple_dependency_groups(script: CpipTestEnvironment) -> None:
+def test_multiple_dependency_groups(script: KpipTestEnvironment) -> None:
     """Test installing from two dependency groups simultaneously."""
     script.temporary_multiline_file(
         "pyproject.toml",
@@ -129,11 +129,11 @@ def test_multiple_dependency_groups(script: CpipTestEnvironment) -> None:
             othersimple = ["simplewheel<2"]
             """,
     )
-    script.cpip_install_local("--group", "simple", "--group", "othersimple")
+    script.kpip_install_local("--group", "simple", "--group", "othersimple")
     script.assert_installed(**{"simple.dist": "0.1", "simplewheel": "1.0"})
 
 
-def test_dependency_group_with_non_normalized_name(script: CpipTestEnvironment) -> None:
+def test_dependency_group_with_non_normalized_name(script: KpipTestEnvironment) -> None:
     """Test installing from a dependency group with a non-normalized name, verifying that
     the pyproject.toml content and CLI arg are normalized to match.
     """
@@ -144,11 +144,11 @@ def test_dependency_group_with_non_normalized_name(script: CpipTestEnvironment) 
             INITOOLS = ["simplewheel==1.0"]
             """,
     )
-    script.cpip_install_local("--group", "IniTools")
+    script.kpip_install_local("--group", "IniTools")
     script.assert_installed(simplewheel="1.0")
 
 
-def test_schema_check_in_requirements_file(script: CpipTestEnvironment) -> None:
+def test_schema_check_in_requirements_file(script: KpipTestEnvironment) -> None:
     """Test installing from a requirements file with an invalid vcs schema.."""
     script.scratch_path.joinpath("file-egg-req.txt").write_text(
         "\n{}\n".format(
@@ -157,7 +157,7 @@ def test_schema_check_in_requirements_file(script: CpipTestEnvironment) -> None:
     )
 
     with pytest.raises(AssertionError):
-        script.cpip("install", "-vvv", "-r", script.scratch_path / "file-egg-req.txt")
+        script.kpip("install", "-vvv", "-r", script.scratch_path / "file-egg-req.txt")
 
 
 @pytest.mark.parametrize(
@@ -172,7 +172,7 @@ def test_schema_check_in_requirements_file(script: CpipTestEnvironment) -> None:
     ],
 )
 def test_relative_requirements_file(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     test_type: str,
     editable: bool,
@@ -200,7 +200,7 @@ def test_relative_requirements_file(
     req_path = req_path.replace(os.path.sep, "/")
     if not editable:
         with requirements_file(req_path + "\n", script.scratch_path) as reqs_file:
-            result = script.cpip(
+            result = script.kpip(
                 "install",
                 "--no-build-isolation",
                 "-vvv",
@@ -215,7 +215,7 @@ def test_relative_requirements_file(
             "-e " + req_path + "\n",
             script.scratch_path,
         ) as reqs_file:
-            result = script.cpip(
+            result = script.kpip(
                 "install",
                 "--no-build-isolation",
                 "-vvv",
@@ -231,7 +231,7 @@ def test_relative_requirements_file(
 @pytest.mark.xfail
 @pytest.mark.network
 @need_svn
-def test_multiple_requirements_files(script: CpipTestEnvironment, tmpdir: Path) -> None:
+def test_multiple_requirements_files(script: KpipTestEnvironment, tmpdir: Path) -> None:
     """Test installing from multiple nested requirements files."""
     other_lib_name, other_lib_version = "six", "1.16.0"
     script.scratch_path.joinpath("initools-req.txt").write_text(
@@ -246,7 +246,7 @@ def test_multiple_requirements_files(script: CpipTestEnvironment, tmpdir: Path) 
     script.scratch_path.joinpath(f"{other_lib_name}-req.txt").write_text(
         f"{other_lib_name}<={other_lib_version}",
     )
-    result = script.cpip("install", "-r", script.scratch_path / "initools-req.txt")
+    result = script.kpip("install", "-r", script.scratch_path / "initools-req.txt")
     assert result.files_created[script.site_packages / other_lib_name].dir
     fn = f"{other_lib_name}-{other_lib_version}.dist-info"
     assert result.files_created[script.site_packages / fn].dir
@@ -254,13 +254,13 @@ def test_multiple_requirements_files(script: CpipTestEnvironment, tmpdir: Path) 
 
 
 def test_package_in_constraints_and_dependencies(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("constraints.txt").write_text(
         "TopoRequires2==0.0.1\nTopoRequires==0.0.1",
     )
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -274,7 +274,7 @@ def test_package_in_constraints_and_dependencies(
 
 
 def test_constraints_apply_to_dependency_groups(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("constraints.txt").write_text("TopoRequires==0.0.1")
@@ -285,7 +285,7 @@ def test_constraints_apply_to_dependency_groups(
             mylibs = ["TopoRequires2"]
             """),
     )
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -300,12 +300,12 @@ def test_constraints_apply_to_dependency_groups(
 
 
 def test_multiple_constraints_files(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("outer.txt").write_text("-c inner.txt")
     script.scratch_path.joinpath("inner.txt").write_text("Upper==1.0")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -319,7 +319,7 @@ def test_multiple_constraints_files(
 
 
 def test_respect_order_in_requirements_file(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("frameworks-req.txt").write_text(
@@ -330,7 +330,7 @@ def test_respect_order_in_requirements_file(
         """),
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -354,11 +354,11 @@ def test_respect_order_in_requirements_file(
 
 
 def test_install_local_editable_with_extras(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     to_install = data.packages.joinpath("LocalExtras")
-    res = script.cpip_install_local(
+    res = script.kpip_install_local(
         "-e",
         f"{to_install}[bar]",
         allow_stderr_warning=True,
@@ -367,8 +367,8 @@ def test_install_local_editable_with_extras(
     res.assert_installed("simple", editable=False)
 
 
-def test_install_collected_dependencies_first(script: CpipTestEnvironment) -> None:
-    result = script.cpip_install_local(
+def test_install_collected_dependencies_first(script: KpipTestEnvironment) -> None:
+    result = script.kpip_install_local(
         "toporequires2",
     )
     text = [line for line in result.stdout.split("\n") if "Installing" in line][0]
@@ -376,9 +376,9 @@ def test_install_collected_dependencies_first(script: CpipTestEnvironment) -> No
 
 
 @pytest.mark.network
-def test_install_local_editable_with_subdirectory(script: CpipTestEnvironment) -> None:
+def test_install_local_editable_with_subdirectory(script: KpipTestEnvironment) -> None:
     version_pkg_path = create_test_package_with_subdirectory(script, "version_subdir")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "-e",
         "{uri}#egg=version_subpkg&subdirectory=version_subdir".format(
@@ -390,9 +390,9 @@ def test_install_local_editable_with_subdirectory(script: CpipTestEnvironment) -
 
 
 @pytest.mark.network
-def test_install_local_with_subdirectory(script: CpipTestEnvironment) -> None:
+def test_install_local_with_subdirectory(script: KpipTestEnvironment) -> None:
     version_pkg_path = create_test_package_with_subdirectory(script, "version_subdir")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "{uri}#egg=version_subpkg&subdirectory=version_subdir".format(
             uri=f"git+{version_pkg_path.as_uri()}",
@@ -404,7 +404,7 @@ def test_install_local_with_subdirectory(script: CpipTestEnvironment) -> None:
 
 @pytest.mark.usefixtures("enable_user_site")
 def test_wheel_user_with_prefix_in_pydistutils_cfg(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     if os.name == "posix":
@@ -420,7 +420,7 @@ def test_wheel_user_with_prefix_in_pydistutils_cfg(
             prefix={script.scratch_path}"""),
         )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--user",
@@ -433,11 +433,11 @@ def test_wheel_user_with_prefix_in_pydistutils_cfg(
 
 
 def test_constraints_not_installed_by_default(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("c.txt").write_text("requiresupper")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -451,11 +451,11 @@ def test_constraints_not_installed_by_default(
 
 
 def test_constraints_only_causes_error(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("c.txt").write_text("requiresupper")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "-f",
@@ -468,12 +468,12 @@ def test_constraints_only_causes_error(
 
 
 def test_constraints_local_editable_install_causes_error(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("constraints.txt").write_text("singlemodule==0.0.0")
     to_install = data.src.joinpath("singlemodule")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -490,22 +490,22 @@ def test_constraints_local_editable_install_causes_error(
 
 @pytest.mark.network
 def test_constraints_local_editable_install_pep518(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     to_install = data.src.joinpath("pep518-3.0")
 
-    script.cpip("download", "setuptools", "-d", data.packages)
-    script.cpip("install", "--no-index", "-f", data.find_links, "-e", to_install)
+    script.kpip("download", "setuptools", "-d", data.packages)
+    script.kpip("install", "--no-index", "-f", data.find_links, "-e", to_install)
 
 
 def test_constraints_local_install_causes_error(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     script.scratch_path.joinpath("constraints.txt").write_text("singlemodule==0.0.0")
     to_install = data.src.joinpath("singlemodule")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -522,14 +522,14 @@ def test_constraints_local_install_causes_error(
 
 
 def test_constraints_constrain_to_local_editable(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     to_install = data.src.joinpath("singlemodule")
     script.scratch_path.joinpath("constraints.txt").write_text(
         f"-e {to_install.as_uri()}#egg=singlemodule",
     )
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "-f",
@@ -544,14 +544,14 @@ def test_constraints_constrain_to_local_editable(
 
 
 def test_constraints_constrain_to_local(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     to_install = data.src.joinpath("singlemodule")
     script.scratch_path.joinpath("constraints.txt").write_text(
         f"{to_install.as_uri()}#egg=singlemodule",
     )
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -566,13 +566,13 @@ def test_constraints_constrain_to_local(
 
 
 def test_constrained_to_url_install_same_url(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     to_install = data.src.joinpath("singlemodule")
     constraints = f"{to_install.as_uri()}#egg=singlemodule"
     script.scratch_path.joinpath("constraints.txt").write_text(constraints)
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -587,7 +587,7 @@ def test_constrained_to_url_install_same_url(
 
 
 def test_double_install_spurious_hash_mismatch(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmpdir: Path,
     data: TestData,
 ) -> None:
@@ -605,7 +605,7 @@ def test_double_install_spurious_hash_mismatch(
         "0929b1af95fb866d6ca016b42d2e6ce53619b653",
         tmpdir,
     ) as reqs_file:
-        result = script.cpip_install_local(
+        result = script.kpip_install_local(
             "--find-links",
             data.find_links,
             "-r",
@@ -613,9 +613,9 @@ def test_double_install_spurious_hash_mismatch(
         )
         assert "Successfully installed simple-1.0" in str(result)
 
-        script.cpip("uninstall", "-y", "simple")
+        script.kpip("uninstall", "-y", "simple")
 
-        result = script.cpip_install_local(
+        result = script.kpip_install_local(
             "--find-links",
             data.find_links,
             "-r",
@@ -625,16 +625,16 @@ def test_double_install_spurious_hash_mismatch(
 
 
 def test_install_with_extras_from_constraints(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
-    script.environ["_CPIP_TEST_ENV"] = ""
+    script.environ["_KPIP_TEST_ENV"] = ""
     to_install = data.packages.joinpath("LocalExtras")
     file = script.temporary_file(
         "constraints.txt",
         f"LocalExtras[bar] @ {to_install.as_uri()}",
     )
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "-c",
         file,
         "LocalExtras",
@@ -644,7 +644,7 @@ def test_install_with_extras_from_constraints(
     assert "Constraints cannot have extras" in result.stderr
 
 
-def test_install_with_extras_from_install(script: CpipTestEnvironment) -> None:
+def test_install_with_extras_from_install(script: KpipTestEnvironment) -> None:
     create_basic_wheel_for_package(
         script,
         name="LocalExtras",
@@ -652,7 +652,7 @@ def test_install_with_extras_from_install(script: CpipTestEnvironment) -> None:
         extras={"bar": ["simple"], "baz": ["singlemodule"]},
     )
     script.scratch_path.joinpath("constraints.txt").write_text("LocalExtras")
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "--find-links",
         script.scratch_path,
         "-c",
@@ -663,9 +663,9 @@ def test_install_with_extras_from_install(script: CpipTestEnvironment) -> None:
 
 
 def test_install_with_extras_and_url_constraint(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
-    """Regression test for https://github.com/pypa/cpip/issues/12018.
+    """Regression test for https://github.com/pypa/pip/issues/12018.
 
     A URL constraint for the base package plus a requirement that asks for
     the same package with extras used to trigger an AssertionError in
@@ -681,7 +681,7 @@ def test_install_with_extras_and_url_constraint(
     script.scratch_path.joinpath("constraints.txt").write_text(
         f"LocalExtras @ {wheel_path.as_uri()}",
     )
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "--find-links",
         script.scratch_path,
         "-c",
@@ -692,16 +692,16 @@ def test_install_with_extras_and_url_constraint(
 
 
 def test_install_with_extras_joined(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
-    script.environ["_CPIP_TEST_ENV"] = ""
+    script.environ["_KPIP_TEST_ENV"] = ""
     to_install = data.packages.joinpath("LocalExtras")
     file = script.temporary_file(
         "constraints.txt",
         f"LocalExtras[bar] @ {to_install.as_uri()}",
     )
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "-c",
         file,
         "LocalExtras[baz]",
@@ -712,7 +712,7 @@ def test_install_with_extras_joined(
 
 
 def test_install_with_extras_editable_joined(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     to_install = data.packages.joinpath("LocalExtras")
@@ -720,7 +720,7 @@ def test_install_with_extras_editable_joined(
         "constraints.txt",
         f"-e LocalExtras[bar] @ {to_install.as_uri()}",
     )
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "-c",
         file,
         "LocalExtras[baz]",
@@ -731,11 +731,11 @@ def test_install_with_extras_editable_joined(
 
 
 def test_install_distribution_full_union(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     to_install = data.packages.joinpath("LocalExtras")
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         to_install,
         f"{to_install}[bar]",
         f"{to_install}[baz]",
@@ -746,24 +746,24 @@ def test_install_distribution_full_union(
 
 
 def test_install_distribution_duplicate_extras(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     to_install = data.packages.joinpath("LocalExtras")
     package_name = f"{to_install}[bar]"
-    result = script.cpip_install_local(package_name, package_name)
+    result = script.kpip_install_local(package_name, package_name)
     unexpected = f"Double requirement given: {package_name}"
     assert unexpected not in result.stderr
 
 
 def test_install_distribution_union_with_constraints(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
-    script.environ["_CPIP_TEST_ENV"] = ""
+    script.environ["_KPIP_TEST_ENV"] = ""
     to_install = data.packages.joinpath("LocalExtras")
     script.scratch_path.joinpath("constraints.txt").write_text(f"{to_install}[bar]")
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "-c",
         script.scratch_path / "constraints.txt",
         f"{to_install}[baz]",
@@ -774,12 +774,12 @@ def test_install_distribution_union_with_constraints(
 
 
 def test_install_distribution_union_with_versions(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     to_install_001 = data.packages.joinpath("LocalExtras")
     to_install_002 = data.packages.joinpath("LocalExtras-0.0.2")
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         f"{to_install_001}[bar]",
         f"{to_install_002}[baz]",
         expect_error=True,
@@ -791,11 +791,11 @@ def test_install_distribution_union_with_versions(
 
 @pytest.mark.xfail
 def test_install_distribution_union_conflicting_extras(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     to_install = data.packages.joinpath("LocalExtras-0.0.2")
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         to_install,
         f"{to_install}[bar]",
         expect_error=True,
@@ -805,7 +805,7 @@ def test_install_distribution_union_conflicting_extras(
 
 
 def test_install_unsupported_wheel_link_with_marker(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     script.scratch_path.joinpath("with-marker.txt").write_text(
         textwrap.dedent("""\
@@ -815,7 +815,7 @@ def test_install_unsupported_wheel_link_with_marker(
             req='sys_platform == "xyz"',
         ),
     )
-    result = script.cpip("install", "-r", script.scratch_path / "with-marker.txt")
+    result = script.kpip("install", "-r", script.scratch_path / "with-marker.txt")
 
     assert (
         "Ignoring asdf: markers 'sys_platform == \"xyz\"' don't match your environment"
@@ -824,12 +824,12 @@ def test_install_unsupported_wheel_link_with_marker(
 
 
 def test_install_unsupported_wheel_file(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     path = data.packages.joinpath("simple.dist-0.1-py1-none-invalid.whl")
     script.scratch_path.joinpath("wheel-file.txt").write_text(f"{path}\n")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "-r",
         script.scratch_path / "wheel-file.txt",
@@ -844,7 +844,7 @@ def test_install_unsupported_wheel_file(
 
 
 def test_config_settings_local_to_package(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     common_wheels: Path,
     arg_recording_sdist_maker: ArgRecordingSdistMaker,
 ) -> None:
@@ -891,7 +891,7 @@ def test_config_settings_local_to_package(
             """),
     )
 
-    script.cpip_install_local(
+    script.kpip_install_local(
         "--no-build-isolation",
         "-r",
         reqs_file,
@@ -915,12 +915,12 @@ def test_config_settings_local_to_package(
 class TestEditableDirectURL:
     def test_install_local_project(
         self,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
         data: TestData,
         common_wheels: Path,
     ) -> None:
         uri = (data.src / "simplewheel-2.0").as_uri()
-        script.cpip(
+        script.kpip(
             "install",
             "--no-index",
             "-e",
@@ -932,12 +932,12 @@ class TestEditableDirectURL:
 
     def test_install_local_project_with_extra(
         self,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
         data: TestData,
         common_wheels: Path,
     ) -> None:
         uri = (data.src / "requires_simple_extra").as_uri()
-        script.cpip(
+        script.kpip(
             "install",
             "--no-index",
             "-e",
@@ -952,12 +952,12 @@ class TestEditableDirectURL:
 
     def test_install_local_git_repo(
         self,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
         common_wheels: Path,
     ) -> None:
         repo_path = create_test_package(script.scratch_path, "simple")
         url = "git+" + repo_path.as_uri()
-        script.cpip(
+        script.kpip(
             "install",
             "--no-index",
             "-e",
@@ -970,12 +970,12 @@ class TestEditableDirectURL:
     @pytest.mark.network
     def test_install_remote_git_repo_with_extra(
         self,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
         data: TestData,
         common_wheels: Path,
     ) -> None:
         req = "pip-test-package[extra] @ git+https://github.com/pypa/pip-test-package"
-        script.cpip(
+        script.kpip(
             "install",
             "--no-index",
             "-e",

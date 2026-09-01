@@ -3,18 +3,18 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
-from cpip.build.metadata import MetadataDistribution
-from cpip.index.links import Link
-from cpip.install.metadata import (
+from kpip.build.metadata import MetadataDistribution
+from kpip.index.links import Link
+from kpip.install.metadata import (
     MetadataInvalid,
     SidecarMetadataInconsistent,
     check_sidecar_matches_wheel,
 )
-from cpip.network.download import Downloader
-from cpip_test_support.transport_mocks import MockResponse
+from kpip.network.download import Downloader
+from kpip_test_support.transport_mocks import MockResponse
 
 
-@patch("cpip.network.download.raise_for_status")
+@patch("kpip.network.download.raise_for_status")
 def test_download_http_url__no_directory_traversal(
     mock_raise_for_status: Mock,
     tmp_path: Path,

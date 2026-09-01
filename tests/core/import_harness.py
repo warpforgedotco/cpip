@@ -1,22 +1,22 @@
-"""Observe what a ``cpip`` invocation imports.
+"""Observe what a ``kpip`` invocation imports.
 
-Import cost is behavior in cpip: a command that loads the resolver to print
+Import cost is behavior in kpip: a command that loads the resolver to print
 its own help has regressed even when every assertion about its output still
 passes.  These helpers are the measuring instrument the startup budgets in
 ``test_import_budgets.py`` assert against.
 
 Three properties matter and each is easy to lose:
 
-- **The child must be hermetic.** A developer's ``CPIP_CACHE_DIR`` or
-  ``CPIP_QUIET`` can send an invocation down a different route, so the child
+- **The child must be hermetic.** A developer's ``KPIP_CACHE_DIR`` or
+  ``KPIP_QUIET`` can send an invocation down a different route, so the child
   environment is built from an explicit passthrough list rather than inherited.
-- **The dump must not collide with the command's own output.** ``cpip list
+- **The dump must not collide with the command's own output.** ``kpip list
   --format=json`` writes JSON to stdout, so the module list goes to the file
-  named by ``CPIP_IMPORT_DUMP`` instead.
+  named by ``KPIP_IMPORT_DUMP`` instead.
 - **The harness must not inflate what it measures.** The child script imports
-  only ``os`` and ``sys`` (plus ``runpy`` for the ``python -m cpip`` shape),
-  and :func:`baseline_modules` runs the same scaffolding with the cpip call
-  removed, so a delta counts only what cpip itself pulled in.
+  only ``os`` and ``sys`` (plus ``runpy`` for the ``python -m kpip`` shape),
+  and :func:`baseline_modules` runs the same scaffolding with the kpip call
+  removed, so a delta counts only what kpip itself pulled in.
 """
 
 from __future__ import annotations
@@ -54,13 +54,13 @@ import sys
 
 
 def _dump():
-    with open(os.environ["CPIP_IMPORT_DUMP"], "w", encoding="utf-8") as handle:
+    with open(os.environ["KPIP_IMPORT_DUMP"], "w", encoding="utf-8") as handle:
         handle.write("\\n".join(sorted(sys.modules)))
 
 
 def _argv():
-    raw = os.environ["CPIP_IMPORT_ARGV"]
-    return ["cpip", *(raw.split("\\n") if raw else [])]
+    raw = os.environ["KPIP_IMPORT_ARGV"]
+    return ["kpip", *(raw.split("\\n") if raw else [])]
 """
 
 _RUNPY_SCRIPT = f"""{_PROLOGUE}
@@ -68,7 +68,7 @@ import runpy
 
 sys.argv = _argv()
 try:
-    runpy.run_module("cpip", run_name="__main__", alter_sys=True)
+    runpy.run_module("kpip", run_name="__main__", alter_sys=True)
 except SystemExit:
     pass
 finally:
@@ -77,7 +77,7 @@ finally:
 
 _DIRECT_SCRIPT = f"""{_PROLOGUE}
 sys.argv = _argv()
-from cpip.cli.entrypoint import main
+from kpip.cli.entrypoint import main
 
 try:
     main()
@@ -95,7 +95,7 @@ _BASELINE_SCRIPTS = {
 
 @dataclass(frozen=True)
 class ImportSnapshot:
-    """Every module a single ``cpip`` invocation left in ``sys.modules``."""
+    """Every module a single ``kpip`` invocation left in ``sys.modules``."""
 
     argv: tuple[str, ...]
     direct: bool
@@ -106,11 +106,11 @@ class ImportSnapshot:
 
     @property
     def launcher(self) -> str:
-        return "console script" if self.direct else "python -m cpip"
+        return "console script" if self.direct else "python -m kpip"
 
     @property
     def first_party(self) -> frozenset[str]:
-        return frozenset(name for name in self.modules if name.startswith("cpip"))
+        return frozenset(name for name in self.modules if name.startswith("kpip"))
 
     def new_modules(self) -> frozenset[str]:
         """Modules this invocation added on top of the empty-harness baseline."""
@@ -135,8 +135,8 @@ def child_env(
 
     env = {name: os.environ[name] for name in PASSTHROUGH_ENV if name in os.environ}
     env["PYTHONPATH"] = str(SRC)
-    env["CPIP_IMPORT_DUMP"] = str(dump_path)
-    env["CPIP_IMPORT_ARGV"] = "\n".join(args)
+    env["KPIP_IMPORT_DUMP"] = str(dump_path)
+    env["KPIP_IMPORT_ARGV"] = "\n".join(args)
     if extra:
         env.update(extra)
     return env
@@ -176,9 +176,9 @@ def import_snapshot(
     env: dict[str, str] | None = None,
     direct: bool = False,
 ) -> ImportSnapshot:
-    """Run ``cpip <args>`` in a child process and report what it imported."""
+    """Run ``kpip <args>`` in a child process and report what it imported."""
 
-    with tempfile.TemporaryDirectory(prefix="cpip-import-") as scratch:
+    with tempfile.TemporaryDirectory(prefix="kpip-import-") as scratch:
         dump_path = Path(scratch) / "imported-modules.txt"
         result, modules = _run_child(
             _DIRECT_SCRIPT if direct else _RUNPY_SCRIPT,
@@ -204,7 +204,7 @@ def imported_modules(
     env: dict[str, str] | None = None,
     direct: bool = False,
 ) -> set[str]:
-    """Return the module names a ``cpip`` invocation left in ``sys.modules``."""
+    """Return the module names a ``kpip`` invocation left in ``sys.modules``."""
 
     return set(import_snapshot(args, cwd=cwd, env=env, direct=direct).modules)
 
@@ -218,7 +218,7 @@ def baseline_modules(*, direct: bool = False) -> frozenset[str]:
     matrix spans several.
     """
 
-    with tempfile.TemporaryDirectory(prefix="cpip-baseline-") as scratch:
+    with tempfile.TemporaryDirectory(prefix="kpip-baseline-") as scratch:
         dump_path = Path(scratch) / "baseline-modules.txt"
         _, modules = _run_child(
             _BASELINE_SCRIPTS[direct],
@@ -243,7 +243,7 @@ def import_timings(
     ``importtime`` expresses the import nesting.
     """
 
-    with tempfile.TemporaryDirectory(prefix="cpip-importtime-") as scratch:
+    with tempfile.TemporaryDirectory(prefix="kpip-importtime-") as scratch:
         dump_path = Path(scratch) / "imported-modules.txt"
         result = subprocess.run(
             [
@@ -314,20 +314,20 @@ def import_chain_report(
     return "\n".join(lines)
 
 
-def run_cpip(
+def run_kpip(
     args: list[str],
     *,
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run ``python -m cpip <args>`` for behavior (not import) assertions."""
+    """Run ``python -m kpip <args>`` for behavior (not import) assertions."""
 
     process_env = os.environ.copy()
     process_env["PYTHONPATH"] = str(SRC)
     if env:
         process_env.update(env)
     return subprocess.run(
-        [sys.executable, "-m", "cpip", *args],
+        [sys.executable, "-m", "kpip", *args],
         cwd=cwd or ROOT,
         env=process_env,
         text=True,

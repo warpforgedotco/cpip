@@ -1,4 +1,4 @@
-# cpip architecture
+# kpip architecture
 
 A map for finding code and keeping package boundaries. The implementation
 named in each section is the source of truth; this page only says where to
@@ -8,7 +8,7 @@ look and which rules to keep.
 
 | Question | Start at |
 | --- | --- |
-| What happens when `cpip` starts? | `cli/entrypoint.py:main` |
+| What happens when `kpip` starts? | `cli/entrypoint.py:main` |
 | Where is a command implemented? | `cli/registry.py` → `run_*` in `cli/<name>.py` |
 | How does install choose a plan? | `cli/install.py:run_install` |
 | How are dependencies resolved? | `resolution/api.py:ResolutionEngine` → `nab_provider.py` → `_vendor/nab_resolver/` |
@@ -16,12 +16,12 @@ look and which rules to keep.
 | How does an artifact become local? | `index/artifacts.py:ArtifactLocator` |
 | How are selected candidates prepared? | `install/output.py:prepare_install_candidates` |
 | How are wheels installed? | `install/wheel_transaction.py:install_wheels_transactionally` |
-| Where do persistent caches live? | the owner in the cache table below; `cli/cache.py` for `cpip cache` |
+| Where do persistent caches live? | the owner in the cache table below; `cli/cache.py` for `kpip cache` |
 | How are build backends invoked? | `build/build_backend.py:ProjectBuilder`, `build/build.py:build_wheel_from_source` |
 
 ## Process entry and dispatch
 
-The console script, `cpip.__init__:main` and `python -m cpip` all reach
+The console script, `kpip.__init__:main` and `python -m kpip` all reach
 `cli.entrypoint:main`.
 
 ```text
@@ -64,7 +64,7 @@ re-deriving locally:
 
 | Concern | Owner |
 | --- | --- |
-| Config files, `CPIP_*` overrides, source selection | `cli/config.py` |
+| Config files, `KPIP_*` overrides, source selection | `cli/config.py` |
 | Requirement collection, `--config-settings`, proxy environment | `cli/requirements.py` |
 | `--group` and dependency-group files | `cli/dependency_groups.py` |
 | Lock serialization (imports nothing; shared with fast paths) | `cli/lock_format.py` |
@@ -118,7 +118,7 @@ ResolutionEngine.resolve                     resolution/api.py
   -> ResolutionResult                        resolution/models.py
 ```
 
-`NabProvider` is the whole contract between cpip and the search
+`NabProvider` is the whole contract between kpip and the search
 (`choose_version`, `get_dependencies`, `has_satisfying_version`, `prioritize`,
 and the conflict-display hooks). Everything the resolver learns about the
 index, installed state or policy arrives through it. On failure `api.py`
@@ -158,7 +158,7 @@ Every persisted cache lives under `<cache root>/v<CACHE_VERSION>/`
 
 The cache is versioned at two levels, for two different jobs. The `v<N>` root
 retires the whole tree at once; it is the escape hatch for a change that
-crosses every store, and it is what `cpip cache purge` keys on, since that
+crosses every store, and it is what `kpip cache purge` keys on, since that
 removes every `v*` directory without knowing the stores. Each store then
 carries its own version in its name (`core/utils.py:versioned_bucket`), so a
 format change to one does not discard the others. Stores cost wildly
@@ -167,7 +167,7 @@ re-extracting every wheel is not -- and a shared version lets the cheapest
 one decide when the most expensive is thrown away. There is no migration code
 at either level: a store of another version is simply never read.
 
-Bumping one store is the whole migration. The new name is a store this cpip
+Bumping one store is the whole migration. The new name is a store this kpip
 has never written; the old one is inert until a purge.
 
 | Owner | Under `v1/` | Contents |

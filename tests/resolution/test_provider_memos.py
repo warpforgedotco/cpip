@@ -19,11 +19,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from cpip.core.packaging import parse_requirement
-from cpip.core.versions import Version
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.models import ResolutionConfig
-from cpip.resolution.nab_provider import NabProvider
+from kpip.core.packaging import parse_requirement
+from kpip.core.versions import Version
+from kpip.index.provider import CandidateProvider
+from kpip.resolution.models import ResolutionConfig
+from kpip.resolution.nab_provider import NabProvider
 
 from .test_forward_check import build_random_graph, make_wrong_package_graph, resolve
 

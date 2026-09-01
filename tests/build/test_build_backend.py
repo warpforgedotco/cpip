@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import tarfile
 import zipfile
 from pathlib import Path
 
 import pytest
-from cpip.build import build
-from cpip.build.build_backend import (
+from kpip.build import build
+from kpip.build.build_backend import (
     BackendSpec,
     ProjectBuilder,
     ProjectMetadataReader,
+    build_sdist,
     prepare_project_metadata,
 )
-from cpip.core.errors import BuildError
-from cpip.index.candidate_materialization import validate_build_requirements
+from kpip.core.errors import BuildError
+from kpip.index.candidate_materialization import validate_build_requirements
 
 
 def test_build_backend_builds_static_wheel_with_typed_marker(tmp_path: Path) -> None:
@@ -112,6 +115,27 @@ def test_build_backend_builds_editable_wheel(tmp_path: Path) -> None:
         assert pth == str((project / "src").resolve()) + "\n"
         assert "editable_pkg-1.0.dist-info/METADATA" in archive.namelist()
         assert "editable_pkg-1.0.dist-info/RECORD" in archive.namelist()
+
+
+def test_build_sdist_honors_gitignore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = write_project(tmp_path, "source-pkg", "source_pkg", "1.0")
+    project.joinpath(".gitignore").write_text(".venv/\ndist/\n", encoding="utf-8")
+    ignored_python = project / ".venv" / "bin" / "python"
+    ignored_python.parent.mkdir(parents=True)
+    ignored_python.write_text("not part of the source release", encoding="utf-8")
+    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+    sdist_dir = tmp_path / "artifacts"
+    monkeypatch.chdir(project)
+
+    sdist_name = build_sdist(str(sdist_dir))
+
+    with tarfile.open(sdist_dir / sdist_name) as archive:
+        names = set(archive.getnames())
+    assert "source_pkg-1.0/pyproject.toml" in names
+    assert "source_pkg-1.0/src/source_pkg/__init__.py" in names
+    assert not any("/.venv/" in name for name in names)
 
 
 def test_build_backend_reads_setup_py_console_scripts(tmp_path: Path) -> None:

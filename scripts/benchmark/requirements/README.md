@@ -6,7 +6,7 @@ at upstream commit `79bbface771210df216b738e9bdc7df95e5a9e6b`.
 
 The files are kept in their upstream layout so resolver inputs, constraint
 files, compiled installer inputs, backtracking cases, and project fixtures can
-be compared directly between cpip and uv. The `live` selector runs this complete
+be compared directly between kpip and uv. The `live` selector runs this complete
 corpus; `trio` selects only the Trio workload.
 
 uv is distributed under the Apache-2.0 and MIT licenses. See the upstream

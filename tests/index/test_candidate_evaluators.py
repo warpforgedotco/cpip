@@ -1,11 +1,11 @@
 import pytest
-from cpip.core.packaging import SpecifierSet, parse_requirement
-from cpip.core.versions import Version
-from cpip.core.wheel import WheelTag
-from cpip.index.candidate_evaluators import CandidateEvaluator
-from cpip.index.candidates import InstallationCandidate
-from cpip.index.links import Link
-from cpip.index.source_models import CandidateRecord, RejectedCandidate
+from kpip.core.packaging import SpecifierSet, parse_requirement
+from kpip.core.versions import Version
+from kpip.core.wheel import WheelTag
+from kpip.index.candidate_evaluators import CandidateEvaluator
+from kpip.index.candidates import InstallationCandidate
+from kpip.index.links import Link
+from kpip.index.source_models import CandidateRecord, RejectedCandidate
 
 
 def test_sort_key_uses_best_supported_tag_rank() -> None:
@@ -47,7 +47,7 @@ def test_sort_key_reuses_preparsed_wheel(
     def fail_wheel_parse(filename: str) -> None:
         raise AssertionError(f"reparsed wheel filename: {filename}")
 
-    monkeypatch.setattr("cpip.index.candidate_evaluators.Wheel", fail_wheel_parse)
+    monkeypatch.setattr("kpip.index.candidate_evaluators.Wheel", fail_wheel_parse)
 
     assert evaluator.sort_key_internal(candidate)[6] == 0
 

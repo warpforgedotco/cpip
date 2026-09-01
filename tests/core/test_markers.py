@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import packaging.markers
 import pytest
-from cpip.core.markers import (
+from kpip.core.markers import (
     InvalidMarker,
     UndefinedEnvironmentName,
     canonical_marker,
@@ -19,7 +19,7 @@ from cpip.core.markers import (
     marker_matches,
     parse_marker,
 )
-from cpip.core.packaging import marker_applies
+from kpip.core.packaging import marker_applies
 from packaging.markers import Marker
 
 LINUX = {

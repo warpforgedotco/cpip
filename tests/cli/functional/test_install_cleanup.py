@@ -1,18 +1,18 @@
 from os.path import exists
 
 import pytest
-from cpip_test_support import CpipTestEnvironment, TestData
+from kpip_test_support import KpipTestEnvironment, TestData
 
 
 @pytest.mark.network
 @pytest.mark.xfail(reason="The --build option was removed")
 def test_no_clean_option_blocks_cleaning_after_install(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     """Test --no-clean option blocks cleaning after install"""
-    build = script.base_path / "cpip-build"
-    script.cpip(
+    build = script.base_path / "kpip-build"
+    script.kpip(
         "install",
         "--no-clean",
         "--no-index",

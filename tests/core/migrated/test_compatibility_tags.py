@@ -4,7 +4,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from cpip.core import target_python
+from kpip.core import target_python
 
 
 class Testcompatibility_tags:

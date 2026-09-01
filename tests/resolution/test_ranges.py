@@ -3,7 +3,7 @@
 ``is_subset`` and ``is_disjoint`` are hot enough during resolution that they
 walk the interval lists directly instead of building a difference or an
 intersection and asking whether it is empty.  That is a local patch to a
-vendored package (see ``src/cpip/_vendor/VENDORED.md``), so these tests pin
+vendored package (see ``src/kpip/_vendor/VENDORED.md``), so these tests pin
 the equivalence rather than the implementation: they compare each predicate
 both against its original set-algebra definition and against an independent
 membership oracle over sampled points.
@@ -15,8 +15,8 @@ import inspect
 import random
 
 import pytest
-from cpip._vendor.nab_resolver import ranges as ranges_module
-from cpip._vendor.nab_resolver.ranges import (
+from kpip._vendor.nab_resolver import ranges as ranges_module
+from kpip._vendor.nab_resolver.ranges import (
     NEGATIVE_INFINITY,
     POSITIVE_INFINITY,
     Range,
@@ -100,7 +100,7 @@ def point_range(values: set[int]) -> Range:
 )
 @pytest.mark.skipif(
     not _HAS_EXTENDED_BETWEEN,
-    reason="requires cpip's extended Range.between patch",
+    reason="requires kpip's extended Range.between patch",
 )
 def test_between_preserves_bound_inclusivity(
     lower_inclusive: bool,
@@ -128,7 +128,7 @@ def test_between_preserves_bound_inclusivity(
 )
 @pytest.mark.skipif(
     not _HAS_EXTENDED_BETWEEN,
-    reason="requires cpip's extended Range.between patch",
+    reason="requires kpip's extended Range.between patch",
 )
 def test_between_rejects_empty_bound_combinations(
     lower: int,
@@ -218,7 +218,7 @@ def test_discrete_and_continuous_ranges_use_the_same_semantics() -> None:
 
 @pytest.mark.skipif(
     not _HAS_POINT_SET_CACHE,
-    reason="requires cpip's discrete-range optimization patch",
+    reason="requires kpip's discrete-range optimization patch",
 )
 def test_point_set_cache_is_reserved_for_large_discrete_ranges() -> None:
     small = point_range(set(range(15)))
@@ -235,7 +235,7 @@ def test_point_set_cache_is_reserved_for_large_discrete_ranges() -> None:
 
 @pytest.mark.skipif(
     not _HAS_POINT_SET_CACHE,
-    reason="requires cpip's discrete-range optimization patch",
+    reason="requires kpip's discrete-range optimization patch",
 )
 def test_large_discrete_binary_operation_converts_both_operands() -> None:
     small = point_range({1, 3})
@@ -248,7 +248,7 @@ def test_large_discrete_binary_operation_converts_both_operands() -> None:
 
 @pytest.mark.skipif(
     not _HAS_POINT_SET_CACHE,
-    reason="requires cpip's discrete-range optimization patch",
+    reason="requires kpip's discrete-range optimization patch",
 )
 def test_large_discrete_range_rebuilds_point_cache_after_pickle() -> None:
     import pickle
@@ -400,7 +400,7 @@ def plain(candidate: Range) -> Range:
 @pytest.mark.parametrize("seed", range(8))
 @pytest.mark.skipif(
     not _HAS_SAFE_INFINITY_COMPARISONS,
-    reason="requires cpip's infinity-bound compatibility patch",
+    reason="requires kpip's infinity-bound compatibility patch",
 )
 def test_bounds_are_never_compared_with_a_sentinel(seed: int) -> None:
     """The interval algebra over bounds that refuse foreign operands gives

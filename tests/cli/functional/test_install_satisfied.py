@@ -1,32 +1,32 @@
-"""``cpip install <name>`` for names already installed prints each
+"""``kpip install <name>`` for names already installed prints each
 requirement once and installs nothing -- on the pre-startup recognizer and on
 the normal path alike."""
 
 from __future__ import annotations
 
-from cpip_test_support import CpipTestEnvironment, TestData
+from kpip_test_support import KpipTestEnvironment, TestData
 
 
 def test_already_installed_names_are_reported_once(
-    script: CpipTestEnvironment, data: TestData
+    script: KpipTestEnvironment, data: TestData
 ) -> None:
-    script.cpip_install_local("simplewheel==2.0")
+    script.kpip_install_local("simplewheel==2.0")
 
-    result = script.cpip("install", "--no-index", "simplewheel", "simplewheel>=1.0")
+    result = script.kpip("install", "--no-index", "simplewheel", "simplewheel>=1.0")
     assert result.stdout == (
         "Requirement already satisfied: simplewheel\n"
         "Requirement already satisfied: simplewheel>=1.0\n"
     ), result.stdout
     assert not result.files_created
 
-    result = script.cpip("install", "--no-index", "-f", data.find_links, "simplewheel")
+    result = script.kpip("install", "--no-index", "-f", data.find_links, "simplewheel")
     assert result.stdout == (
         f"Looking in links: {data.find_links}\n"
         "Requirement already satisfied: simplewheel\n"
     ), result.stdout
     assert not result.files_created
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--no-binary",
@@ -40,11 +40,11 @@ def test_already_installed_names_are_reported_once(
 
 
 def test_unmet_specifier_still_resolves(
-    script: CpipTestEnvironment, data: TestData
+    script: KpipTestEnvironment, data: TestData
 ) -> None:
-    script.cpip_install_local("simplewheel==1.0")
+    script.kpip_install_local("simplewheel==1.0")
 
-    result = script.cpip(
+    result = script.kpip(
         "install", "--no-index", "-f", data.find_links, "simplewheel>=2.0"
     )
     assert "Requirement already satisfied" not in result.stdout

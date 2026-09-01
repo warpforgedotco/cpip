@@ -6,9 +6,9 @@ import os
 from pathlib import Path
 
 import pytest
-from cpip.core.errors import InstallationError
-from cpip.install.target import InstallTarget
-from cpip.install.wheel_archive import (
+from kpip.core.errors import InstallationError
+from kpip.install.target import InstallTarget
+from kpip.install.wheel_archive import (
     MemberPaths,
     destination_internal_parts_text,
     validate_member_parts,
@@ -168,7 +168,7 @@ def test_shared_resolved_roots_survive_concurrent_misses(
     plain-dict updates are atomic, so every worker sees one consistent answer."""
     from concurrent.futures import ThreadPoolExecutor
 
-    from cpip.install.wheel_archive import _resolved_parent_directory
+    from kpip.install.wheel_archive import _resolved_parent_directory
 
     roots: dict[str, str] = {}
     directories: dict[tuple[str, str], str] = {}
@@ -202,7 +202,7 @@ class TestCompiledParts:
     """
 
     def test_directory_comes_from_the_member_not_the_interpreter(self) -> None:
-        from cpip.install.wheel_archive import compiled_parts, mapped_parts
+        from kpip.install.wheel_archive import compiled_parts, mapped_parts
 
         parts = compiled_parts(mapped_parts("pkg/sub/mod.py"))
 
@@ -212,7 +212,7 @@ class TestCompiledParts:
         assert parts[-1].endswith(".pyc")
 
     def test_scripts_are_not_compiled(self) -> None:
-        from cpip.install.wheel_archive import compiled_parts, mapped_parts
+        from kpip.install.wheel_archive import compiled_parts, mapped_parts
 
         assert compiled_parts(mapped_parts("f-1.0.data/scripts/tool.py")) is None
         assert compiled_parts(mapped_parts("pkg/data.txt")) is None
@@ -229,7 +229,7 @@ class TestCompiledParts:
         """
         import importlib.util
 
-        from cpip.install.wheel_archive import compiled_parts, mapped_parts
+        from kpip.install.wheel_archive import compiled_parts, mapped_parts
 
         monkeypatch.setattr(
             importlib.util,
@@ -251,7 +251,7 @@ class TestCompiledParts:
         bytecode belongs beside the module it was built from."""
         import importlib.util
 
-        from cpip.install.wheel_archive import compiled_parts, mapped_parts
+        from kpip.install.wheel_archive import compiled_parts, mapped_parts
 
         monkeypatch.setattr(
             importlib.util,

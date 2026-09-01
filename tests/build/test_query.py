@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from cpip.build.query import (
+from kpip.build.query import (
     PackageDetails,
     _dependent_index,
     check_package_set,
     marker_allows,
     package_set_from_dependencies,
 )
-from cpip.core.packaging import canonicalize_name, parse_requirement
-from cpip.core.versions import Version
+from kpip.core.packaging import canonicalize_name, parse_requirement
+from kpip.core.versions import Version
 
 
 class FakeDistribution:
@@ -143,9 +143,9 @@ def test_dependent_index_reports_unreadable_metadata() -> None:
 
 
 def test_unsupported_distributions_computes_tags_only_when_needed(tmp_path) -> None:  # noqa: ANN001
-    from cpip.build.query import unsupported_distributions
-    from cpip.core.light_metadata import LightDistributionStore
-    from cpip.core.target_python import get_supported
+    from kpip.build.query import unsupported_distributions
+    from kpip.core.light_metadata import LightDistributionStore
+    from kpip.core.target_python import get_supported
 
     def wheel(name: str, *tags: str) -> None:
         info = tmp_path / f"{name}-1.0.dist-info"

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from benchmark_support import reset_caches
-from cpip.core.packaging import parse_requirement
+from kpip.core.packaging import parse_requirement
 from pytest_codspeed import BenchmarkFixture
 
 CORPUS_DIR = Path(__file__).with_name("corpus") / "uv_workloads"

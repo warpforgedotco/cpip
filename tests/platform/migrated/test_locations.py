@@ -8,8 +8,8 @@ import tempfile
 from typing import Any
 from unittest.mock import Mock
 
-from cpip.platform.locations.sysconfig import get_scheme
-from cpip.platform.scheme import SCHEME_KEYS
+from kpip.platform.locations.sysconfig import get_scheme
+from kpip.platform.scheme import SCHEME_KEYS
 
 if sys.platform == "win32":
     pwd = Mock()

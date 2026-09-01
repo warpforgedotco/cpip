@@ -11,9 +11,9 @@ versions rather than enumerating every tag the host satisfies.
 from __future__ import annotations
 
 import pytest
-from cpip.core import libc, wheel
-from cpip.core.utils import CURRENT_PYTHON_VERSION_DIGITS
-from cpip.core.wheel import (
+from kpip.core import libc, wheel
+from kpip.core.utils import CURRENT_PYTHON_VERSION_DIGITS
+from kpip.core.wheel import (
     WheelTag,
     _parse_wheel_filename,
     linux_platform_parts,

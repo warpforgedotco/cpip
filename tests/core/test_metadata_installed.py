@@ -3,7 +3,7 @@
 ``InstalledDistribution`` reads Name/Version/Requires-Dist through
 ``parse_metadata_headers`` instead of ``importlib.metadata``'s full RFC822
 email parsing (see ``core/metadata.py``). These tests build real dist-info
-directories on disk and assert cpip's fast path agrees exactly with what
+directories on disk and assert kpip's fast path agrees exactly with what
 ``importlib.metadata`` itself would report.
 """
 
@@ -13,8 +13,8 @@ import importlib.metadata
 from pathlib import Path
 
 import pytest
-from cpip.core.metadata import iter_installed_distributions
-from cpip.core.versions import Version
+from kpip.core.metadata import iter_installed_distributions
+from kpip.core.versions import Version
 
 
 def _write_dist_info(
@@ -107,7 +107,7 @@ def _widget_metadata(version: str) -> str:
 
 
 def test_find_installed_matches_an_uncached_scan(tmp_path: Path) -> None:
-    from cpip.core.metadata import clear_installed_index, find_installed
+    from kpip.core.metadata import clear_installed_index, find_installed
 
     site_packages = tmp_path / "site-packages"
     _write_dist_info(site_packages, "widget-1.2.3.dist-info", _widget_metadata("1.2.3"))
@@ -139,7 +139,7 @@ def test_find_installed_reads_metadata_once_per_environment(
 ) -> None:
     import builtins
 
-    from cpip.core.metadata import clear_installed_index, find_installed
+    from kpip.core.metadata import clear_installed_index, find_installed
 
     site_packages = tmp_path / "site-packages"
     for index in range(5):
@@ -168,7 +168,7 @@ def test_find_installed_notices_a_new_distribution(tmp_path: Path) -> None:
     import os
     import time
 
-    from cpip.core.metadata import clear_installed_index, find_installed
+    from kpip.core.metadata import clear_installed_index, find_installed
 
     site_packages = tmp_path / "site-packages"
     _write_dist_info(site_packages, "widget-1.2.3.dist-info", _widget_metadata("1.2.3"))
@@ -188,7 +188,7 @@ def test_find_installed_notices_a_new_distribution(tmp_path: Path) -> None:
 
 
 def test_find_installed_first_path_wins(tmp_path: Path) -> None:
-    from cpip.core.metadata import clear_installed_index, find_installed
+    from kpip.core.metadata import clear_installed_index, find_installed
 
     first = tmp_path / "first"
     second = tmp_path / "second"
@@ -204,7 +204,7 @@ def test_find_installed_first_path_wins(tmp_path: Path) -> None:
 
 
 def test_find_installed_accepts_a_generator_of_paths(tmp_path: Path) -> None:
-    from cpip.core.metadata import clear_installed_index, find_installed
+    from kpip.core.metadata import clear_installed_index, find_installed
 
     site_packages = tmp_path / "site-packages"
     _write_dist_info(site_packages, "widget-1.2.3.dist-info", _widget_metadata("1.2.3"))
@@ -223,7 +223,7 @@ def test_default_and_explicit_scans_are_cached_separately(
     stand in for the other."""
     import sys
 
-    from cpip.core import metadata
+    from kpip.core import metadata
 
     metadata.clear_installed_index()
     calls: list[object] = []
@@ -250,7 +250,7 @@ def test_default_and_explicit_scans_are_cached_separately(
 
 def _stdlib_view(paths: list[str]) -> list[tuple[str, str, str]]:
     """(name, metadata path, location) for every entry the stdlib finds
-    that carries metadata -- the same filter cpip applies."""
+    that carries metadata -- the same filter kpip applies."""
     found = []
     for dist in importlib.metadata.distributions(path=paths):
         text = dist.read_text("METADATA") or dist.read_text("PKG-INFO")
@@ -268,7 +268,7 @@ def _stdlib_view(paths: list[str]) -> list[tuple[str, str, str]]:
     return sorted(found)
 
 
-def _cpip_view(paths: list[str]) -> list[tuple[str, str, str]]:
+def _kpip_view(paths: list[str]) -> list[tuple[str, str, str]]:
     return sorted(
         (dist.name, str(dist.metadata_location), dist.location)
         for dist in iter_installed_distributions(paths=paths)
@@ -303,21 +303,21 @@ def test_directory_scan_matches_stdlib_for_every_root_spelling(
         str(root.relative_to(tmp_path)),
     ):
         monkeypatch.chdir(tmp_path)
-        view = _cpip_view([spelling])
+        view = _kpip_view([spelling])
         assert view == _stdlib_view([spelling]), spelling
         assert sorted(name for name, _, _ in view) == ["Up", "demo", "flat", "legacy"]
 
     monkeypatch.chdir(root)
-    assert _cpip_view([""]) == _stdlib_view([""])
-    assert len(_cpip_view([""])) == 4
-    assert _cpip_view(["."]) == _stdlib_view(["."])
+    assert _kpip_view([""]) == _stdlib_view([""])
+    assert len(_kpip_view([""])) == 4
+    assert _kpip_view(["."]) == _stdlib_view(["."])
 
 
 def test_directory_scan_skips_roots_the_stdlib_skips(tmp_path: Path) -> None:
     plain_file = tmp_path / "plain.txt"
     plain_file.write_text("x")
     for root in (str(tmp_path / "missing"), str(plain_file)):
-        assert _cpip_view([root]) == []
+        assert _kpip_view([root]) == []
         assert _stdlib_view([root]) == []
 
 
@@ -334,11 +334,11 @@ def test_zip_and_egg_roots_still_go_through_the_stdlib(tmp_path: Path) -> None:
     _write_dist_info(egg, "inner-7.0.dist-info", "Name: inner\nVersion: 7.0\n")
 
     for root in (str(archive), str(egg)):
-        view = _cpip_view([root])
+        view = _kpip_view([root])
         assert view == _stdlib_view([root]), root
         assert view, root
-    assert [name for name, _, _ in _cpip_view([str(archive)])] == ["zipped"]
-    assert sorted(name for name, _, _ in _cpip_view([str(egg)])) == ["inner", "legacy"]
+    assert [name for name, _, _ in _kpip_view([str(archive)])] == ["zipped"]
+    assert sorted(name for name, _, _ in _kpip_view([str(egg)])) == ["inner", "legacy"]
 
 
 def test_default_scan_honours_other_distribution_finders(
@@ -348,7 +348,7 @@ def test_default_scan_honours_other_distribution_finders(
     importer) keeps the default scan on the stdlib so its entries are seen."""
     import sys
 
-    from cpip.core.metadata import clear_installed_index, find_installed
+    from kpip.core.metadata import clear_installed_index, find_installed
 
     private = tmp_path / "private"
     _write_dist_info(
@@ -406,7 +406,7 @@ def test_installed_distribution_keeps_a_legacy_version_as_text(tmp_path: Path) -
     """A non-PEP 440 version never matches a Version (so it is replaced on
     install and ignored by the resolver) but the distribution stays
     inspectable and removable through its text."""
-    from cpip.core.metadata import clear_installed_index, find_installed
+    from kpip.core.metadata import clear_installed_index, find_installed
 
     site_packages = tmp_path / "site-packages"
     _write_dist_info(
@@ -443,7 +443,7 @@ class _RecordingHeaderCache:
 
 @pytest.fixture
 def header_cache():  # noqa: ANN201
-    from cpip.core.metadata import clear_installed_index, use_header_cache
+    from kpip.core.metadata import clear_installed_index, use_header_cache
 
     cache = _RecordingHeaderCache()
     clear_installed_index()
@@ -460,7 +460,7 @@ def test_header_cache_serves_unchanged_metadata_without_reading_it(
 ) -> None:
     import os
 
-    from cpip.index.metadata_cache import metadata_identity
+    from kpip.index.metadata_cache import metadata_identity
 
     root = tmp_path / "site-packages"
     _write_dist_info(
@@ -500,8 +500,8 @@ def test_header_cache_round_trips_through_the_wheel_metadata_store(
 ) -> None:
     """A second process finds the first one's headers on disk and reads no
     METADATA file for an unchanged environment."""
-    from cpip.core.metadata import clear_installed_index, use_header_cache
-    from cpip.index.metadata_cache import WheelMetadataCache
+    from kpip.core.metadata import clear_installed_index, use_header_cache
+    from kpip.index.metadata_cache import WheelMetadataCache
 
     root = tmp_path / "site-packages"
     for index in range(5):
@@ -528,7 +528,7 @@ def test_header_cache_round_trips_through_the_wheel_metadata_store(
         def no_reads(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
             raise AssertionError(f"METADATA read on a warm scan: {args[0]}")
 
-        monkeypatch.setattr("cpip.core.metadata._read_text_file", no_reads)
+        monkeypatch.setattr("kpip.core.metadata._read_text_file", no_reads)
         second = iter_installed_distributions(paths=[str(root)])
     finally:
         use_header_cache(None)
@@ -566,7 +566,7 @@ class TestFilteredScan:
         site_packages = tmp_path / "site-packages"
         self._populate(site_packages, 40)
 
-        from cpip.core import metadata as core_metadata
+        from kpip.core import metadata as core_metadata
 
         opened: list[object] = []
         read_text = core_metadata._read_text_file
@@ -653,7 +653,7 @@ class TestFilteredScan:
         """The trade this optimization makes, pinned.
 
         The binary distribution format requires ``.dist-info`` to be named
-        ``{escaped name}-{version}``, and both pip and cpip build it that way.
+        ``{escaped name}-{version}``, and both pip and kpip build it that way.
         A ``names=`` scan trusts that, so metadata whose directory disagrees
         with its own ``Name`` is not found -- an unfiltered scan still finds
         it. Reading every ``METADATA`` to cover a spec violation costs ~21x on
@@ -677,7 +677,7 @@ class TestFilteredScan:
 
 class TestInstalledNameMightMatch:
     def test_matches_name_and_name_with_version(self) -> None:
-        from cpip.core.names import installed_name_might_match
+        from kpip.core.names import installed_name_might_match
 
         assert installed_name_might_match(
             "widget-1.0.dist-info", ".dist-info", {"widget"}
@@ -690,7 +690,7 @@ class TestInstalledNameMightMatch:
     def test_a_longer_name_is_not_a_prefix_match(self) -> None:
         """``widget`` must not claim ``widget-extra``'s directory as its own
         beyond the version boundary, or the parsed-name check does the work."""
-        from cpip.core.names import installed_name_might_match
+        from kpip.core.names import installed_name_might_match
 
         assert installed_name_might_match(
             "widget_extra-1.0.dist-info", ".dist-info", {"widget"}
@@ -700,7 +700,7 @@ class TestInstalledNameMightMatch:
         )
 
     def test_leading_and_trailing_separators_are_dropped(self) -> None:
-        from cpip.core.names import canonicalize_installed_name
+        from kpip.core.names import canonicalize_installed_name
 
         assert canonicalize_installed_name("_widget_") == "widget"
         assert canonicalize_installed_name("Foo__Bar") == "foo-bar"

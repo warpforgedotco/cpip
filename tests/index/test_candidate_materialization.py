@@ -5,21 +5,21 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from cpip.core.errors import UnsupportedWheel
-from cpip.core.packaging import parse_requirement
-from cpip.core.versions import Version
-from cpip.core.wheel import WheelCandidate, parse_wheel
-from cpip.index.candidate_materialization import (
+from kpip.core.errors import UnsupportedWheel
+from kpip.core.packaging import parse_requirement
+from kpip.core.versions import Version
+from kpip.core.wheel import WheelCandidate, parse_wheel
+from kpip.index.candidate_materialization import (
     CandidateMaterializer,
     CandidateStream,
     LazyWheelCandidate,
     candidate_metadata_fingerprint,
 )
-from cpip.index.links import Link
-from cpip.index.provider import CandidateProvider
-from cpip.index.source_models import CandidateRecord
-from cpip.resolution.api import ResolutionEngine
-from cpip.core.archive import WheelArchive
+from kpip.index.links import Link
+from kpip.index.provider import CandidateProvider
+from kpip.index.source_models import CandidateRecord
+from kpip.resolution.api import ResolutionEngine
+from kpip.core.archive import WheelArchive
 
 from ..wheel_helpers import make_wheel
 
@@ -157,7 +157,7 @@ def test_file_url_identity_stat_is_reused(
         stats += 1
         return original_stat(*args, **kwargs)
 
-    monkeypatch.setattr("cpip.index.links.os.stat", counting_stat)
+    monkeypatch.setattr("kpip.index.links.os.stat", counting_stat)
     record = CandidateRecord(
         name="demo",
         version=Version("1.0"),
@@ -243,8 +243,8 @@ def test_materialized_candidate_keeps_the_resolver_layout(tmp_path: Path) -> Non
     """The layout built during materialization must reach the returned
     candidate: it is what lets the installer open the wheel again without
     another central-directory scan."""
-    from cpip.install.wheel_archive_runtime import RawWheelArchive, open_wheel_archive
-    from cpip.core import archive
+    from kpip.install.wheel_archive_runtime import RawWheelArchive, open_wheel_archive
+    from kpip.core import archive
 
     wheel = _write_wheel_with_script(tmp_path, "layout-pkg", "1.0")
     provider = CandidateProvider.from_options(find_links=[str(tmp_path)], no_index=True)
@@ -316,7 +316,7 @@ def test_unsupported_member_compression_falls_back_to_zipfile(tmp_path: Path) ->
     """A METADATA the raw reader cannot decode must still resolve and
     materialize -- through zipfile, as it did before the raw reader was used
     for materialization."""
-    from cpip.index.candidate_materialization import _open_resolver_wheel_archive
+    from kpip.index.candidate_materialization import _open_resolver_wheel_archive
 
     wheel = _write_wheel_with_script(
         tmp_path,

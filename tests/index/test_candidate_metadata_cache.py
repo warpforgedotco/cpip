@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cpip.core.packaging import parse_requirement
-from cpip.core.versions import Version
-from cpip.index.candidate_metadata_cache import (
+from kpip.core.packaging import parse_requirement
+from kpip.core.versions import Version
+from kpip.index.candidate_metadata_cache import (
     NAME,
     CandidateMetadataCache,
     get_candidate_metadata_cache,
 )
-from cpip.index.source_models import CandidateMetadata
+from kpip.index.source_models import CandidateMetadata
 
 
 def test_candidate_metadata_cache_roundtrip(tmp_path: Path) -> None:

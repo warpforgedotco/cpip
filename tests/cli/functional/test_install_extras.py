@@ -4,23 +4,23 @@ from os.path import join
 from pathlib import Path
 
 import pytest
-from cpip_test_support import (
-    CpipTestEnvironment,
+from kpip_test_support import (
+    KpipTestEnvironment,
     TestData,
     create_basic_wheel_for_package,
 )
 
 
-def setuptools_compatibility_constraint(script: CpipTestEnvironment) -> Path:
+def setuptools_compatibility_constraint(script: KpipTestEnvironment) -> Path:
     constraints = script.scratch_path / "build-constraints.txt"
     constraints.write_text("setuptools<72\n", encoding="utf-8")
     return constraints
 
 
 @pytest.mark.network
-def test_simple_extras_install_from_pypi(script: CpipTestEnvironment) -> None:
+def test_simple_extras_install_from_pypi(script: KpipTestEnvironment) -> None:
     """Test installing a package from PyPI using extras dependency Paste[openid]."""
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--build-constraint",
         setuptools_compatibility_constraint(script),
@@ -31,11 +31,11 @@ def test_simple_extras_install_from_pypi(script: CpipTestEnvironment) -> None:
     result.did_create(initools_folder)
 
 
-def test_extras_after_wheel(script: CpipTestEnvironment, data: TestData) -> None:
+def test_extras_after_wheel(script: KpipTestEnvironment, data: TestData) -> None:
     """Test installing a package with extras after installing from a wheel."""
     simple = script.site_packages / "simple"
 
-    no_extra = script.cpip(
+    no_extra = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -46,7 +46,7 @@ def test_extras_after_wheel(script: CpipTestEnvironment, data: TestData) -> None
     )
     no_extra.did_not_create(simple)
 
-    extra = script.cpip(
+    extra = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -59,9 +59,9 @@ def test_extras_after_wheel(script: CpipTestEnvironment, data: TestData) -> None
 
 
 @pytest.mark.network
-def test_no_extras_uninstall(script: CpipTestEnvironment) -> None:
+def test_no_extras_uninstall(script: KpipTestEnvironment) -> None:
     """No extras dependency gets uninstalled when the root package is uninstalled"""
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--build-constraint",
         setuptools_compatibility_constraint(script),
@@ -70,13 +70,13 @@ def test_no_extras_uninstall(script: CpipTestEnvironment) -> None:
     )
     result.did_create(join(script.site_packages, "paste"))
     result.did_create(join(script.site_packages, "openid"))
-    result2 = script.cpip("uninstall", "Paste", "-y")
+    result2 = script.kpip("uninstall", "Paste", "-y")
     initools_folder = script.site_packages / "openid"
     assert initools_folder not in result2.files_deleted, result.files_deleted
 
 
 def test_nonexistent_extra_warns_user_no_wheel(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     """A warning is logged telling the user that the extra option they requested
@@ -84,7 +84,7 @@ def test_nonexistent_extra_warns_user_no_wheel(
 
     This exercises source installs.
     """
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-binary=:all:",
         "--no-build-isolation",
@@ -99,7 +99,7 @@ def test_nonexistent_extra_warns_user_no_wheel(
 
 
 def test_nonexistent_extra_warns_user_with_wheel(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     """A warning is logged telling the user that the extra option they requested
@@ -107,7 +107,7 @@ def test_nonexistent_extra_warns_user_with_wheel(
 
     This exercises wheel installs.
     """
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--find-links=" + data.find_links,
@@ -118,11 +118,11 @@ def test_nonexistent_extra_warns_user_with_wheel(
 
 
 def test_nonexistent_options_listed_in_order(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     """Warn the user for each extra that doesn't exist."""
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--find-links=" + data.find_links,
@@ -137,7 +137,7 @@ def test_nonexistent_options_listed_in_order(
 
 
 def test_install_fails_if_extra_at_end(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     """Fail if order of specifiers and extras is incorrect.
@@ -149,7 +149,7 @@ def test_install_fails_if_extra_at_end(
         "requires_simple_extra>=0.1[extra]",
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--find-links=" + data.find_links,
@@ -169,7 +169,7 @@ def test_install_fails_if_extra_at_end(
     ],
 )
 def test_install_special_extra(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     specified_extra: str,
     requested_extra: str,
 ) -> None:
@@ -181,7 +181,7 @@ def test_install_special_extra(
         extras={specified_extra: ["missing_pkg"]},
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         f"pkga[{requested_extra}] @ {pkga_path.as_uri()}",
@@ -193,9 +193,9 @@ def test_install_special_extra(
 
 
 @pytest.mark.network
-def test_install_requirements_no_r_flag(script: CpipTestEnvironment) -> None:
+def test_install_requirements_no_r_flag(script: KpipTestEnvironment) -> None:
     """Beginners sometimes forget the -r and this leads to confusion"""
-    result = script.cpip("install", "requirements.txt", expect_error=True)
+    result = script.kpip("install", "requirements.txt", expect_error=True)
     assert 'literally named "requirements.txt"' in result.stdout, str(result)
 
 
@@ -210,7 +210,7 @@ def test_install_requirements_no_r_flag(script: CpipTestEnvironment) -> None:
 )
 @pytest.mark.usefixtures("data")
 def test_install_extra_merging(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     extra_to_install: str,
     simple_version: str,
 ) -> None:
@@ -228,7 +228,7 @@ def test_install_extra_merging(
     """),
     )
 
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         f"{pkga_path}{extra_to_install}",
         expect_error=False,
     )
@@ -237,13 +237,13 @@ def test_install_extra_merging(
     assert expected in result.stdout
 
 
-def test_install_extras(script: CpipTestEnvironment) -> None:
+def test_install_extras(script: KpipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "a", "1", depends=["b", "dep[x-y]"])
     create_basic_wheel_for_package(script, "b", "1", depends=["dep[x_y]"])
     create_basic_wheel_for_package(script, "dep", "1", extras={"x-y": ["meh"]})
     create_basic_wheel_for_package(script, "meh", "1")
 
-    script.cpip(
+    script.kpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -263,7 +263,7 @@ def test_install_extras(script: CpipTestEnvironment) -> None:
     ids=["separate-specifiers", "combined-specifier"],
 )
 def test_install_self_referential_extras(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     all_extra: list[str],
 ) -> None:
     """A package extra can depend on the same package with a different extra."""
@@ -280,7 +280,7 @@ def test_install_self_referential_extras(
         },
     )
 
-    script.cpip(
+    script.kpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -292,7 +292,7 @@ def test_install_self_referential_extras(
 
 
 def test_install_setuptools_extras_inconsistency(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmp_path: Path,
 ) -> None:
     test_project_path = tmp_path.joinpath("test")
@@ -307,4 +307,4 @@ def test_install_setuptools_extras_inconsistency(
                 )
             """),
     )
-    script.cpip("install", "--no-build-isolation", "--dry-run", test_project_path)
+    script.kpip("install", "--no-build-isolation", "--dry-run", test_project_path)

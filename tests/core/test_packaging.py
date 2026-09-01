@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import re
 import pytest
-from cpip.core.packaging import (
+from kpip.core.packaging import (
     InvalidSpecifier,
     SpecifierSet,
     canonicalize_name,
@@ -11,7 +11,7 @@ from cpip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
-from cpip.core.versions import InvalidVersion, Version
+from kpip.core.versions import InvalidVersion, Version
 
 
 def test_canonicalize_name() -> None:
@@ -41,7 +41,7 @@ def test_standard_requirement_skips_url_parsing(
     def fail_url_parse(value: str) -> None:
         raise AssertionError(f"parsed colon-free requirement as a URL: {value}")
 
-    monkeypatch.setattr("cpip.core.packaging.urllib.parse.urlparse", fail_url_parse)
+    monkeypatch.setattr("kpip.core.packaging.urllib.parse.urlparse", fail_url_parse)
 
     requirement = parse_requirement("demo-pkg>=1")
 
@@ -100,7 +100,7 @@ def test_version_orders_epoch_and_dev_releases() -> None:
     ["1.2.3", "1!2.0rc1.post2.dev3+linux-x86_64", "0.0.0", "1.0.dev"],
 )
 def test_version_wire_roundtrip_is_interned(raw: str) -> None:
-    from cpip.core.versions import is_version_wire
+    from kpip.core.versions import is_version_wire
 
     original = Version(raw)
     state = original.to_wire()
@@ -117,7 +117,7 @@ def test_version_wire_roundtrip_is_interned(raw: str) -> None:
 
 
 def test_is_version_wire_rejects_malformed() -> None:
-    from cpip.core.versions import is_version_wire
+    from kpip.core.versions import is_version_wire
 
     good = Version("1.2.0+a").to_wire()
     assert is_version_wire(good)
@@ -252,7 +252,7 @@ class TestVersionIsItsOwnKey:
     """
 
     def test_sentinel_comparisons_defer_to_the_sentinel(self) -> None:
-        from cpip._vendor.nab_resolver.ranges import (
+        from kpip._vendor.nab_resolver.ranges import (
             NEGATIVE_INFINITY,
             POSITIVE_INFINITY,
         )
@@ -316,7 +316,7 @@ class TestVersionIsItsOwnKey:
         assert str(restored) == str(version)
 
     def test_zero_version_is_the_shared_sentinel(self) -> None:
-        from cpip.core.versions import ZERO_VERSION
+        from kpip.core.versions import ZERO_VERSION
 
         assert ZERO_VERSION == Version("0")
         assert ZERO_VERSION < Version("0.0.1")
@@ -376,14 +376,14 @@ class TestSplitMarker:
         ],
     )
     def test_split(self, value: str, expected: tuple[str, str | None]) -> None:
-        from cpip.core.packaging import split_marker
+        from kpip.core.packaging import split_marker
 
         assert split_marker(value) == expected
 
 
 def _table_sizes() -> dict[str, int]:
-    from cpip.core import packaging
-    from cpip.core import versions
+    from kpip.core import packaging
+    from kpip.core import versions
 
     return {
         "specifier_sets": len(packaging._specifier_sets),
@@ -392,8 +392,8 @@ def _table_sizes() -> dict[str, int]:
 
 
 def _table_limits() -> dict[str, int]:
-    from cpip.core import packaging
-    from cpip.core import versions
+    from kpip.core import packaging
+    from kpip.core import versions
 
     return {
         "specifier_sets": packaging._SPECIFIER_SET_CACHE_SIZE,
@@ -517,7 +517,7 @@ class TestFrozenInternedSpecifiers:
             SpecifierSet("==1.0.")
 
     def test_contains_caches_are_bounded_per_mode(self) -> None:
-        from cpip.core import packaging
+        from kpip.core import packaging
 
         shared = SpecifierSet(">=1")
         limit = packaging._CONTAINS_CACHE_SIZE
@@ -600,7 +600,7 @@ class TestPep440ContainmentRules:
 
 
 def test_version_of_parses_text_and_passes_versions_through() -> None:
-    from cpip.core.versions import version_of
+    from kpip.core.versions import version_of
 
     assert version_of("2.0.0") == Version("2.0")
     assert version_of(Version("2.0")) is Version("2.0")

@@ -12,13 +12,13 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from cpip.core import caches
-from cpip.index import candidate_metadata_cache
-from cpip.index.candidate_metadata_cache import get_candidate_metadata_cache
-from cpip.index.metadata_cache import get_wheel_metadata_cache
-from cpip.index.release_facts_cache import get_release_facts_cache
-from cpip.index import metadata_cache
-from cpip.index import release_facts_cache
+from kpip.core import caches
+from kpip.index import candidate_metadata_cache
+from kpip.index.candidate_metadata_cache import get_candidate_metadata_cache
+from kpip.index.metadata_cache import get_wheel_metadata_cache
+from kpip.index.release_facts_cache import get_release_facts_cache
+from kpip.index import metadata_cache
+from kpip.index import release_facts_cache
 
 SHA256_PLACEHOLDER = "a" * 64
 METADATA_PLACEHOLDER = "b" * 64
@@ -92,7 +92,7 @@ def make_sdist(
     Mirrors uv's ``create_many_files_sdist`` (crates/uv-bench/benches/uv.rs):
     a single leading directory holding ``payload_files`` tiny files plus a
     minimal PKG-INFO/pyproject.toml, built directly rather than through
-    cpip's own sdist-build path -- this exists purely as archive input for
+    kpip's own sdist-build path -- this exists purely as archive input for
     ``untar_file`` benchmarks, not to exercise the build backend.
     """
     distribution = project.replace("-", "_")
@@ -129,7 +129,7 @@ def make_source_tree(root: Path, project: str = "bench-sdist") -> Path:
     (source / "pyproject.toml").write_text(
         "[build-system]\n"
         "requires = []\n"
-        'build-backend = "cpip.build.build_backend"\n\n'
+        'build-backend = "kpip.build.build_backend"\n\n'
         "[project]\n"
         f'name = "{project}"\n'
         'version = "1.0.0"\n',
@@ -338,9 +338,9 @@ def make_nab_smoke_fixture(wheelhouse: Path) -> None:
 
     Ported from ``nab-python/benchmarks/smoke/fixture.toml`` in
     https://github.com/notatallshaw/nab -- the upstream project
-    ``cpip._vendor.nab_resolver`` is vendored from. Only the packages reached
-    by the scenarios cpip can actually run are included (see
-    ``test_benchmark_nab_smoke.py`` for which of nab's scenarios have no cpip
+    ``kpip._vendor.nab_resolver`` is vendored from. Only the packages reached
+    by the scenarios kpip can actually run are included (see
+    ``test_benchmark_nab_smoke.py`` for which of nab's scenarios have no kpip
     equivalent and were dropped).
     """
     make_wheel(
@@ -596,7 +596,7 @@ def cold_metadata_cache_dir() -> str:
     """
     global _COLD_CACHE_ROOT
     if _COLD_CACHE_ROOT is None:
-        _COLD_CACHE_ROOT = Path(tempfile.mkdtemp(prefix="cpip-bench-metadata-"))
+        _COLD_CACHE_ROOT = Path(tempfile.mkdtemp(prefix="kpip-bench-metadata-"))
     directory = _COLD_CACHE_ROOT / str(next(_COLD_CACHE_SEQUENCE))
     directory.mkdir(parents=True, exist_ok=True)
     return str(directory)

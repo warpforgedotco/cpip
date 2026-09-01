@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cpip_benchmark.record import (
+from kpip_benchmark.record import (
     default_output,
     parse_thermal_limits,
     preflight_failures,

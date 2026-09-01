@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 
 from benchmark_support import reset_caches
-from cpip.core.packaging import parse_requirement
-from cpip.index.page_parsing import IndexPageParser
+from kpip.core.packaging import parse_requirement
+from kpip.index.page_parsing import IndexPageParser
 from pytest_codspeed import BenchmarkFixture
 
 SNAPSHOT = Path(__file__).with_name("corpus") / "pypi_snapshot.json"

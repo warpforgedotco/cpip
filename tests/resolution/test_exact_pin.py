@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from cpip.core.packaging import parse_requirement
-from cpip.core.versions import Version
+from kpip.core.packaging import parse_requirement
+from kpip.core.versions import Version
 
 
 def test_exact_version_reuses_the_specifiers_parsed_version() -> None:

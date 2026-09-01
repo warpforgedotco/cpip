@@ -12,7 +12,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cpip-benchmark"
+name = "kpip-benchmark"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [

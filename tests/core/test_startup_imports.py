@@ -4,12 +4,12 @@ import json
 import sys
 from pathlib import Path
 
-from import_harness import ROOT, baseline_modules, imported_modules, run_cpip
+from import_harness import ROOT, baseline_modules, imported_modules, run_kpip
 
 if sys.version_info >= (3, 11):
     from tomllib import loads
 else:
-    from cpip._vendor.tomli import loads
+    from kpip._vendor.tomli import loads
 
 
 PACKAGES = ROOT / "tests" / "cli" / "data" / "packages"
@@ -17,36 +17,36 @@ SIMPLEWHEEL = PACKAGES / "simplewheel-2.0-py2.py3-none-any.whl"
 
 
 def test_literal_version_matches_project_metadata() -> None:
-    import cpip
+    import kpip
 
     project = loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert cpip.__version__ == project["project"]["version"]
+    assert kpip.__version__ == project["project"]["version"]
 
 
 def test_top_level_help_exits_zero_and_prints_usage() -> None:
-    result = run_cpip(["--help"])
+    result = run_kpip(["--help"])
 
     assert result.returncode == 0
     assert "Usage:" in result.stdout
-    assert "cpip" in result.stdout
+    assert "kpip" in result.stdout
 
 
 def test_unknown_command_errors() -> None:
-    result = run_cpip(["definitely-not-a-command"])
+    result = run_kpip(["definitely-not-a-command"])
 
     assert result.returncode == 1
     assert "Unknown command" in result.stderr
 
 
 def test_version_prints_package_location() -> None:
-    result = run_cpip(["--version"])
+    result = run_kpip(["--version"])
 
     assert result.returncode == 0
-    assert result.stdout.startswith("cpip ")
+    assert result.stdout.startswith("kpip ")
 
 
 def test_fast_list_empty_json_output(tmp_path: Path) -> None:
-    result = run_cpip(["list", "--format=json", "--path", str(tmp_path)], cwd=tmp_path)
+    result = run_kpip(["list", "--format=json", "--path", str(tmp_path)], cwd=tmp_path)
 
     assert result.returncode == 0
     assert result.stdout == "[]\n"
@@ -60,7 +60,7 @@ def test_fast_list_reads_simple_dist_info(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    result = run_cpip(["list", "--format=json", "--path", str(tmp_path)], cwd=tmp_path)
+    result = run_kpip(["list", "--format=json", "--path", str(tmp_path)], cwd=tmp_path)
 
     assert result.returncode == 0
     assert json.loads(result.stdout) == [{"name": "demo-pkg", "version": "1.2"}]
@@ -79,10 +79,10 @@ def test_fast_lock_produces_output_on_cache_hit(tmp_path: Path) -> None:
         str(output),
         "simplewheel==2.0",
     ]
-    env = {"CPIP_CACHE_DIR": str(cache_dir)}
+    env = {"KPIP_CACHE_DIR": str(cache_dir)}
 
-    first = run_cpip(args, cwd=tmp_path, env=env)
-    second = run_cpip(args, cwd=tmp_path, env=env)
+    first = run_kpip(args, cwd=tmp_path, env=env)
+    second = run_kpip(args, cwd=tmp_path, env=env)
 
     assert first.returncode == 0
     assert second.returncode == 0
@@ -100,11 +100,11 @@ FAST_INSTALL_FORBIDDEN = frozenset(
         "json",
         "sqlite3",
         "zipfile",
-        "cpip.resolution.models",
-        "cpip.resolution.api",
-        "cpip.index.provider",
-        "cpip.cli.install",
-        "cpip.cli.requirements",
+        "kpip.resolution.models",
+        "kpip.resolution.api",
+        "kpip.index.provider",
+        "kpip.cli.install",
+        "kpip.cli.requirements",
     },
 )
 
@@ -127,12 +127,12 @@ def test_fast_local_install_stays_import_light(tmp_path: Path) -> None:
         str(wheelhouse),
         "simplewheel==2.0",
     ]
-    env = {"CPIP_CACHE_DIR": str(tmp_path / "cache")}
+    env = {"KPIP_CACHE_DIR": str(tmp_path / "cache")}
 
     modules = imported_modules(args, cwd=tmp_path, env=env)
 
     assert next(target.glob("simplewheel-2.0.dist-info"), None) is not None
-    assert "cpip.cli.fast_install" in modules
+    assert "kpip.cli.fast_install" in modules
     assert not (modules & FAST_INSTALL_FORBIDDEN), sorted(
         modules & FAST_INSTALL_FORBIDDEN
     )
@@ -159,24 +159,24 @@ def test_default_install_scans_installed_state_without_importlib_metadata(
         str(wheelhouse),
         "simplewheel==2.0",
     ]
-    env = {"CPIP_CACHE_DIR": str(tmp_path / "cache")}
+    env = {"KPIP_CACHE_DIR": str(tmp_path / "cache")}
 
     first = imported_modules(args, cwd=tmp_path, env=env) - baseline_modules()
     assert next(target.glob("simplewheel-2.0.dist-info"), None) is not None
     second = imported_modules(args, cwd=tmp_path, env=env) - baseline_modules()
 
     for modules in (first, second):
-        assert "cpip.cli.install" in modules
+        assert "kpip.cli.install" in modules
         assert "importlib.metadata" not in modules
 
 
 SATISFIED_INSTALL_FORBIDDEN = frozenset(
     {
-        "cpip.cli.install",
-        "cpip.cli.fast_install",
-        "cpip.cli.requirements",
-        "cpip.index.provider",
-        "cpip.resolution.api",
+        "kpip.cli.install",
+        "kpip.cli.fast_install",
+        "kpip.cli.requirements",
+        "kpip.index.provider",
+        "kpip.resolution.api",
         "logging",
         "argparse",
         "sqlite3",
@@ -186,7 +186,7 @@ SATISFIED_INSTALL_FORBIDDEN = frozenset(
 
 
 def test_already_satisfied_install_answers_before_startup(tmp_path: Path) -> None:
-    """``cpip install <name>`` for names already installed in a release
+    """``kpip install <name>`` for names already installed in a release
     version is answered by the pre-startup recognizer: the same lines the
     normal path prints, without loading it."""
     import os
@@ -210,12 +210,12 @@ def test_already_satisfied_install_answers_before_startup(tmp_path: Path) -> Non
             "simplewheel==2.0",
         ],
         cwd=tmp_path,
-        env={"CPIP_CACHE_DIR": str(tmp_path / "cache")},
+        env={"KPIP_CACHE_DIR": str(tmp_path / "cache")},
     )
     assert next(site.glob("simplewheel-2.0.dist-info"), None) is not None
 
     env = {
-        "CPIP_CACHE_DIR": str(tmp_path / "cache"),
+        "KPIP_CACHE_DIR": str(tmp_path / "cache"),
         "PYTHONPATH": f"{site}{os.pathsep}{SRC}",
     }
     snapshot = import_snapshot(
@@ -241,20 +241,20 @@ def test_already_satisfied_install_answers_before_startup(tmp_path: Path) -> Non
     assert "Could not find a version that satisfies" in snapshot.stderr, (
         snapshot.describe()
     )
-    assert "cpip.cli.install" in snapshot.modules
+    assert "kpip.cli.install" in snapshot.modules
 
 
 NORMAL_INSTALL_FORBIDDEN = frozenset(
     {
         "dataclasses",
         "importlib.metadata",
-        "cpip.resolution.files.parser",
-        "cpip.vcs.versioncontrol",
-        "cpip.core.subprocess",
+        "kpip.resolution.files.parser",
+        "kpip.vcs.versioncontrol",
+        "kpip.core.subprocess",
         "html.parser",
         "tomllib",
-        "cpip._vendor.tomli",
-        "cpip.build.build_backend",
+        "kpip._vendor.tomli",
+        "kpip.build.build_backend",
         "email.message",
         "configparser",
     },
@@ -278,12 +278,12 @@ def test_normal_local_install_stays_import_light(tmp_path: Path) -> None:
         str(wheelhouse),
         "simplewheel==2.0",
     ]
-    env = {"CPIP_CACHE_DIR": str(tmp_path / "cache")}
+    env = {"KPIP_CACHE_DIR": str(tmp_path / "cache")}
 
     modules = imported_modules(args, cwd=tmp_path, env=env) - baseline_modules()
 
     assert next(target.glob("simplewheel-2.0.dist-info"), None) is not None
-    assert "cpip.cli.install" in modules
+    assert "kpip.cli.install" in modules
     forbidden = NORMAL_INSTALL_FORBIDDEN
     if sys.version_info >= (3, 14):
         forbidden = forbidden - {"dataclasses"}
@@ -293,18 +293,18 @@ def test_normal_local_install_stays_import_light(tmp_path: Path) -> None:
 FAST_LIST_FORBIDDEN = frozenset(
     {
         "typing",
-        "cpip.cli.fast_install",
-        "cpip.core.packaging",
-        "cpip.cli.list",
-        "cpip.build.query",
-        "cpip.core.metadata",
+        "kpip.cli.fast_install",
+        "kpip.core.packaging",
+        "kpip.cli.list",
+        "kpip.build.query",
+        "kpip.core.metadata",
         "argparse",
     }
 )
 
 
 def test_plain_freeze_stays_import_light(tmp_path: Path) -> None:
-    """``cpip freeze`` with no options is the fast path over sys.path."""
+    """``kpip freeze`` with no options is the fast path over sys.path."""
     import os
 
     from import_harness import SRC, import_snapshot
@@ -321,8 +321,8 @@ def test_plain_freeze_stays_import_light(tmp_path: Path) -> None:
     snapshot = import_snapshot(["freeze", "--exclude-editable"], cwd=tmp_path, env=env)
     assert "demo-pkg==1.2\n" in snapshot.stdout, snapshot.describe()
     forbidden = FAST_LIST_FORBIDDEN | {
-        "cpip.cli.freeze",
-        "cpip.core.light_metadata",
+        "kpip.cli.freeze",
+        "kpip.core.light_metadata",
         "logging",
     }
     assert not (set(snapshot.modules) & forbidden), sorted(
@@ -331,7 +331,7 @@ def test_plain_freeze_stays_import_light(tmp_path: Path) -> None:
 
 
 def test_plain_list_stays_import_light(tmp_path: Path) -> None:
-    """``cpip list`` with no options is the fast path over sys.path."""
+    """``kpip list`` with no options is the fast path over sys.path."""
     import os
 
     from import_harness import SRC, import_snapshot
@@ -370,5 +370,5 @@ def test_fast_list_stays_import_light(tmp_path: Path) -> None:
         - baseline_modules()
     )
 
-    assert "cpip.cli.fast" in modules
+    assert "kpip.cli.fast" in modules
     assert not (modules & FAST_LIST_FORBIDDEN), sorted(modules & FAST_LIST_FORBIDDEN)

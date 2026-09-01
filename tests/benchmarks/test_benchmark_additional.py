@@ -8,32 +8,32 @@ from pathlib import Path
 from typing import Any, cast
 
 from benchmark_support import make_wheel, reset_caches
-from cpip._vendor.nab_resolver import incompat_index, propagate
-from cpip.build.build_backend import ProjectBuilder, prepare_project_metadata
-from cpip.build.metadata import InstalledDistributionStore
-from cpip._vendor.nab_resolver.ranges import Range
-from cpip._vendor.nab_resolver.resolver import Resolver
-from cpip._vendor.nab_resolver.types import (
+from kpip._vendor.nab_resolver import incompat_index, propagate
+from kpip.build.build_backend import ProjectBuilder, prepare_project_metadata
+from kpip.build.metadata import InstalledDistributionStore
+from kpip._vendor.nab_resolver.ranges import Range
+from kpip._vendor.nab_resolver.resolver import Resolver
+from kpip._vendor.nab_resolver.types import (
     Incompatibility,
     IncompatibilityCause,
     Term,
 )
-from cpip.core.errors import BuildError
-from cpip.core.packaging import SpecifierSet, parse_requirement
-from cpip.core.wheel import read_metadata_message
-from cpip.index.candidate_materialization import (
+from kpip.core.errors import BuildError
+from kpip.core.packaging import SpecifierSet, parse_requirement
+from kpip.core.wheel import read_metadata_message
+from kpip.index.candidate_materialization import (
     CandidateMaterializer,
     validate_build_requirements,
 )
-from cpip.index.candidates import InstallationCandidate
-from cpip.index.links import Link
-from cpip.index.provider import CandidateProvider
-from cpip.install.target import InstallTarget
-from cpip.install.uninstall import DistributionUninstaller
-from cpip.platform.unpacking import unzip_file
-from cpip.install.wheel_transaction import WheelInstaller
-from cpip.resolution.api import ResolutionEngine
-from cpip.resolution.files import parse_requirements
+from kpip.index.candidates import InstallationCandidate
+from kpip.index.links import Link
+from kpip.index.provider import CandidateProvider
+from kpip.install.target import InstallTarget
+from kpip.install.uninstall import DistributionUninstaller
+from kpip.platform.unpacking import unzip_file
+from kpip.install.wheel_transaction import WheelInstaller
+from kpip.resolution.api import ResolutionEngine
+from kpip.resolution.files import parse_requirements
 from pytest_codspeed import BenchmarkFixture
 
 

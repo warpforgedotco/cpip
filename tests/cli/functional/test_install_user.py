@@ -1,4 +1,4 @@
-"""tests specific to "cpip install --user" """
+"""tests specific to "kpip install --user" """
 
 import os
 import textwrap
@@ -6,15 +6,15 @@ from os.path import curdir, isdir, isfile
 from pathlib import Path
 
 import pytest
-from cpip_test_support import (
-    CpipTestEnvironment,
+from kpip_test_support import (
+    KpipTestEnvironment,
     TestData,
     create_basic_wheel_for_package,
     need_svn,
     pyversion,  # noqa: F401
 )
-from cpip_test_support.local_repos import local_checkout
-from cpip_test_support.venv import VirtualEnvironment
+from kpip_test_support.local_repos import local_checkout
+from kpip_test_support.venv import VirtualEnvironment
 
 
 def patch_dist_in_site_packages(virtualenv: VirtualEnvironment) -> None:
@@ -22,7 +22,7 @@ def patch_dist_in_site_packages(virtualenv: VirtualEnvironment) -> None:
         def dist_in_site_packages(dist):
             return False
 
-        from cpip.build.metadata import InstalledMetadataDistribution
+        from kpip.build.metadata import InstalledMetadataDistribution
         InstalledMetadataDistribution.in_site_packages = property(dist_in_site_packages)
     """)
 
@@ -31,11 +31,11 @@ def patch_dist_in_site_packages(virtualenv: VirtualEnvironment) -> None:
 class Tests_UserSite:
     def test_reset_env_system_site_packages_usersite(
         self,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
         data: TestData,
     ) -> None:
         """Check user site works as expected."""
-        script.cpip_install_local("--user", "INITools==0.2", "-f", data.pypi_packages)
+        script.kpip_install_local("--user", "INITools==0.2", "-f", data.pypi_packages)
         result = script.run(
             "python",
             "-c",
@@ -50,13 +50,13 @@ class Tests_UserSite:
     @need_svn
     def test_install_subversion_usersite_editable_with_distribute(
         self,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
         tmpdir: Path,
     ) -> None:
         """Test installing current directory ('.') into usersite after installing
         distribute
         """
-        result = script.cpip(
+        result = script.kpip(
             "install",
             "--user",
             "-e",
@@ -71,12 +71,12 @@ class Tests_UserSite:
 
     def test_install_from_current_directory_into_usersite(
         self,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
         data: TestData,
     ) -> None:
         """Test installing current directory ('.') into usersite"""
         run_from = data.packages.joinpath("FSPkg")
-        result = script.cpip(
+        result = script.kpip(
             "install",
             "--no-build-isolation",
             "-vvv",
@@ -94,13 +94,13 @@ class Tests_UserSite:
     def test_install_user_venv_nositepkgs_fails(
         self,
         virtualenv: VirtualEnvironment,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
         data: TestData,
     ) -> None:
         """User install in virtualenv (with no system packages) fails with message"""
         virtualenv.user_site_packages = False
         run_from = data.packages.joinpath("FSPkg")
-        result = script.cpip(
+        result = script.kpip(
             "install",
             "--user",
             curdir,
@@ -114,13 +114,13 @@ class Tests_UserSite:
 
     def test_install_user_conflict_in_usersite(
         self,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
         data: TestData,
     ) -> None:
         """Test user install with conflict in usersite updates usersite."""
-        script.cpip_install_local("--user", "INITools==0.2", "-f", data.pypi_packages)
+        script.kpip_install_local("--user", "INITools==0.2", "-f", data.pypi_packages)
 
-        result2 = script.cpip_install_local(
+        result2 = script.kpip_install_local(
             "--user",
             "INITools==0.1",
             "-f",
@@ -137,7 +137,7 @@ class Tests_UserSite:
     def test_install_user_conflict_in_globalsite(
         self,
         virtualenv: VirtualEnvironment,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
     ) -> None:
         """Test user install with conflict in global site ignores site and
         installs to usersite
@@ -147,14 +147,14 @@ class Tests_UserSite:
 
         patch_dist_in_site_packages(virtualenv)
 
-        script.cpip(
+        script.kpip(
             "install",
             "--no-index",
             "--find-links",
             script.scratch_path,
             "initools==0.2",
         )
-        result2 = script.cpip(
+        result2 = script.kpip(
             "install",
             "--no-index",
             "--find-links",
@@ -178,7 +178,7 @@ class Tests_UserSite:
     def test_upgrade_user_conflict_in_globalsite(
         self,
         virtualenv: VirtualEnvironment,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
     ) -> None:
         """Test user install/upgrade with conflict in global site ignores site and
         installs to usersite
@@ -188,14 +188,14 @@ class Tests_UserSite:
 
         patch_dist_in_site_packages(virtualenv)
 
-        script.cpip(
+        script.kpip(
             "install",
             "--no-index",
             "--find-links",
             script.scratch_path,
             "initools==0.2",
         )
-        result2 = script.cpip(
+        result2 = script.kpip(
             "install",
             "--no-index",
             "--find-links",
@@ -220,7 +220,7 @@ class Tests_UserSite:
     def test_install_user_conflict_in_globalsite_and_usersite(
         self,
         virtualenv: VirtualEnvironment,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
     ) -> None:
         """Test user install with conflict in globalsite and usersite ignores
         global site and updates usersite.
@@ -237,14 +237,14 @@ class Tests_UserSite:
 
         patch_dist_in_site_packages(virtualenv)
 
-        script.cpip(
+        script.kpip(
             "install",
             "--no-index",
             "--find-links",
             script.scratch_path,
             "initools==0.2",
         )
-        script.cpip(
+        script.kpip(
             "install",
             "--no-index",
             "--find-links",
@@ -252,7 +252,7 @@ class Tests_UserSite:
             "--user",
             "initools==0.3",
         )
-        result3 = script.cpip(
+        result3 = script.kpip(
             "install",
             "--no-index",
             "--find-links",
@@ -275,7 +275,7 @@ class Tests_UserSite:
 
     def test_install_user_in_global_virtualenv_with_conflict_fails(
         self,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
     ) -> None:
         """Test user install in --system-site-packages virtualenv with conflict in
         site fails.
@@ -283,7 +283,7 @@ class Tests_UserSite:
         create_basic_wheel_for_package(script, "pkg", "0.1")
         create_basic_wheel_for_package(script, "pkg", "0.2")
 
-        script.cpip(
+        script.kpip(
             "install",
             "--no-cache-dir",
             "--no-index",
@@ -292,7 +292,7 @@ class Tests_UserSite:
             "pkg==0.2",
         )
 
-        result2 = script.cpip(
+        result2 = script.kpip(
             "install",
             "--no-cache-dir",
             "--no-index",
@@ -305,7 +305,7 @@ class Tests_UserSite:
         resultp = script.run(
             "python",
             "-c",
-            "from cpip.build.metadata import InstalledDistributionStore; "
+            "from kpip.build.metadata import InstalledDistributionStore; "
             "print(InstalledDistributionStore().find('pkg').location)",
         )
         dist_location = resultp.stdout.strip()
@@ -317,7 +317,7 @@ class Tests_UserSite:
 
     def test_install_user_nositepkgs_fails(
         self,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
         data: TestData,
     ) -> None:
         """Test that --user install fails when user site-packages are disabled."""
@@ -335,9 +335,9 @@ class Tests_UserSite:
             sys.base_prefix = sys.prefix
             site.ENABLE_USER_SITE = False
 
-            # Set up sys.argv to simulate running cpip install --user
+            # Set up sys.argv to simulate running kpip install --user
             sys.argv = [
-                "cpip", "install",
+                "kpip", "install",
                 "--no-cache-dir",
                 "--no-index",
                 "--find-links",
@@ -346,8 +346,8 @@ class Tests_UserSite:
                 "--user"
             ]
 
-            # Import and run cpip's main
-            from cpip.cli.main import main
+            # Import and run kpip's main
+            from kpip.cli.main import main
             sys.exit(main())
             """),
         )

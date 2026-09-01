@@ -3,23 +3,23 @@
 Source: ``nab-python/benchmarks/deterministic_smoke.py`` and
 ``nab-python/benchmarks/smoke/{fixture,scenarios}.toml`` in
 https://github.com/notatallshaw/nab -- the upstream project
-``cpip._vendor.nab_resolver`` is vendored from. Every resolve in that suite
+``kpip._vendor.nab_resolver`` is vendored from. Every resolve in that suite
 is checked for its exact pins, not just wall time; these benchmarks preserve
 that discipline.
 
-Of nab's 11 smoke scenarios, 4 have no cpip equivalent and are intentionally
+Of nab's 11 smoke scenarios, 4 have no kpip equivalent and are intentionally
 not ported:
 
-* ``strategy-lowest`` / ``strategy-lowest-direct`` -- cpip's
-  :class:`~cpip.resolution.api.ResolutionEngine` has no "prefer lowest
+* ``strategy-lowest`` / ``strategy-lowest-direct`` -- kpip's
+  :class:`~kpip.resolution.api.ResolutionEngine` has no "prefer lowest
   candidate" resolution-strategy knob; it always walks candidates
   highest-first.
-* ``universal-aligned`` / ``universal-independent`` -- cpip has no
+* ``universal-aligned`` / ``universal-independent`` -- kpip has no
   cross-target (multi-Python/multi-platform) "universal" resolve mode.
 
 nab also resolves against an arbitrary configured target Python version
-independent of the host interpreter; cpip's marker evaluation
-(``cpip.core.packaging.default_environment``) always reads the actual
+independent of the host interpreter; kpip's marker evaluation
+(``kpip.core.packaging.default_environment``) always reads the actual
 running interpreter. ``test_nab_smoke_extra_and_python_marker`` accounts for
 that by computing its marker-gated expectation from ``sys.version_info``
 instead of hardcoding nab's Python-3.11 assumption.
@@ -31,10 +31,10 @@ import sys
 from pathlib import Path
 
 from benchmark_support import reset_caches
-from cpip.core.errors import ResolutionError
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.api import ResolutionEngine
-from cpip.resolution.models import ResolutionResult
+from kpip.core.errors import ResolutionError
+from kpip.index.provider import CandidateProvider
+from kpip.resolution.api import ResolutionEngine
+from kpip.resolution.models import ResolutionResult
 from pytest_codspeed import BenchmarkFixture
 
 

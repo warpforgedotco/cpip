@@ -3,8 +3,8 @@ from __future__ import annotations
 import marshal
 from pathlib import Path
 
-from cpip.core.versions import Version
-from cpip.index.catalog_cache import (
+from kpip.core.versions import Version
+from kpip.index.catalog_cache import (
     CHOICE_HEADER,
     WHEEL_RECORD,
     CatalogChoices,
@@ -20,9 +20,9 @@ from cpip.index.catalog_cache import (
     save_summary_value,
     summary_key,
 )
-from cpip.index.links import Link
-from cpip.index.source_models import MetadataFile
-from cpip.network.cache import SafeFileCache
+from kpip.index.links import Link
+from kpip.index.source_models import MetadataFile
+from kpip.network.cache import SafeFileCache
 
 
 def test_catalog_cache_roundtrip(tmp_path: Path) -> None:
@@ -86,7 +86,7 @@ def test_catalog_summary_hands_off_decoded_catalog(tmp_path: Path) -> None:
     cache.delete(summary_key(page_url))
 
     assert load_summary(cache, page_url) is not None
-    pending = getattr(cache, "_cpip_pending_catalogs")
+    pending = getattr(cache, "_kpip_pending_catalogs")
     assert page_url in pending
     assert load_catalog(cache, page_url) is not None
     assert page_url not in pending
@@ -217,7 +217,7 @@ def test_catalog_with_an_unparseable_version_is_a_miss(tmp_path: Path) -> None:
     ]
     cache.set_atomic(
         cache_key(page_url),
-        marshal.dumps(("cpip-index-catalog", groups, [])),
+        marshal.dumps(("kpip-index-catalog", groups, [])),
     )
 
     assert load_catalog(cache, page_url) is None
@@ -244,7 +244,7 @@ def test_catalog_with_an_unparseable_upload_time_is_a_miss(tmp_path: Path) -> No
     groups = [("demo", "1.0.0", [(WHEEL_RECORD, record)], [])]
     cache.set_atomic(
         cache_key(page_url),
-        marshal.dumps(("cpip-index-catalog", groups, [])),
+        marshal.dumps(("kpip-index-catalog", groups, [])),
     )
 
     assert load_catalog(cache, page_url) is None

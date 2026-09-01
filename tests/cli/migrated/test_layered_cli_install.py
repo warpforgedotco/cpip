@@ -2,24 +2,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cpip.cli import install, main
+from kpip.cli import install, main
 
 
-def test_layered_cli_uses_public_cpip_install_services() -> None:
+def test_layered_cli_uses_public_kpip_install_services() -> None:
     source = Path(install.__file__).read_text()
-    assert "from cpip.install.metadata import (" in source
+    assert "from kpip.install.metadata import (" in source
     assert "prepare_editable_source," in source
     assert "def _prepare_editable_source" not in source
 
 
-def test_layered_cli_uninstall_dispatches_to_cpip_install(monkeypatch, capsys) -> None:
+def test_layered_cli_uninstall_dispatches_to_kpip_install(monkeypatch, capsys) -> None:
     removed: list[str] = []
 
     def fake_uninstall(name: str) -> bool:
         removed.append(name)
         return True
 
-    from cpip.install.requirements import RequirementInstaller
+    from kpip.install.requirements import RequirementInstaller
 
     monkeypatch.setattr(
         RequirementInstaller,
