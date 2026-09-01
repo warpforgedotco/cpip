@@ -36,29 +36,26 @@ installation are treated as first-class performance problems.
 
 ## Upstream is the destination
 
-kpip now contains a working body of performance engineering intended to flow
-back to pip and the wider Python packaging ecosystem. The current goal is to
-determine how best to upstream that work: identify the improvements that
-transfer cleanly, separate them into focused and reviewable changes, adapt them
-to pip's architecture and compatibility requirements, and validate them in
-pip's own test and benchmark environments.
+The performance work in kpip has already been implemented and exercised as a
+complete system. The focus now is translating its useful results into changes
+that pip and the wider Python packaging ecosystem can adopt.
 
-The repository is not expected to map commit-for-commit onto pip. Its
-implementation combines several architectural changes and, in places, narrows
-compatibility to make performance gains measurable. Upstreaming means
-extracting the underlying ideas and evidence, then reshaping them into changes
-that fit pip's maintenance and compatibility constraints.
+That will not be a commit-for-commit transfer. kpip combines architectural
+changes and, in places, narrows compatibility to isolate performance effects.
+Each candidate improvement must be separated into a focused proposal, adapted
+to pip's architecture and compatibility contract, and validated in pip's own
+test and benchmark environments.
 
-Each upstream proposal should carry forward:
+An upstream proposal should carry forward:
 
 - a reproducible measurement of the problem and the improvement;
 - behavioral and compatibility tests that preserve pip's contract;
 - the smallest maintainable implementation that can be proposed upstream; and
 - a clear account of tradeoffs, limitations, and results that did not hold up.
 
-Negative results matter too. If an optimization does not survive realistic
-workloads or cannot preserve behavior, the useful outcome is the evidence—not a
-performance claim.
+Negative results are useful too. If an optimization does not survive realistic
+workloads or cannot preserve behavior, the evidence is still worth
+preserving.
 
 ## Installation
 
