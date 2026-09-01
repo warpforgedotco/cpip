@@ -1,5 +1,6 @@
 [project]
 name = "kpip"
+# Bump with `uv run scripts/bump_version.py --bump patch`; it syncs __version__.
 version = "0.0.1"
 description = "Pip Reimagined for Performance"
 license = "MIT"
