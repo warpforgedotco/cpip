@@ -1,16 +1,16 @@
 [project]
-name = "cpip-benchmark"
+name = "kpip-benchmark"
 version = "0.0.1"
-description = "Hyperfine benchmark harness for cpip"
+description = "Hyperfine benchmark harness for kpip"
 requires-python = ">=3.10"
 dependencies = [
   "pytest",
 ]
 
 [project.scripts]
-cpip-bench = "cpip_benchmark.cli:main"
-cpip-bench-compare = "cpip_benchmark.compare:main"
-cpip-bench-record = "cpip_benchmark.record:main"
+kpip-bench = "kpip_benchmark.cli:main"
+kpip-bench-compare = "kpip_benchmark.compare:main"
+kpip-bench-record = "kpip_benchmark.record:main"
 
 [build-system]
 requires = ["hatchling"]

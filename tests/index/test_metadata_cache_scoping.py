@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from cpip.index.candidate_materialization import CandidateMaterializer
-from cpip.index.links import Link
+from kpip.index.candidate_materialization import CandidateMaterializer
+from kpip.index.links import Link
 
 
 def materializer_with_cache(cache: object) -> CandidateMaterializer:

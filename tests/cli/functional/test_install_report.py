@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from cpip.core.urls import url_to_path
-from cpip_test_support import CpipTestEnvironment, TestData
+from kpip.core.urls import url_to_path
+from kpip_test_support import KpipTestEnvironment, TestData
 from packaging.utils import canonicalize_name
 
 
@@ -15,12 +15,12 @@ def install_dict_internal(report: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_install_report_basic(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     shared_data: TestData,
     tmp_path: Path,
 ) -> None:
     report_path = tmp_path / "report.json"
-    script.cpip(
+    script.kpip(
         "install",
         "simplewheel",
         "--dry-run",
@@ -52,13 +52,13 @@ def test_install_report_basic(
 
 
 def test_install_report_dep(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     shared_data: TestData,
     tmp_path: Path,
 ) -> None:
     """Test dependencies are present in the install report with requested=False."""
     report_path = tmp_path / "report.json"
-    script.cpip(
+    script.kpip(
         "install",
         "--no-build-isolation",
         "require_simple",
@@ -76,7 +76,7 @@ def test_install_report_dep(
 
 
 def test_yanked_version(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     tmp_path: Path,
 ) -> None:
@@ -85,7 +85,7 @@ def test_yanked_version(
     matches a version specifier that "pins" to an exact version (PEP 592).
     """
     report_path = tmp_path / "report.json"
-    script.cpip(
+    script.kpip(
         "install",
         "--no-build-isolation",
         "simple==3.0",
@@ -105,7 +105,7 @@ def test_yanked_version(
 
 
 def test_skipped_yanked_version(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     tmp_path: Path,
 ) -> None:
@@ -114,7 +114,7 @@ def test_skipped_yanked_version(
     matches a version specifier that "pins" to an exact version (PEP 592).
     """
     report_path = tmp_path / "report.json"
-    script.cpip(
+    script.kpip(
         "install",
         "--no-build-isolation",
         "simple",
@@ -142,7 +142,7 @@ def test_skipped_yanked_version(
     ],
 )
 def test_install_report_index(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmp_path: Path,
     specifiers: tuple[str, ...],
 ) -> None:
@@ -150,7 +150,7 @@ def test_install_report_index(
     report_path = tmp_path / "report.json"
     build_constraints = tmp_path / "build-constraints.txt"
     build_constraints.write_text("setuptools<72\n", encoding="utf-8")
-    script.cpip(
+    script.kpip(
         "install",
         "--build-constraint",
         str(build_constraints),
@@ -179,14 +179,14 @@ def test_install_report_index(
 
 @pytest.mark.network
 def test_install_report_index_multiple_extras(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmp_path: Path,
 ) -> None:
     """Test report for sdist obtained from index, with multiple extras requested."""
     report_path = tmp_path / "report.json"
     build_constraints = tmp_path / "build-constraints.txt"
     build_constraints.write_text("setuptools<72\n", encoding="utf-8")
-    script.cpip(
+    script.kpip(
         "install",
         "--build-constraint",
         str(build_constraints),
@@ -203,13 +203,13 @@ def test_install_report_index_multiple_extras(
 
 
 def test_install_report_direct_archive(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmp_path: Path,
     shared_data: TestData,
 ) -> None:
     """Test report for direct URL archive."""
     report_path = tmp_path / "report.json"
-    script.cpip(
+    script.kpip(
         "install",
         str(shared_data.root / "packages" / "simplewheel-1.0-py2.py3-none-any.whl"),
         "--dry-run",
@@ -238,13 +238,13 @@ def test_install_report_direct_archive(
 
 @pytest.mark.network
 def test_install_report_vcs_and_wheel_cache(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmp_path: Path,
 ) -> None:
     """Test report for VCS reference, and interactions with the wheel cache."""
     cache_dir = tmp_path / "cache"
     report_path = tmp_path / "report.json"
-    script.cpip(
+    script.kpip(
         "install",
         "git+https://github.com/pypa/pip-test-package"
         "@5547fa909e83df8bd743d3978d6667497983a4b7",
@@ -255,20 +255,20 @@ def test_install_report_vcs_and_wheel_cache(
     )
     report = json.loads(report_path.read_text())
     assert len(report["install"]) == 1
-    cpip_test_package_report = report["install"][0]
-    assert cpip_test_package_report["is_direct"] is True
-    assert cpip_test_package_report["requested"] is True
+    kpip_test_package_report = report["install"][0]
+    assert kpip_test_package_report["is_direct"] is True
+    assert kpip_test_package_report["requested"] is True
     assert (
-        cpip_test_package_report["download_info"]["url"]
+        kpip_test_package_report["download_info"]["url"]
         == "https://github.com/pypa/pip-test-package"
     )
-    assert cpip_test_package_report["download_info"]["vcs_info"]["vcs"] == "git"
+    assert kpip_test_package_report["download_info"]["vcs_info"]["vcs"] == "git"
     assert (
-        cpip_test_package_report["download_info"]["vcs_info"]["commit_id"]
+        kpip_test_package_report["download_info"]["vcs_info"]["commit_id"]
         == "5547fa909e83df8bd743d3978d6667497983a4b7"
     )
     report_path.unlink()
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "pip-test-package @ git+https://github.com/pypa/pip-test-package"
         "@5547fa909e83df8bd743d3978d6667497983a4b7",
@@ -281,28 +281,28 @@ def test_install_report_vcs_and_wheel_cache(
     assert "Using cached pip_test_package" in result.stdout
     report = json.loads(report_path.read_text())
     assert len(report["install"]) == 1
-    cpip_test_package_report = report["install"][0]
-    assert cpip_test_package_report["is_direct"] is True
-    assert cpip_test_package_report["requested"] is True
+    kpip_test_package_report = report["install"][0]
+    assert kpip_test_package_report["is_direct"] is True
+    assert kpip_test_package_report["requested"] is True
     assert (
-        cpip_test_package_report["download_info"]["url"]
+        kpip_test_package_report["download_info"]["url"]
         == "https://github.com/pypa/pip-test-package"
     )
-    assert cpip_test_package_report["download_info"]["vcs_info"]["vcs"] == "git"
+    assert kpip_test_package_report["download_info"]["vcs_info"]["vcs"] == "git"
     assert (
-        cpip_test_package_report["download_info"]["vcs_info"]["commit_id"]
+        kpip_test_package_report["download_info"]["vcs_info"]["commit_id"]
         == "5547fa909e83df8bd743d3978d6667497983a4b7"
     )
 
 
 @pytest.mark.network
 def test_install_report_vcs_editable(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmp_path: Path,
 ) -> None:
     """Test report remote editable."""
     report_path = tmp_path / "report.json"
-    script.cpip(
+    script.kpip(
         "install",
         "--editable",
         "git+https://github.com/pypa/pip-test-package"
@@ -313,17 +313,17 @@ def test_install_report_vcs_editable(
     )
     report = json.loads(report_path.read_text())
     assert len(report["install"]) == 1
-    cpip_test_package_report = report["install"][0]
-    assert cpip_test_package_report["is_direct"] is True
-    assert cpip_test_package_report["download_info"]["url"].startswith("file://")
-    assert cpip_test_package_report["download_info"]["url"].endswith(
+    kpip_test_package_report = report["install"][0]
+    assert kpip_test_package_report["is_direct"] is True
+    assert kpip_test_package_report["download_info"]["url"].startswith("file://")
+    assert kpip_test_package_report["download_info"]["url"].endswith(
         "/src/pip-test-package",
     )
-    assert cpip_test_package_report["download_info"]["dir_info"]["editable"] is True
+    assert kpip_test_package_report["download_info"]["dir_info"]["editable"] is True
 
 
 def test_install_report_local_path_with_extras(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmp_path: Path,
     shared_data: TestData,
 ) -> None:
@@ -341,7 +341,7 @@ def test_install_report_local_path_with_extras(
             """),
     )
     report_path = tmp_path / "report.json"
-    script.cpip(
+    script.kpip(
         "install",
         "--dry-run",
         "--no-build-isolation",
@@ -367,7 +367,7 @@ def test_install_report_local_path_with_extras(
 
 
 def test_install_report_editable_local_path_with_extras(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmp_path: Path,
     shared_data: TestData,
 ) -> None:
@@ -385,7 +385,7 @@ def test_install_report_editable_local_path_with_extras(
             """),
     )
     report_path = tmp_path / "report.json"
-    script.cpip(
+    script.kpip(
         "install",
         "--dry-run",
         "--no-build-isolation",
@@ -412,10 +412,10 @@ def test_install_report_editable_local_path_with_extras(
 
 
 def test_install_report_to_stdout(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     shared_data: TestData,
 ) -> None:
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "simplewheel",
         "--quiet",

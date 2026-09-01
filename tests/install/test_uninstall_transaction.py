@@ -5,10 +5,10 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from cpip.core.errors import InstallationError
-from cpip.install.requirements import RequirementInstaller
-from cpip.install.target import InstallTarget
-from cpip.install.wheel_transaction import WheelInstaller
+from kpip.core.errors import InstallationError
+from kpip.install.requirements import RequirementInstaller
+from kpip.install.target import InstallTarget
+from kpip.install.wheel_transaction import WheelInstaller
 
 
 def wheel_internal(directory: Path) -> Path:

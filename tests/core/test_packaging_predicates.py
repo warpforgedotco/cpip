@@ -25,13 +25,13 @@ import random
 from collections.abc import Callable
 
 import pytest
-from cpip.core.packaging import (
+from kpip.core.packaging import (
     Requirement,
     SpecifierSet,
     is_windows_path,
     parse_requirement,
 )
-from cpip.core.versions import InvalidVersion, Version
+from kpip.core.versions import InvalidVersion, Version
 
 
 def _oracle_names_exact_version(requirement: Requirement) -> bool:

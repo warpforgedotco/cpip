@@ -18,13 +18,13 @@ from io import BytesIO
 from zipfile import ZipFile
 
 import pytest
-from cpip.core.http import HttpResponse
-from cpip.network.lazy_wheel import (
+from kpip.core.http import HttpResponse
+from kpip.network.lazy_wheel import (
     TAIL_CHUNK_SIZE,
     HTTPRangeRequestUnsupported,
     LazyZipOverHTTP,
 )
-from cpip_test_support.transport_mocks import make_response
+from kpip_test_support.transport_mocks import make_response
 
 
 class RangeServerSession:

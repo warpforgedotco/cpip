@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cpip.index.metadata_cache import NAME, WheelMetadataCache, metadata_identity
+from kpip.index.metadata_cache import NAME, WheelMetadataCache, metadata_identity
 
 
 def test_metadata_cache_round_trips_versioned_headers(tmp_path: Path) -> None:
@@ -109,7 +109,7 @@ def test_one_cache_instance_per_directory_across_threads(tmp_path: Path) -> None
     put through a losing instance are never flushed."""
     import threading
 
-    from cpip.index import metadata_cache
+    from kpip.index import metadata_cache
 
     metadata_cache._CACHE_INSTANCES.clear()
     cache_dir = str(tmp_path / "cache")

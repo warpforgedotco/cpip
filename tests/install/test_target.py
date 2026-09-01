@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 import pytest
-from cpip.install.target import InstallTarget
+from kpip.install.target import InstallTarget
 
 
 def test_target_mode_uses_one_contained_destination(tmp_path: Path) -> None:

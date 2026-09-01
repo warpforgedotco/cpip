@@ -1,4 +1,4 @@
-"""cpip.core.packaging against the real ``packaging`` library, as a ratchet.
+"""kpip.core.packaging against the real ``packaging`` library, as a ratchet.
 
 A seeded generator produces version and specifier texts well outside what
 real indexes serve (every PEP 440 spelling, leading zeros, ``v`` prefixes,
@@ -15,7 +15,7 @@ Two assertions make this a ratchet rather than a snapshot:
   reproduces must be deleted from the list, so the list only shrinks.
 
 The causes are documented where they are classified. What remains is a
-``packaging`` bug (``~=`` with an unnormalised operand); cpip's own
+``packaging`` bug (``~=`` with an unnormalised operand); kpip's own
 divergences -- a specifier grammar that accepted clauses PEP 440 forbids --
 have been removed rather than recorded.
 """
@@ -28,8 +28,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from cpip.core.packaging import SpecifierSet
-from cpip.core.versions import InvalidVersion, Version
+from kpip.core.packaging import SpecifierSet
+from kpip.core.versions import InvalidVersion, Version
 from packaging import specifiers, version
 
 SEED = 20260820

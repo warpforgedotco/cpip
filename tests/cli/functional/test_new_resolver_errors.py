@@ -1,17 +1,17 @@
 import pathlib
 import sys
 
-from cpip_test_support import (
-    CpipTestEnvironment,
+from kpip_test_support import (
+    KpipTestEnvironment,
     create_basic_wheel_for_package,
     create_test_package_with_setup,
 )
-from cpip_test_support.wheel import make_wheel
+from kpip_test_support.wheel import make_wheel
 
 
 def test_new_resolver_conflict_requirements_file(
     tmpdir: pathlib.Path,
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(script, "base", "1.0")
     create_basic_wheel_for_package(script, "base", "2.0")
@@ -31,7 +31,7 @@ def test_new_resolver_conflict_requirements_file(
     req_file = tmpdir.joinpath("requirements.txt")
     req_file.write_text("pkga\npkgb")
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -47,14 +47,14 @@ def test_new_resolver_conflict_requirements_file(
 
 def test_new_resolver_conflict_constraints_file(
     tmpdir: pathlib.Path,
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(script, "pkg", "1.0")
 
     constraints_file = tmpdir.joinpath("constraints.txt")
     constraints_file.write_text("pkg!=1.0")
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -71,7 +71,7 @@ def test_new_resolver_conflict_constraints_file(
     assert "pkg!=1.0" in result.stdout, str(result)
 
 
-def test_new_resolver_requires_python_error(script: CpipTestEnvironment) -> None:
+def test_new_resolver_requires_python_error(script: KpipTestEnvironment) -> None:
     compatible_python = f">={sys.version_info.major}.{sys.version_info.minor}"
     incompatible_python = f"<{sys.version_info.major}.{sys.version_info.minor}"
 
@@ -88,7 +88,7 @@ def test_new_resolver_requires_python_error(script: CpipTestEnvironment) -> None
         python_requires=incompatible_python,
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -102,7 +102,7 @@ def test_new_resolver_requires_python_error(script: CpipTestEnvironment) -> None
 
 
 def test_new_resolver_checks_requires_python_before_dependencies(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     incompatible_python = f"<{sys.version_info.major}.{sys.version_info.minor}"
 
@@ -119,7 +119,7 @@ def test_new_resolver_checks_requires_python_before_dependencies(
         requires_python=incompatible_python,
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -134,7 +134,7 @@ def test_new_resolver_checks_requires_python_before_dependencies(
     assert "pkg_dep" not in result.stdout, str(result)
 
 
-def test_new_resolver_no_versions_available_hint(script: CpipTestEnvironment) -> None:
+def test_new_resolver_no_versions_available_hint(script: KpipTestEnvironment) -> None:
     """Test hint that no package candidate is available at all,
     when ResolutionImpossible occurs.
     """
@@ -168,7 +168,7 @@ def test_new_resolver_no_versions_available_hint(script: CpipTestEnvironment) ->
         wheel_house.joinpath("requesting_pkg-2.0.0-py2.py3-none-any.whl"),
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-cache-dir",
         "--no-index",

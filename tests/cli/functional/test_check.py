@@ -1,7 +1,7 @@
 from collections.abc import Collection
 
-from cpip_test_support import (
-    CpipTestEnvironment,
+from kpip_test_support import (
+    KpipTestEnvironment,
     create_really_basic_wheel,
     create_test_package_with_setup,
 )
@@ -13,23 +13,23 @@ def matches_expected_lines(string: str, expected_lines: Collection[str]) -> bool
     return set(last_few_output_lines) == set(expected_lines)
 
 
-def test_basic_check_clean(script: CpipTestEnvironment) -> None:
+def test_basic_check_clean(script: KpipTestEnvironment) -> None:
     """On a clean environment, check should print a helpful message."""
-    result = script.cpip("check")
+    result = script.kpip("check")
 
     expected_lines = ("No broken requirements found.",)
     assert matches_expected_lines(result.stdout, expected_lines)
     assert result.returncode == 0
 
 
-def test_basic_check_missing_dependency(script: CpipTestEnvironment) -> None:
+def test_basic_check_missing_dependency(script: KpipTestEnvironment) -> None:
     pkga_path = create_test_package_with_setup(
         script,
         name="pkga",
         version="1.0",
         install_requires=["missing==0.1"],
     )
-    res = script.cpip(
+    res = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -38,21 +38,21 @@ def test_basic_check_missing_dependency(script: CpipTestEnvironment) -> None:
     )
     assert "Successfully installed pkga-1.0" in res.stdout, str(res)
 
-    result = script.cpip("check", expect_error=True)
+    result = script.kpip("check", expect_error=True)
 
     expected_lines = ("pkga 1.0 requires missing, which is not installed.",)
     assert matches_expected_lines(result.stdout, expected_lines)
     assert result.returncode == 1
 
 
-def test_basic_check_broken_dependency(script: CpipTestEnvironment) -> None:
+def test_basic_check_broken_dependency(script: KpipTestEnvironment) -> None:
     pkga_path = create_test_package_with_setup(
         script,
         name="pkga",
         version="1.0",
         install_requires=["broken>=1.0"],
     )
-    res = script.cpip(
+    res = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -66,7 +66,7 @@ def test_basic_check_broken_dependency(script: CpipTestEnvironment) -> None:
         name="broken",
         version="0.1",
     )
-    res = script.cpip(
+    res = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -75,7 +75,7 @@ def test_basic_check_broken_dependency(script: CpipTestEnvironment) -> None:
     )
     assert "Successfully installed broken-0.1" in res.stdout, str(res)
 
-    result = script.cpip("check", expect_error=True)
+    result = script.kpip("check", expect_error=True)
 
     expected_lines = ("pkga 1.0 has requirement broken>=1.0, but you have broken 0.1.",)
     assert matches_expected_lines(result.stdout, expected_lines)
@@ -83,7 +83,7 @@ def test_basic_check_broken_dependency(script: CpipTestEnvironment) -> None:
 
 
 def test_basic_check_broken_dependency_and_missing_dependency(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     pkga_path = create_test_package_with_setup(
         script,
@@ -91,7 +91,7 @@ def test_basic_check_broken_dependency_and_missing_dependency(
         version="1.0",
         install_requires=["broken>=1.0"],
     )
-    res = script.cpip(
+    res = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -106,7 +106,7 @@ def test_basic_check_broken_dependency_and_missing_dependency(
         version="0.1",
         install_requires=["missing"],
     )
-    res = script.cpip(
+    res = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -115,7 +115,7 @@ def test_basic_check_broken_dependency_and_missing_dependency(
     )
     assert "Successfully installed broken-0.1" in res.stdout, str(res)
 
-    result = script.cpip("check", expect_error=True)
+    result = script.kpip("check", expect_error=True)
 
     expected_lines = (
         "broken 0.1 requires missing, which is not installed.",
@@ -126,7 +126,7 @@ def test_basic_check_broken_dependency_and_missing_dependency(
     assert result.returncode == 1
 
 
-def test_check_complicated_name_missing(script: CpipTestEnvironment) -> None:
+def test_check_complicated_name_missing(script: KpipTestEnvironment) -> None:
     package_a_path = create_test_package_with_setup(
         script,
         name="package_A",
@@ -134,7 +134,7 @@ def test_check_complicated_name_missing(script: CpipTestEnvironment) -> None:
         install_requires=["Dependency-B>=1.0"],
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -146,13 +146,13 @@ def test_check_complicated_name_missing(script: CpipTestEnvironment) -> None:
         or "Successfully installed package-A-1.0" in result.stdout
     ), str(result)
 
-    result = script.cpip("check", expect_error=True)
+    result = script.kpip("check", expect_error=True)
     expected_lines = ("package-a 1.0 requires dependency-b, which is not installed.",)
     assert matches_expected_lines(result.stdout, expected_lines)
     assert result.returncode == 1
 
 
-def test_check_complicated_name_broken(script: CpipTestEnvironment) -> None:
+def test_check_complicated_name_broken(script: KpipTestEnvironment) -> None:
     package_a_path = create_test_package_with_setup(
         script,
         name="package_A",
@@ -165,7 +165,7 @@ def test_check_complicated_name_broken(script: CpipTestEnvironment) -> None:
         version="0.1",
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -177,7 +177,7 @@ def test_check_complicated_name_broken(script: CpipTestEnvironment) -> None:
         or "Successfully installed package-A-1.0" in result.stdout
     ), str(result)
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -186,7 +186,7 @@ def test_check_complicated_name_broken(script: CpipTestEnvironment) -> None:
     )
     assert "Successfully installed dependency-b-0.1" in result.stdout
 
-    result = script.cpip("check", expect_error=True)
+    result = script.kpip("check", expect_error=True)
     expected_lines = (
         "package-a 1.0 has requirement Dependency-B>=1.0, but you have "
         "dependency-b 0.1.",
@@ -195,7 +195,7 @@ def test_check_complicated_name_broken(script: CpipTestEnvironment) -> None:
     assert result.returncode == 1
 
 
-def test_check_complicated_name_clean(script: CpipTestEnvironment) -> None:
+def test_check_complicated_name_clean(script: KpipTestEnvironment) -> None:
     package_a_path = create_test_package_with_setup(
         script,
         name="package_A",
@@ -208,7 +208,7 @@ def test_check_complicated_name_clean(script: CpipTestEnvironment) -> None:
         version="1.0",
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -220,7 +220,7 @@ def test_check_complicated_name_clean(script: CpipTestEnvironment) -> None:
         or "Successfully installed package-A-1.0" in result.stdout
     ), str(result)
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -229,13 +229,13 @@ def test_check_complicated_name_clean(script: CpipTestEnvironment) -> None:
     )
     assert "Successfully installed dependency-b-1.0" in result.stdout
 
-    result = script.cpip("check")
+    result = script.kpip("check")
     expected_lines = ("No broken requirements found.",)
     assert matches_expected_lines(result.stdout, expected_lines)
     assert result.returncode == 0
 
 
-def test_check_considers_conditional_reqs(script: CpipTestEnvironment) -> None:
+def test_check_considers_conditional_reqs(script: KpipTestEnvironment) -> None:
     package_a_path = create_test_package_with_setup(
         script,
         name="package_A",
@@ -246,7 +246,7 @@ def test_check_considers_conditional_reqs(script: CpipTestEnvironment) -> None:
         ],
     )
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -258,14 +258,14 @@ def test_check_considers_conditional_reqs(script: CpipTestEnvironment) -> None:
         or "Successfully installed package-A-1.0" in result.stdout
     ), str(result)
 
-    result = script.cpip("check", expect_error=True)
+    result = script.kpip("check", expect_error=True)
     expected_lines = ("package-a 1.0 requires dependency-b, which is not installed.",)
     assert matches_expected_lines(result.stdout, expected_lines)
     assert result.returncode == 1
 
 
 def test_check_development_versions_are_also_considered(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     pkga_path = create_test_package_with_setup(
         script,
@@ -273,7 +273,7 @@ def test_check_development_versions_are_also_considered(
         version="1.0",
         install_requires=["depend>=1.0"],
     )
-    res = script.cpip(
+    res = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -287,7 +287,7 @@ def test_check_development_versions_are_also_considered(
         name="depend",
         version="1.1.0.dev0",
     )
-    res = script.cpip(
+    res = script.kpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -296,13 +296,13 @@ def test_check_development_versions_are_also_considered(
     )
     assert "Successfully installed depend-1.1.0.dev0" in res.stdout, str(res)
 
-    result = script.cpip("check")
+    result = script.kpip("check")
     expected_lines = ("No broken requirements found.",)
     assert matches_expected_lines(result.stdout, expected_lines)
     assert result.returncode == 0
 
 
-def test_basic_check_broken_metadata(script: CpipTestEnvironment) -> None:
+def test_basic_check_broken_metadata(script: KpipTestEnvironment) -> None:
     dist_info_dir = script.site_packages_path / "pkga-1.0.dist-info"
     dist_info_dir.mkdir()
     with open(dist_info_dir / "METADATA", "w") as f:
@@ -310,16 +310,16 @@ def test_basic_check_broken_metadata(script: CpipTestEnvironment) -> None:
             "Metadata-Version: 2.1\n"
             "Name: pkga\n"
             "Version: 1.0\n"
-            'Requires-Dist: cpip; python_version == "3.4";extra == "test"\n',
+            'Requires-Dist: kpip; python_version == "3.4";extra == "test"\n',
         )
 
-    result = script.cpip("check", expect_error=True)
+    result = script.kpip("check", expect_error=True)
 
     assert "Error parsing dependencies of" in result.stderr
     assert result.returncode == 1
 
 
-def test_check_skip_work_dir_pkg(script: CpipTestEnvironment) -> None:
+def test_check_skip_work_dir_pkg(script: KpipTestEnvironment) -> None:
     """Test that check should not include package
     present in working directory
     """
@@ -332,13 +332,13 @@ def test_check_skip_work_dir_pkg(script: CpipTestEnvironment) -> None:
 
     script.run("python", "setup.py", "egg_info", expect_stderr=True, cwd=pkg_path)
 
-    result = script.cpip("check", cwd=pkg_path)
+    result = script.kpip("check", cwd=pkg_path)
     expected_lines = ("No broken requirements found.",)
     assert matches_expected_lines(result.stdout, expected_lines)
     assert result.returncode == 0
 
 
-def test_check_include_work_dir_pkg(script: CpipTestEnvironment) -> None:
+def test_check_include_work_dir_pkg(script: KpipTestEnvironment) -> None:
     """Test that check should include package in working directory
     if working directory is added in PYTHONPATH
     """
@@ -353,24 +353,24 @@ def test_check_include_work_dir_pkg(script: CpipTestEnvironment) -> None:
 
     script.environ.update({"PYTHONPATH": pkg_path})
 
-    result = script.cpip("check", expect_error=True, cwd=pkg_path)
+    result = script.kpip("check", expect_error=True, cwd=pkg_path)
     expected_lines = ("simple 1.0 requires missing, which is not installed.",)
     assert matches_expected_lines(result.stdout, expected_lines)
     assert result.returncode == 1
 
 
 def test_check_unsupported(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     script.scratch_path.joinpath("base-0.1.0-py2.py3-none-any.whl").write_bytes(
         create_really_basic_wheel("base", "0.1.0"),
     )
-    script.cpip_install_local("base==0.1.0", find_links=script.scratch_path)
+    script.kpip_install_local("base==0.1.0", find_links=script.scratch_path)
     with open(
         script.site_packages_path.joinpath("base-0.1.0.dist-info/WHEEL"),
         "a",
     ) as f:
         f.write("\nTag: cp310-cp310-musllinux_1_1_x86_64\n")
-    result = script.cpip("check", expect_error=True)
+    result = script.kpip("check", expect_error=True)
     assert "base 0.1.0 is not supported on this platform" in result.stdout
     assert result.returncode == 1

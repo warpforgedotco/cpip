@@ -9,15 +9,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from cpip.build.metadata import InstalledDistributionStore
-from cpip.core.errors import InstallationError
-from cpip.core.metadata import default_lib_path
-from cpip.core.packaging import parse_requirement
-from cpip.core.wheel import wheel_candidate
-from cpip.install.requirements import RequirementInstaller
-from cpip.install.target import InstallTarget
-from cpip.install.transaction import InstallTransaction
-from cpip.install.wheel_transaction import (
+from kpip.build.metadata import InstalledDistributionStore
+from kpip.core.errors import InstallationError
+from kpip.core.metadata import default_lib_path
+from kpip.core.packaging import parse_requirement
+from kpip.core.wheel import wheel_candidate
+from kpip.install.requirements import RequirementInstaller
+from kpip.install.target import InstallTarget
+from kpip.install.transaction import InstallTransaction
+from kpip.install.wheel_transaction import (
     WheelInstaller,
     install_wheels_transactionally,
 )
@@ -108,7 +108,7 @@ def test_installed_distribution_store_can_filter_names(tmp_path: Path) -> None:
     assert [distribution.canonical_name for distribution in distributions] == ["wanted"]
 
 
-def test_install_and_uninstall_are_owned_by_cpip_install(tmp_path: Path) -> None:
+def test_install_and_uninstall_are_owned_by_kpip_install(tmp_path: Path) -> None:
     wheel = make_wheel_internal(tmp_path)
     target = tmp_path / "site-packages"
 
@@ -117,7 +117,7 @@ def test_install_and_uninstall_are_owned_by_cpip_install(tmp_path: Path) -> None
     assert candidate.name == "owner-demo"
     assert target.joinpath("owner_demo", "__init__.py").read_text() == "VALUE = '1.0'\n"
     assert (
-        target.joinpath("owner_demo-1.0.dist-info", "INSTALLER").read_text() == "cpip\n"
+        target.joinpath("owner_demo-1.0.dist-info", "INSTALLER").read_text() == "kpip\n"
     )
     assert RequirementInstaller().uninstall("owner-demo", paths=[str(target)])
     assert not target.joinpath("owner_demo").exists()
@@ -354,11 +354,11 @@ def test_fresh_target_reuses_copy_on_write_wheel_archive(tmp_path: Path) -> None
     )
 
     assert (target / "owner_demo" / "__init__.py").read_text() == "VALUE = '1.0'\n"
-    assert (target / "owner_demo-1.0.dist-info" / "INSTALLER").read_text() == "cpip\n"
+    assert (target / "owner_demo-1.0.dist-info" / "INSTALLER").read_text() == "kpip\n"
     assert (target / "owner_demo-1.0.dist-info" / "REQUESTED").exists()
     assert (target / "bin" / "owner-demo").read_text().startswith("#!/target/python\n")
     assert (target / "bin" / "raw-tool").read_text().startswith("#!/target/python\n")
-    from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
+    from kpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
 
     cache_tree = cache / ARCHIVE_CACHE_BUCKET / digest[:2] / digest / "tree"
     assert (
@@ -396,7 +396,7 @@ def test_fresh_target_reuses_copy_on_write_wheel_archive(tmp_path: Path) -> None
 def test_cached_archive_upgrades_nonempty_target_without_original_wheel(
     tmp_path: Path,
 ) -> None:
-    from cpip.install.wheel_archive_cache import prepare_cached_wheel
+    from kpip.install.wheel_archive_cache import prepare_cached_wheel
 
     old = make_wheel_internal(tmp_path, version="1.0")
     new = make_wheel_internal(
@@ -448,8 +448,8 @@ def test_upgrade_falls_back_to_metadata_store_when_discovery_declines(
     only under ``TYPE_CHECKING``, so this path raised ``NameError`` the one
     time production would actually take it.
     """
-    from cpip.install import wheel_state
-    from cpip.install.wheel_archive_cache import prepare_cached_wheel
+    from kpip.install import wheel_state
+    from kpip.install.wheel_archive_cache import prepare_cached_wheel
 
     old = make_wheel_internal(tmp_path, version="1.0")
     new = make_wheel_internal(tmp_path, version="2.0")
@@ -481,7 +481,7 @@ def test_cached_archive_swaps_self_contained_target_for_upgrade(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cpip.install.wheel_archive_cache import prepare_cached_wheel
+    from kpip.install.wheel_archive_cache import prepare_cached_wheel
 
     old = make_wheel_internal(tmp_path, version="1.0")
     new = make_wheel_internal(tmp_path, version="2.0")
@@ -533,7 +533,7 @@ def test_invalid_unpacked_wheel_cache_is_rebuilt(tmp_path: Path) -> None:
         )
         assert (target / "owner_demo" / "__init__.py").exists()
         if index == 0:
-            from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
+            from kpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
 
             manifest = (
                 cache / ARCHIVE_CACHE_BUCKET / digest[:2] / digest / "manifest.bin"
@@ -542,7 +542,7 @@ def test_invalid_unpacked_wheel_cache_is_rebuilt(tmp_path: Path) -> None:
 
 
 def test_exact_install_plan_receipt_reuses_cached_archives(tmp_path: Path) -> None:
-    from cpip.install.wheel_install_plan_cache import (
+    from kpip.install.wheel_install_plan_cache import (
         RESOLUTION_CACHE_BUCKET,
         exact_install_plan_key,
         exact_install_plan_key_from_strings,
@@ -894,7 +894,7 @@ def test_exact_install_plan_key_rejects_local_path_requirements() -> None:
     """A local wheel path parses to a name and an exact version with no URL;
     a plan keyed by name and version alone must not be shared with (or
     borrowed from) the index artifact of the same release."""
-    from cpip.install.wheel_install_plan_cache import exact_install_plan_key
+    from kpip.install.wheel_install_plan_cache import exact_install_plan_key
 
     local = SimpleNamespace(req=parse_requirement("./demo-1.0-py3-none-any.whl"))
     assert local.req.url is None
@@ -924,8 +924,8 @@ def test_reinstalling_the_same_version_is_a_no_op(
 
 
 def test_installed_wheel_distribution_versions_are_versions() -> None:
-    from cpip.core.versions import Version
-    from cpip.install.wheel_state import InstalledWheelDistribution
+    from kpip.core.versions import Version
+    from kpip.install.wheel_state import InstalledWheelDistribution
 
     record = InstalledWheelDistribution(
         location="/site",

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from cpip.build.build import unpack_source
-from cpip.core.errors import BuildError
+from kpip.build.build import unpack_source
+from kpip.core.errors import BuildError
 
 
 def test_unpack_source_rejects_zip_path_traversal(tmp_path: Path) -> None:

@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from cpip.cli import fast
+from kpip.cli import fast
 
 
 def _dist(
@@ -149,10 +149,10 @@ def test_run_reports_satisfied_requirements_like_the_normal_path(
     _dist(root, "simple-2.0.0.dist-info", "simple", "2.0.0")
     _dist(root, "other-1.5.dist-info", "other", "1.5")
     monkeypatch.setattr(sys, "path", [str(root)])
-    monkeypatch.delenv("CPIP_TARGET_PREFIX", raising=False)
-    monkeypatch.delenv("CPIP_RESOLVER_DEBUG", raising=False)
+    monkeypatch.delenv("KPIP_TARGET_PREFIX", raising=False)
+    monkeypatch.delenv("KPIP_RESOLVER_DEBUG", raising=False)
 
-    from cpip.cli import config
+    from kpip.cli import config
 
     class Config:
         find_links: list[str] = []
@@ -176,9 +176,9 @@ def test_run_reports_satisfied_requirements_like_the_normal_path(
     assert fast.run_satisfied_install(["missing"]) is None
     _dist(root, "pre-1.0rc1.dist-info", "pre", "1.0rc1")
     assert fast.run_satisfied_install(["pre"]) is None
-    monkeypatch.setenv("CPIP_TARGET_PREFIX", "/elsewhere")
+    monkeypatch.setenv("KPIP_TARGET_PREFIX", "/elsewhere")
     assert fast.run_satisfied_install(["simple"]) is None
-    monkeypatch.delenv("CPIP_TARGET_PREFIX")
+    monkeypatch.delenv("KPIP_TARGET_PREFIX")
     Config.find_links = ["/configured"]
     assert fast.run_satisfied_install(["simple"]) is None
     assert capsys.readouterr().out == ""

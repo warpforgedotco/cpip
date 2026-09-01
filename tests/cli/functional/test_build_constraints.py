@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from cpip.core.urls import path_to_url
-from cpip_test_support import (
-    CpipTestEnvironment,
-    TestCpipResult,
+from kpip.core.urls import path_to_url
+from kpip_test_support import (
+    KpipTestEnvironment,
+    TestKpipResult,
     TestData,
     create_test_package_with_setup,
 )
@@ -19,7 +19,7 @@ INSTALLER_ARGS = [
 ]
 
 
-def create_simple_test_package(script: CpipTestEnvironment, name: str) -> Path:
+def create_simple_test_package(script: KpipTestEnvironment, name: str) -> Path:
     """Create a simple test package with minimal setup."""
     return create_test_package_with_setup(
         script,
@@ -30,7 +30,7 @@ def create_simple_test_package(script: CpipTestEnvironment, name: str) -> Path:
 
 
 def create_constraints_file(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     filename: str,
     content: str,
 ) -> Path:
@@ -40,15 +40,15 @@ def create_constraints_file(
     return constraints_file
 
 
-def run_cpip_install_with_build_constraints(
-    script: CpipTestEnvironment,
+def run_kpip_install_with_build_constraints(
+    script: KpipTestEnvironment,
     data: TestData,
     project_dir: Path,
     build_constraints_file: Path,
     extra_args: list[str] | None = None,
     expect_error: bool = False,
-) -> TestCpipResult:
-    """Run cpip install with build constraints and common arguments."""
+) -> TestKpipResult:
+    """Run kpip install with build constraints and common arguments."""
     args = [
         "--no-cache-dir",
         "--build-constraint",
@@ -60,7 +60,7 @@ def run_cpip_install_with_build_constraints(
 
     args.append(str(project_dir))
 
-    return script.cpip_install_local(
+    return script.kpip_install_local(
         *args,
         expect_error=expect_error,
         build_isolation=True,
@@ -69,7 +69,7 @@ def run_cpip_install_with_build_constraints(
 
 
 def test_build_constraints_basic_functionality_simple(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     tmpdir: Path,
 ) -> None:
@@ -83,7 +83,7 @@ def test_build_constraints_basic_functionality_simple(
         filename="constraints.txt",
         content="setuptools>=40.0.0\n",
     )
-    result = run_cpip_install_with_build_constraints(
+    result = run_kpip_install_with_build_constraints(
         script=script,
         data=data,
         project_dir=project_dir,
@@ -98,7 +98,7 @@ def test_build_constraints_basic_functionality_simple(
 
 @pytest.mark.network
 def test_build_constraints_vs_regular_constraints_simple(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     tmpdir: Path,
 ) -> None:
@@ -120,7 +120,7 @@ def test_build_constraints_vs_regular_constraints_simple(
         filename="constraints.txt",
         content="six>=1.10.0\n",
     )
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-cache-dir",
         "--build-constraint",
@@ -136,7 +136,7 @@ def test_build_constraints_vs_regular_constraints_simple(
 
 
 def test_build_constraints_environment_isolation_simple(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     tmpdir: Path,
 ) -> None:
@@ -147,7 +147,7 @@ def test_build_constraints_environment_isolation_simple(
         filename="build_constraints.txt",
         content="setuptools>=40.0.0\n",
     )
-    result = run_cpip_install_with_build_constraints(
+    result = run_kpip_install_with_build_constraints(
         script=script,
         data=data,
         project_dir=project_dir,
@@ -158,7 +158,7 @@ def test_build_constraints_environment_isolation_simple(
 
 
 def test_build_constraints_file_not_found(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     tmpdir: Path,
 ) -> None:
@@ -168,7 +168,7 @@ def test_build_constraints_file_not_found(
         name="test_missing_constraints",
     )
     missing_constraints = script.scratch_path / "missing_constraints.txt"
-    result = run_cpip_install_with_build_constraints(
+    result = run_kpip_install_with_build_constraints(
         script=script,
         data=data,
         project_dir=project_dir,
@@ -180,12 +180,12 @@ def test_build_constraints_file_not_found(
 
 
 def test_use_feature_build_constraint_is_always_enabled(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     """``--use-feature=build-constraint`` is accepted but now a no-op that
     reports the feature is always enabled.
     """
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--use-feature=build-constraint",
         "--no-index",
@@ -199,12 +199,12 @@ def test_use_feature_build_constraint_is_always_enabled(
 
 @pytest.mark.parametrize("installer_args", INSTALLER_ARGS)
 def test_constraints_dont_pass_through(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     tmpdir: Path,
     installer_args: list[str],
 ) -> None:
-    """CPIP_CONSTRAINT must not affect the isolated build env."""
+    """KPIP_CONSTRAINT must not affect the isolated build env."""
     project_dir = create_test_package_with_setup(
         script,
         name="test_isolation",
@@ -216,8 +216,8 @@ def test_constraints_dont_pass_through(
         filename="constraints.txt",
         content="setuptools==2000\n",
     )
-    script.environ["CPIP_CONSTRAINT"] = path_to_url(str(constraints))
-    result = script.cpip_install_local(
+    script.environ["KPIP_CONSTRAINT"] = path_to_url(str(constraints))
+    result = script.kpip_install_local(
         "--no-cache-dir",
         *installer_args,
         str(project_dir),
@@ -229,12 +229,12 @@ def test_constraints_dont_pass_through(
 
 @pytest.mark.parametrize("installer_args", INSTALLER_ARGS)
 def test_constraints_dont_pass_through_with_build_constraints(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     tmpdir: Path,
     installer_args: list[str],
 ) -> None:
-    """CPIP_CONSTRAINT must not affect the build env even when build
+    """KPIP_CONSTRAINT must not affect the build env even when build
     constraints are also passed.
     """
     project_dir = create_test_package_with_setup(
@@ -253,8 +253,8 @@ def test_constraints_dont_pass_through_with_build_constraints(
         filename="build_constraints.txt",
         content="setuptools>=40.0.0\n",
     )
-    script.environ["CPIP_CONSTRAINT"] = path_to_url(str(constraints))
-    result = run_cpip_install_with_build_constraints(
+    script.environ["KPIP_CONSTRAINT"] = path_to_url(str(constraints))
+    result = run_kpip_install_with_build_constraints(
         script=script,
         data=data,
         project_dir=project_dir,
@@ -266,7 +266,7 @@ def test_constraints_dont_pass_through_with_build_constraints(
 
 @pytest.mark.parametrize("installer_args", INSTALLER_ARGS)
 def test_build_constraint_is_enforced(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     tmpdir: Path,
     installer_args: list[str],
@@ -283,7 +283,7 @@ def test_build_constraint_is_enforced(
         filename="build_constraints.txt",
         content="setuptools==2000\n",
     )
-    result = run_cpip_install_with_build_constraints(
+    result = run_kpip_install_with_build_constraints(
         script=script,
         data=data,
         project_dir=project_dir,

@@ -1,6 +1,6 @@
-# cpip benchmark
+# kpip benchmark
 
-Local `hyperfine` benchmarks for comparing `cpip` against `uv`.
+Local `hyperfine` benchmarks for comparing `kpip` against `uv`.
 
 Requirements:
 
@@ -10,20 +10,20 @@ Requirements:
 Run from this directory:
 
 ```console
-uv run cpip-bench --workload offline --benchmark startup-help --benchmark lock-warm
+uv run kpip-bench --workload offline --benchmark startup-help --benchmark lock-warm
 ```
 
 The default `offline` workload is generated locally and never touches the
 network. List the mirrored official uv workloads and their capabilities with:
 
 ```console
-uv run cpip-bench --list-workloads
+uv run kpip-bench --list-workloads
 ```
 
 Run Jupyter's cold and warm resolver and installer comparisons:
 
 ```console
-uv run cpip-bench --workload jupyter
+uv run kpip-bench --workload jupyter
 ```
 
 Run every official uv workload. Resolver-only workloads run the cold and warm
@@ -31,29 +31,29 @@ lock cases; workloads with an upstream `compiled/*.txt` fixture also run cold
 and warm installation cases:
 
 ```console
-uv run cpip-bench --workload live
+uv run kpip-bench --workload live
 ```
 
 To limit the complete corpus to resolver benchmarks:
 
 ```console
-uv run cpip-bench \
+uv run kpip-bench \
   --workload live \
   --benchmark lock-cold \
   --benchmark lock-warm
 ```
 
-By default, cpip is measured as `python -m cpip`. To measure the direct
-console-script style launcher, pass `--cpip-launcher direct`:
+By default, kpip is measured as `python -m kpip`. To measure the direct
+console-script style launcher, pass `--kpip-launcher direct`:
 
 ```console
-uv run cpip-bench --cpip-launcher direct --benchmark startup-help
+uv run kpip-bench --kpip-launcher direct --benchmark startup-help
 ```
 
 Startup-focused cases:
 
 ```console
-uv run cpip-bench \
+uv run kpip-bench \
   --benchmark startup-help \
   --benchmark startup-version \
   --benchmark startup-install-help \
@@ -73,7 +73,7 @@ that `lock-warm`/`install-warm` measure against the full offline workload.
 To run the Trio/PyPI workload used by uv's public benchmark documentation:
 
 ```console
-uv run cpip-bench --workload trio --benchmark lock-cold --benchmark install-cold
+uv run kpip-bench --workload trio --benchmark lock-cold --benchmark install-cold
 ```
 
 `live` is the suite selector for the complete official corpus; concrete names
@@ -93,23 +93,23 @@ enum) are deliberately not in `BENCHMARKS` above: `resolve-incremental` (add
 one new dependency to an existing lockfile, re-lock) and `resolve-noop`
 (re-lock against a lockfile that already satisfies the input, expecting a
 cheap confirmation). Both measure whether a tool reuses an existing lockfile
-instead of fully re-resolving. `cpip lock` has no such reuse path -- it
+instead of fully re-resolving. `kpip lock` has no such reuse path -- it
 always resolves from scratch regardless of what's already on disk at
-`--output` -- so running either case against cpip would just be `lock-warm`
-again under a different name, not a distinct measurement. Revisit if `cpip
+`--output` -- so running either case against kpip would just be `lock-warm`
+again under a different name, not a distinct measurement. Revisit if `kpip
 lock` ever grows preferred-versions-from-an-existing-lockfile support.
 
 ## Recording a baseline
 
 ```console
-uv run cpip-bench-record
+uv run kpip-bench-record
 ```
 
 Sweeps the offline and live workloads with `--json` into
 `benchmark-runs/<branch>-<timestamp>/` (gitignored) and prints the
-`cpip-bench-compare` line for a later run. `--workload` narrows the sweep,
+`kpip-bench-compare` line for a later run. `--workload` narrows the sweep,
 `-o` picks the directory, and anything after `--` is forwarded to
-`cpip-bench`.
+`kpip-bench`.
 
 It refuses to record unless the machine is actually quiet -- 1-minute load
 average under `cores/4`, on mains power, not thermally limited -- and names
@@ -125,10 +125,10 @@ its own -- Windows has no `os.getloadavg` -- is a blocker too, on the same
 reasoning: an unverifiable machine is exactly the one whose numbers look
 authoritative and are not.
 
-Note that `cpip-bench` measures whatever `--cpip-python` points at, which
+Note that `kpip-bench` measures whatever `--kpip-python` points at, which
 defaults to this harness's own interpreter -- pinned to 3.10 by
 `.python-version`, not the 3.12 the CodSpeed job uses. `meta.json` records
-which one ran, and `cpip-bench-compare` warns when two runs disagree.
+which one ran, and `kpip-bench-compare` warns when two runs disagree.
 
 ## Comparing two runs
 
@@ -138,7 +138,7 @@ compare a change against a baseline, run `--json` once per checkout into
 separate directories, then:
 
 ```console
-uv run cpip-bench-compare before/ after/
+uv run kpip-bench-compare before/ after/
 ```
 
 This prints a before/after/delta table per benchmark and tool, and warns if
@@ -162,13 +162,13 @@ exec'd directly instead of through `/bin/sh`. Two reasons:
 With no shell there is nothing to interpret a command string, so two things
 moved:
 
-- Per-command env vars (`PYTHONPATH`, `CPIP_CACHE_DIR`) are set on the
+- Per-command env vars (`PYTHONPATH`, `KPIP_CACHE_DIR`) are set on the
   hyperfine process and inherited, rather than written as a `FOO=bar` prefix.
   Wrapping each command in a helper interpreter instead would put a whole
   Python startup inside the timed region. `Hyperfine.environment` raises if
   two commands in one benchmark want different values for the same variable.
 - `--setup`/`--prepare` steps that used to chain with `&&` are now a single
-  `cpip_benchmark.runner chain --spec '<json>'` call. Preparation is untimed,
+  `kpip_benchmark.runner chain --spec '<json>'` call. Preparation is untimed,
   so the extra interpreter costs the measurement nothing.
 
 Measured on `startup-help` (30 runs, two sequential pairs), dropping the
@@ -176,4 +176,4 @@ shell moved the mean by -4.2 ms and -2.4 ms, and roughly halved the spread:
 sigma 21.8 -> 8.9 ms and 9.0 -> 4.2 ms. The tighter spread is the point; the
 mean shift is small but real, so JSON exports recorded before this landed are
 not comparable to ones recorded after -- re-record both sides of any
-`cpip-bench-compare` baseline.
+`kpip-bench-compare` baseline.

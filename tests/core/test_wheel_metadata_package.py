@@ -7,8 +7,8 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
-from cpip.core import wheel
-from cpip.core.errors import UnsupportedWheel
+from kpip.core import wheel
+from kpip.core.errors import UnsupportedWheel
 
 ZipDir = Callable[[Path], ZipFile]
 
@@ -170,7 +170,7 @@ class TestParseMetadataHeadersBody:
     """
 
     def test_body_lines_never_leak_into_headers(self) -> None:
-        from cpip.core.wheel_metadata import parse_metadata_headers
+        from kpip.core.wheel_metadata import parse_metadata_headers
 
         contents = (
             "Metadata-Version: 2.1\n"
@@ -190,7 +190,7 @@ class TestParseMetadataHeadersBody:
         assert headers["requires-dist"] == ["real-dep>=1"]
 
     def test_crlf_boundary(self) -> None:
-        from cpip.core.wheel_metadata import parse_metadata_headers
+        from kpip.core.wheel_metadata import parse_metadata_headers
 
         contents = "Name: demo\r\nVersion: 2.0\r\n\r\nRequires-Dist: body-noise>=1\r\n"
 
@@ -201,7 +201,7 @@ class TestParseMetadataHeadersBody:
         assert "requires-dist" not in headers
 
     def test_no_body_at_all(self) -> None:
-        from cpip.core.wheel_metadata import parse_metadata_headers
+        from kpip.core.wheel_metadata import parse_metadata_headers
 
         headers = parse_metadata_headers("Name: demo\nVersion: 3.0\n")
 
@@ -209,7 +209,7 @@ class TestParseMetadataHeadersBody:
         assert headers["version"] == ["3.0"]
 
     def test_continuation_line_falls_back_to_slow_parse(self) -> None:
-        from cpip.core.wheel_metadata import parse_metadata_headers
+        from kpip.core.wheel_metadata import parse_metadata_headers
 
         contents = (
             "Name: demo\nRequires-Dist: dep>=1 ;\n python_version >= '3.8'\n\nbody\n"

@@ -1,6 +1,6 @@
 """``fetch_candidate_sources`` fetches candidate artifacts concurrently.
 
-``cpip download`` used to bring each artifact local one at a time, so a cold
+``kpip download`` used to bring each artifact local one at a time, so a cold
 multi-package download paid one full RTT-plus-transfer per candidate in
 sequence. The helper pools the safe fetches; these tests pin the properties
 that matter: results keep candidate order, independent fetches overlap, and
@@ -12,7 +12,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from cpip.install.output import fetch_candidate_sources
+from kpip.install.output import fetch_candidate_sources
 
 
 class Candidate:

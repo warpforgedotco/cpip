@@ -3,16 +3,16 @@ from __future__ import annotations
 import threading
 import time
 
-from cpip.core.packaging import parse_requirement
-from cpip.core.versions import Version
-from cpip.core.wheel import WheelCandidate
-from cpip.index.candidate_materialization import (
+from kpip.core.packaging import parse_requirement
+from kpip.core.versions import Version
+from kpip.core.wheel import WheelCandidate
+from kpip.index.candidate_materialization import (
     CandidateMaterializer,
     LazyWheelCandidate,
 )
-from cpip.index.links import Link
-from cpip.index.source_models import CandidateRecord
-from cpip.install.output import (
+from kpip.index.links import Link
+from kpip.index.source_models import CandidateRecord
+from kpip.install.output import (
     _run_candidate_operation,
     prepare_install_candidates,
 )

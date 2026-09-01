@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from cpip.cli.main import main
+from kpip.cli.main import main
 
 PACKAGES = Path(__file__).resolve().parents[1] / "data" / "packages"
 

@@ -7,10 +7,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from cpip.index import candidate_materialization
-from cpip.index.provider import CandidateProvider
-from cpip.install.output import materialize_candidates
-from cpip.resolution.api import ResolutionEngine
+from kpip.index import candidate_materialization
+from kpip.index.provider import CandidateProvider
+from kpip.install.output import materialize_candidates
+from kpip.resolution.api import ResolutionEngine
 
 _BENCHMARKS = Path(__file__).resolve().parents[1] / "benchmarks"
 if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect
@@ -69,7 +69,7 @@ def test_winners_materialize_without_reopening_their_wheels(
 def test_the_lazy_layout_matches_the_eager_one(
     tmp_path: Path, opened: list[str]
 ) -> None:
-    from cpip.index.candidate_materialization import CandidateMaterializer
+    from kpip.index.candidate_materialization import CandidateMaterializer
 
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()

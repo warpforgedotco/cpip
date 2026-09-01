@@ -4,12 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
-import cpip.resolution.api
-from cpip.core.errors import ResolutionError
-from cpip.core.packaging import parse_requirement
-from cpip.core.versions import Version
-from cpip.resolution.api import ResolutionConfig, ResolutionEngine
-from cpip.resolution.nab_provider import NabProvider
+import kpip.resolution.api
+from kpip.core.errors import ResolutionError
+from kpip.core.packaging import parse_requirement
+from kpip.core.versions import Version
+from kpip.resolution.api import ResolutionConfig, ResolutionEngine
+from kpip.resolution.nab_provider import NabProvider
 
 from .test_nab_provider import FakeProvider
 
@@ -31,7 +31,7 @@ def test_resolution_snapshots_installed_state_once(
         snapshot_calls += 1
         return {}
 
-    monkeypatch.setattr(cpip.resolution.api, "installed_index", snapshot)
+    monkeypatch.setattr(kpip.resolution.api, "installed_index", snapshot)
     engine = ResolutionEngine(
         provider=FakeProvider(),
     )
@@ -45,7 +45,7 @@ def test_resolution_snapshots_installed_state_once(
 def test_resolution_reuses_the_solvers_dependency_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cpip._vendor.nab_resolver.resolver import Resolver
+    from kpip._vendor.nab_resolver.resolver import Resolver
 
     dependency_calls = 0
     calls_when_solved = None
@@ -346,7 +346,7 @@ def test_root_dependency_extras_rebuild_an_installed_candidate(
         dependencies=installed_dependencies,
     )
     monkeypatch.setattr(
-        cpip.resolution.api,
+        kpip.resolution.api,
         "installed_index",
         lambda: {"aaa-feature": installed},
     )

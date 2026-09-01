@@ -7,24 +7,24 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, call, patch
 
 import pytest
-from cpip.index.links import Link
-from cpip.network.download import (
+from kpip.index.links import Link
+from kpip.network.download import (
     Downloader,
     get_http_response_size,
     log_download,
     parse_content_disposition,
     sanitize_content_filename,
 )
-from cpip.network.exceptions import (
+from kpip.network.exceptions import (
     ConnectionFailedError,
     ConnectionTimeoutError,
     IncompleteDownloadError,
     ProxyConnectionError,
     SSLMissingError,
 )
-from cpip.network.http import NetworkSession
-from cpip_test_support.transport_mocks import BrokenStream, MockResponse
-from cpip_test_support.server import Body, MockServer
+from kpip.network.http import NetworkSession
+from kpip_test_support.transport_mocks import BrokenStream, MockResponse
+from kpip_test_support.server import Body, MockServer
 
 if TYPE_CHECKING:
     from typeshed.wsgi import StartResponse, WSGIEnvironment
@@ -596,8 +596,8 @@ def test_resumed_download_caching(tmp_path: Path) -> None:
 
 def test_error_response_is_drained_and_closed(monkeypatch) -> None:
     """A streamed error response must not keep its connection checked out."""
-    from cpip.core.http import HttpStatusError
-    from cpip_test_support.transport_mocks import make_response
+    from kpip.core.http import HttpStatusError
+    from kpip_test_support.transport_mocks import make_response
 
     url = "https://example.invalid/demo.whl"
     resp = make_response(

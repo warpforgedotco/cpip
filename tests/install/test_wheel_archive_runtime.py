@@ -8,9 +8,9 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from cpip.core.wheel import wheel_candidate_from_path
-from cpip.index.candidate_materialization import _open_resolver_wheel_archive
-from cpip.install.wheel_archive_runtime import RawWheelArchive, open_wheel_archive
+from kpip.core.wheel import wheel_candidate_from_path
+from kpip.index.candidate_materialization import _open_resolver_wheel_archive
+from kpip.install.wheel_archive_runtime import RawWheelArchive, open_wheel_archive
 
 
 def _write_wheel(path: Path, *, big_member: bool = False, bzip2: bool = False) -> None:
@@ -74,7 +74,7 @@ def test_layout_open_does_not_read_the_central_directory(
     wheel: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cpip.core import archive
+    from kpip.core import archive
 
     candidate = wheel_candidate_from_path(os.fspath(wheel))
 
@@ -124,7 +124,7 @@ def test_resolver_archive_reports_modes_like_zipfile(wheel: Path) -> None:
 def test_materialized_candidate_layout_carries_modes(wheel: Path) -> None:
     """The materializer's layout (built through the resolver reader) has the
     same member records, modes included, as one built through zipfile."""
-    from cpip.core.wheel import wheel_candidate
+    from kpip.core.wheel import wheel_candidate
 
     with _open_resolver_wheel_archive(os.fspath(wheel)) as archive:
         via_fast = wheel_candidate(

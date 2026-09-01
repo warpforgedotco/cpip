@@ -40,7 +40,7 @@ KNOWN_DEBT = frozenset(
 
 
 def test_first_party_imports_follow_architecture() -> None:
-    package_root = Path(__file__).parents[2] / "src" / "cpip"
+    package_root = Path(__file__).parents[2] / "src" / "kpip"
     violations: list[str] = []
     for path in package_root.glob("*/*.py"):
         relative = path.relative_to(package_root)
@@ -56,7 +56,7 @@ def test_first_party_imports_follow_architecture() -> None:
             else:
                 continue
             for module in modules:
-                if not module.startswith("cpip."):
+                if not module.startswith("kpip."):
                     continue
                 target = module.split(".", 2)[1]
                 if target in {owner, "_vendor"} or target in ALLOWED_IMPORTS[owner]:

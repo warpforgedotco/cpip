@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-import cpip._vendor.nab_resolver.resolver as resolver_module
-from cpip._vendor.nab_resolver import decide, incompat_index, propagate
-from cpip._vendor.nab_resolver.ranges import Range
-from cpip._vendor.nab_resolver.resolver import Resolver, Solution
-from cpip._vendor.nab_resolver.types import (
+import kpip._vendor.nab_resolver.resolver as resolver_module
+from kpip._vendor.nab_resolver import decide, incompat_index, propagate
+from kpip._vendor.nab_resolver.ranges import Range
+from kpip._vendor.nab_resolver.resolver import Resolver, Solution
+from kpip._vendor.nab_resolver.types import (
     Incompatibility,
     IncompatibilityCause,
     RootRequirement,
@@ -18,7 +18,7 @@ from cpip._vendor.nab_resolver.types import (
 
 _REQUIRES_RESOLVER_OPTIMIZATIONS = pytest.mark.skipif(
     not hasattr(incompat_index, "add_dependency_incompatibility"),
-    reason="requires cpip's resolver optimization patch",
+    reason="requires kpip's resolver optimization patch",
 )
 
 

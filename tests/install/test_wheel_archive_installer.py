@@ -1,4 +1,4 @@
-"""Unit tests for src/cpip/install/wheel_archive_installer.py helpers."""
+"""Unit tests for src/kpip/install/wheel_archive_installer.py helpers."""
 
 from __future__ import annotations
 
@@ -8,11 +8,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from cpip.core.errors import InstallationError
-from cpip.core.wheel import wheel_candidate
-from cpip.install.target import InstallTarget
-from cpip.install.wheel_archive_cache import prepare_cached_wheels
-from cpip.install.wheel_archive_installer import (
+from kpip.core.errors import InstallationError
+from kpip.core.wheel import wheel_candidate
+from kpip.install.target import InstallTarget
+from kpip.install.wheel_archive_cache import prepare_cached_wheels
+from kpip.install.wheel_archive_installer import (
     _rewrite_metadata,
     install_wheels_from_archive_cache,
 )
@@ -277,8 +277,8 @@ def test_archive_route_compiles_bytecode_and_records_it(tmp_path: Path) -> None:
 def test_transactional_install_with_compilation_takes_the_clone_route(
     tmp_path: Path,
 ) -> None:
-    from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
-    from cpip.install.wheel_transaction import install_wheels_transactionally
+    from kpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
+    from kpip.install.wheel_transaction import install_wheels_transactionally
 
     cache_dir = tmp_path / "cache"
     wheel = _make_wheel(tmp_path, "pkg_default", shared_module="default_mod.py")
@@ -399,7 +399,7 @@ def _install_one(
     pycompile: bool = True,
 ) -> tuple[Path, Path]:
     """Install ``wheel`` through the clone route; return (target, cache_dir)."""
-    from cpip.install.wheel_transaction import install_wheels_transactionally
+    from kpip.install.wheel_transaction import install_wheels_transactionally
 
     cache_dir = tmp_path / "cache"
     target = tmp_path / "target"
@@ -428,7 +428,7 @@ def _loaded_code(pyc: Path) -> object:
 
 def test_archive_cache_byte_compiles_at_fill_time(tmp_path: Path) -> None:
     """The cache entry carries its own ``pyc/`` tree, laid out by mapped path."""
-    from cpip.install.wheel_archive_cache import (
+    from kpip.install.wheel_archive_cache import (
         ARCHIVE_CACHE_BUCKET,
         PYC_CACHE_SUBDIR,
     )
@@ -579,7 +579,7 @@ def test_install_falls_back_when_the_cache_has_no_bytecode(tmp_path: Path) -> No
     They must still install with bytecode, compiled in the stage."""
     import shutil as _shutil
 
-    from cpip.install.wheel_archive_cache import (
+    from kpip.install.wheel_archive_cache import (
         ARCHIVE_CACHE_BUCKET,
         PYC_CACHE_SUBDIR,
     )
@@ -606,7 +606,7 @@ def test_a_cold_install_never_compiles_in_the_stage(tmp_path: Path) -> None:
     the stage, and the cache would compile the same modules again -- strictly
     worse than doing it inline. This pins the ordering.
     """
-    from cpip.install import wheel_archive_installer as installer_module
+    from kpip.install import wheel_archive_installer as installer_module
 
     wheel = _make_wheel_with_members(
         tmp_path,

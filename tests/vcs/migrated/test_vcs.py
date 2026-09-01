@@ -8,16 +8,16 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from cpip.core.errors import InstallationError
-from cpip.core.subprocess import CommandArgs
-from cpip.vcs.bazaar import Bazaar
-from cpip.vcs.errors import BadCommand
-from cpip.vcs.git import Git, RemoteNotValidError, looks_like_hash
-from cpip.vcs.mercurial import Mercurial
-from cpip.vcs.subversion import Subversion
-from cpip.vcs.support import HiddenText, hide_url, hide_value
-from cpip.vcs.versioncontrol import RevOptions, VersionControl, make_vcs_requirement_url
-from cpip_test_support import is_svn_installed, need_svn
+from kpip.core.errors import InstallationError
+from kpip.core.subprocess import CommandArgs
+from kpip.vcs.bazaar import Bazaar
+from kpip.vcs.errors import BadCommand
+from kpip.vcs.git import Git, RemoteNotValidError, looks_like_hash
+from kpip.vcs.mercurial import Mercurial
+from kpip.vcs.subversion import Subversion
+from kpip.vcs.support import HiddenText, hide_url, hide_value
+from kpip.vcs.versioncontrol import RevOptions, VersionControl, make_vcs_requirement_url
+from kpip_test_support import is_svn_installed, need_svn
 
 
 @pytest.mark.skipif(
@@ -158,7 +158,7 @@ def test_should_add_vcs_url_prefix(
     ],
 )
 def test_git_remote_url_to_pip(url: str, target: str) -> None:
-    assert Git.git_remote_to_cpip_url(url) == target
+    assert Git.git_remote_to_kpip_url(url) == target
 
 
 @pytest.mark.parametrize(
@@ -170,24 +170,24 @@ def test_git_remote_url_to_pip(url: str, target: str) -> None:
     ],
 )
 def test_paths_are_not_mistaken_for_scp_shorthand(url: str, platform: str) -> None:
-    from cpip.vcs.git import SCP_REGEX
+    from kpip.vcs.git import SCP_REGEX
 
     assert not SCP_REGEX.match(url)
 
     if platform == os.name:
         with pytest.raises(RemoteNotValidError):
-            Git.git_remote_to_cpip_url(url)
+            Git.git_remote_to_kpip_url(url)
 
 
 def test_git_remote_local_path(tmp_path: pathlib.Path) -> None:
     path = pathlib.Path(tmp_path, "project.git")
     path.mkdir()
-    assert Git.git_remote_to_cpip_url(str(path)) == path.as_uri()
+    assert Git.git_remote_to_kpip_url(str(path)) == path.as_uri()
 
 
-@mock.patch("cpip.vcs.git.Git.get_remote_url")
-@mock.patch("cpip.vcs.git.Git.get_revision")
-@mock.patch("cpip.vcs.git.Git.get_subdirectory")
+@mock.patch("kpip.vcs.git.Git.get_remote_url")
+@mock.patch("kpip.vcs.git.Git.get_revision")
+@mock.patch("kpip.vcs.git.Git.get_subdirectory")
 @pytest.mark.parametrize(
     "git_url, target_url_prefix",
     [
@@ -212,7 +212,7 @@ def test_git_get_src_requirements(
 ) -> None:
     sha = "5547fa909e83df8bd743d3978d6667497983a4b7"
 
-    mock_get_remote_url.return_value = Git.git_remote_to_cpip_url(git_url)
+    mock_get_remote_url.return_value = Git.git_remote_to_kpip_url(git_url)
     mock_get_revision.return_value = sha
     mock_get_subdirectory.return_value = None
 
@@ -222,7 +222,7 @@ def test_git_get_src_requirements(
     assert ret == target
 
 
-@mock.patch("cpip.vcs.git.Git.get_revision_sha")
+@mock.patch("kpip.vcs.git.Git.get_revision_sha")
 def test_git_resolve_revision_rev_exists(get_sha_mock: mock.Mock) -> None:
     get_sha_mock.return_value = ("123456", False)
     url = HiddenText("git+https://git.example.com", redacted="*")
@@ -232,7 +232,7 @@ def test_git_resolve_revision_rev_exists(get_sha_mock: mock.Mock) -> None:
     assert new_options.rev == "123456"
 
 
-@mock.patch("cpip.vcs.git.Git.get_revision_sha")
+@mock.patch("kpip.vcs.git.Git.get_revision_sha")
 def test_git_resolve_revision_rev_not_found(get_sha_mock: mock.Mock) -> None:
     get_sha_mock.return_value = (None, False)
     url = HiddenText("git+https://git.example.com", redacted="*")
@@ -242,7 +242,7 @@ def test_git_resolve_revision_rev_not_found(get_sha_mock: mock.Mock) -> None:
     assert new_options.rev == "develop"
 
 
-@mock.patch("cpip.vcs.git.Git.get_revision_sha")
+@mock.patch("kpip.vcs.git.Git.get_revision_sha")
 def test_git_resolve_revision_not_found_warning(
     get_sha_mock: mock.Mock,
     caplog: pytest.LogCaptureFixture,
@@ -275,7 +275,7 @@ def test_git_resolve_revision_not_found_warning(
         (None, False),
     ],
 )
-@mock.patch("cpip.vcs.git.Git.get_revision")
+@mock.patch("kpip.vcs.git.Git.get_revision")
 def test_git_is_commit_id_equal(
     mock_get_revision: mock.Mock,
     rev_name: str | None,
@@ -418,7 +418,7 @@ def test_version_control__run_command__fails(
     when the command is not found or when the user have no permission
     to execute it. The error message must contains the command name.
     """
-    with mock.patch("cpip.vcs.versioncontrol.call_subprocess") as call:
+    with mock.patch("kpip.vcs.versioncontrol.call_subprocess") as call:
         call.side_effect = exc_cls
         with pytest.raises(BadCommand, match=msg_re.format(name=vcs_cls.name)):
             vcs_cls.run_command([])
@@ -554,7 +554,7 @@ def test_get_git_version() -> None:
     ],
 )
 def test_get_git_version_parser(version: str, expected: tuple[int, int]) -> None:
-    with mock.patch("cpip.vcs.git.Git.run_command", return_value=version):
+    with mock.patch("kpip.vcs.git.Git.run_command", return_value=version):
         assert Git().get_git_version() == expected
 
 
@@ -615,7 +615,7 @@ def test_subversion__call_vcs_version() -> None:
         ("", ()),
     ],
 )
-@mock.patch("cpip.vcs.subversion.Subversion.run_command")
+@mock.patch("kpip.vcs.subversion.Subversion.run_command")
 def test_subversion__call_vcs_version_patched(
     mock_run_command: mock.Mock,
     svn_output: str,
@@ -627,7 +627,7 @@ def test_subversion__call_vcs_version_patched(
     assert version == expected_version
 
 
-@mock.patch("cpip.vcs.subversion.Subversion.run_command")
+@mock.patch("kpip.vcs.subversion.Subversion.run_command")
 def test_subversion__call_vcs_version_svn_not_installed(
     mock_run_command: mock.Mock,
 ) -> None:
@@ -661,7 +661,7 @@ def test_subversion__get_vcs_version_cached(version: tuple[int, ...]) -> None:
         (1, 8, 0),
     ],
 )
-@mock.patch("cpip.vcs.subversion.Subversion.call_vcs_version")
+@mock.patch("kpip.vcs.subversion.Subversion.call_vcs_version")
 def test_subversion__get_vcs_version_call_vcs(
     mock_call_vcs: mock.Mock,
     vcs_version: tuple[int, ...],
@@ -708,7 +708,7 @@ class TestVcsArgs:
         self.dest = os.fspath(tmp_path / "dest")
         self.call_subprocess_mock = mock.MagicMock()
         monkeypatch.setattr(
-            "cpip.vcs.versioncontrol.call_subprocess",
+            "kpip.vcs.versioncontrol.call_subprocess",
             self.call_subprocess_mock,
         )
 
@@ -813,7 +813,7 @@ class TestGitArgs(TestVcsArgs):
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setenv("CPIP_NO_PARTIAL_CLONE_FOR_BROKEN_GIT_SERVER", "1")
+        monkeypatch.setenv("KPIP_NO_PARTIAL_CLONE_FOR_BROKEN_GIT_SERVER", "1")
         with mock.patch.object(self.svn, "get_git_version", return_value=(2, 17)):
             with mock.patch.object(
                 self.svn,

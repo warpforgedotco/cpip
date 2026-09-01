@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 import pytest
-from cpip.platform import tar_reader
+from kpip.platform import tar_reader
 
 
 def _write_tar(
@@ -504,7 +504,7 @@ class TestFastUntarEmptyArchive:
         extracted_names[0] after a successful-but-empty fast_untar() raised
         IndexError instead of the (correct) no-op.
         """
-        from cpip.platform.unpacking import untar_file
+        from kpip.platform.unpacking import untar_file
 
         archive_path = tmp_path / "empty.tar.gz"
 
@@ -711,7 +711,7 @@ class TestDirectoryCache:
         _assert_matches_real_tarfile(tmp_path, archive_path)
 
     def test_directory_level_escape_is_rejected(self, tmp_path: Path) -> None:
-        from cpip.core.errors import InstallationError
+        from kpip.core.errors import InstallationError
 
         archive_path = tmp_path / "escape.tar"
         with archive_path.open("wb") as fp:
@@ -745,7 +745,7 @@ class TestDirectoryCache:
     def test_absolute_member_names_are_rejected(
         self, tmp_path: Path, name: str
     ) -> None:
-        from cpip.core.errors import InstallationError
+        from kpip.core.errors import InstallationError
 
         archive_path = tmp_path / "absolute.tar"
         with archive_path.open("wb") as fp:

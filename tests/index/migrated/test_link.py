@@ -5,11 +5,11 @@ import posixpath
 from pathlib import Path
 
 import pytest
-from cpip.core.errors import CpipError
-from cpip.core.hashes import Hashes
-from cpip.index.links import InvalidEggFragment, Link
-from cpip.index.paths import PathComponent
-from cpip.index.source_models import ArtifactKind
+from kpip.core.errors import KpipError
+from kpip.core.hashes import Hashes
+from kpip.index.links import InvalidEggFragment, Link
+from kpip.index.paths import PathComponent
+from kpip.index.source_models import ArtifactKind
 
 
 class TestLink:
@@ -54,7 +54,7 @@ class TestLink:
         def fail_url_to_path(url: str) -> str:
             raise AssertionError(f"converted known local URL back to a path: {url}")
 
-        monkeypatch.setattr("cpip.index.links.url_to_path", fail_url_to_path)
+        monkeypatch.setattr("kpip.index.links.url_to_path", fail_url_to_path)
 
         link = Link.from_path(wheel, source_url=None, is_dir=False)
 
@@ -171,7 +171,7 @@ class TestLink:
     )
     def test_invalid_egg_fragments(self, fragment: str) -> None:
         url = f"git+https://example.com/package#egg={fragment}"
-        with pytest.raises(CpipError):
+        with pytest.raises(KpipError):
             Link(url)
 
     def test_invalid_egg_fragment_with_extras_and_version_hint(self) -> None:

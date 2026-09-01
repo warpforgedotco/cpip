@@ -3,12 +3,12 @@ from __future__ import annotations
 import hashlib
 
 import pytest
-from cpip.core.errors import HashMismatch, HashMissing, InstallationError
-from cpip.core.hashes import Hashes, MissingHashes
+from kpip.core.errors import HashMismatch, HashMissing, InstallationError
+from kpip.core.hashes import Hashes, MissingHashes
 
 
 def test_hashes_validate_path(tmp_path) -> None:
-    content = b"cpip hash test"
+    content = b"kpip hash test"
     digest = hashlib.sha256(content).hexdigest()
     file_path = tmp_path / "archive.whl"
     file_path.write_bytes(content)
@@ -28,7 +28,7 @@ def test_hashes_intersection() -> None:
 
 def test_missing_hashes_reports_sha256(tmp_path) -> None:
     file_path = tmp_path / "archive.whl"
-    file_path.write_bytes(b"cpip hash test")
+    file_path.write_bytes(b"kpip hash test")
 
     with pytest.raises(HashMissing):
         MissingHashes().check_against_path(str(file_path))

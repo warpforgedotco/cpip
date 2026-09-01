@@ -7,13 +7,13 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from cpip._vendor.urllib3.connection import HTTPConnection
-from cpip._vendor.urllib3.exceptions import DecodeError, NewConnectionError
-from cpip._vendor.urllib3.response import HTTPResponse as Urllib3HTTPResponse
-from cpip._vendor.urllib3.util import Timeout
-from cpip.network.exceptions import ConnectionFailedError, TooManyRedirectsError
-from cpip.network.http import DEFAULT_TIMEOUT, NetworkSession
-from cpip_test_support.transport_mocks import make_response
+from kpip._vendor.urllib3.connection import HTTPConnection
+from kpip._vendor.urllib3.exceptions import DecodeError, NewConnectionError
+from kpip._vendor.urllib3.response import HTTPResponse as Urllib3HTTPResponse
+from kpip._vendor.urllib3.util import Timeout
+from kpip.network.exceptions import ConnectionFailedError, TooManyRedirectsError
+from kpip.network.http import DEFAULT_TIMEOUT, NetworkSession
+from kpip_test_support.transport_mocks import make_response
 
 
 def test_session_decodes_gzip_responses(tmp_path) -> None:

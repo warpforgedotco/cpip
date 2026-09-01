@@ -10,10 +10,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from cpip.core.wheel import wheel_candidate
-from cpip.index import metadata_cache
-from cpip.install import wheel_archive_cache
-from cpip.install.wheel_archive_cache import prepare_cached_wheel, wheel_digest
+from kpip.core.wheel import wheel_candidate
+from kpip.index import metadata_cache
+from kpip.install import wheel_archive_cache
+from kpip.install.wheel_archive_cache import prepare_cached_wheel, wheel_digest
 
 _BENCHMARKS = Path(__file__).resolve().parents[1] / "benchmarks"
 if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect
@@ -120,7 +120,7 @@ def test_prepare_cached_wheels_reads_the_digests_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A warm batch costs one digest query, not one per wheel."""
-    from cpip.install.wheel_archive_cache import prepare_cached_wheels
+    from kpip.install.wheel_archive_cache import prepare_cached_wheels
 
     wheels = [make_wheel(tmp_path, f"demo-{index}", "1.0.0") for index in range(4)]
     candidates = tuple(wheel_candidate(str(wheel)) for wheel in wheels)
@@ -157,7 +157,7 @@ def test_threaded_preparation_records_every_digest(
 ) -> None:
     """The thread pool preparing a batch must not lose digests to a racing
     cache instance; the next install then hashes nothing."""
-    from cpip.install.wheel_archive_cache import prepare_cached_wheels
+    from kpip.install.wheel_archive_cache import prepare_cached_wheels
 
     wheels = [make_wheel(tmp_path, f"demo-{index}", "1.0.0") for index in range(12)]
     candidates = tuple(wheel_candidate(str(wheel)) for wheel in wheels)

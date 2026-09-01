@@ -4,7 +4,7 @@
 artifact, so its per-request overhead (header assembly, credential
 resolution, HTTP-cache probing, coalescing bookkeeping) scales with every
 resolve.  These benchmarks stub the transport with canned responses so they
-measure only cpip's own policy code, never sockets.
+measure only kpip's own policy code, never sockets.
 """
 
 from __future__ import annotations
@@ -13,11 +13,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from cpip.core.http import HttpResponse
-from cpip.network.download import Downloader
-from cpip.network.http import NetworkSession
-from cpip.network.lazy_wheel import dist_from_wheel_url
-from cpip_test_support.transport_mocks import make_response
+from kpip.core.http import HttpResponse
+from kpip.network.download import Downloader
+from kpip.network.http import NetworkSession
+from kpip.network.lazy_wheel import dist_from_wheel_url
+from kpip_test_support.transport_mocks import make_response
 from pytest_codspeed import BenchmarkFixture
 
 from benchmark_support import make_wheel, simple_index_html
@@ -381,7 +381,7 @@ def test_download_artifacts(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     """Streaming artifact downloads through the Downloader chunk loop."""
-    from cpip.index.links import Link
+    from kpip.index.links import Link
 
     bodies = dict.fromkeys(ARTIFACT_URLS, ARTIFACT_BODY)
     response_headers = {"Content-Type": "application/octet-stream"}

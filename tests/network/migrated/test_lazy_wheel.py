@@ -1,16 +1,16 @@
 from collections.abc import Iterator
 
 import pytest
-from cpip.network.exceptions import InvalidWheel
-from cpip.network.http import NetworkSession
-from cpip.network.lazy_wheel import (
+from kpip.network.exceptions import InvalidWheel
+from kpip.network.http import NetworkSession
+from kpip.network.lazy_wheel import (
     HTTPRangeRequestUnsupported,
     dist_from_wheel_url,
 )
-from cpip_test_support import TestData
-from cpip_test_support.server import MockServer, file_response
+from kpip_test_support import TestData
+from kpip_test_support.server import MockServer, file_response
 from packaging.utils import canonicalize_name
-from cpip.core.versions import Version
+from kpip.core.versions import Version
 
 MYPY_0_782_WHL = (
     "https://files.pythonhosted.org/packages/9d/65/"

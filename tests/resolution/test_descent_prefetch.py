@@ -10,12 +10,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import cpip.resolution.nab_provider as nab_provider
-from cpip.core.versions import Version
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.api import ResolutionEngine
-from cpip.resolution.models import ResolutionConfig
-from cpip.resolution.nab_provider import NabProvider
+import kpip.resolution.nab_provider as nab_provider
+from kpip.core.versions import Version
+from kpip.index.provider import CandidateProvider
+from kpip.resolution.api import ResolutionEngine
+from kpip.resolution.models import ResolutionConfig
+from kpip.resolution.nab_provider import NabProvider
 
 _BENCHMARKS = Path(__file__).resolve().parents[1] / "benchmarks"
 if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect

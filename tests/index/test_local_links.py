@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 
 import pytest
-from cpip.core.urls import path_to_url
-from cpip.index.links import Link
-from cpip.index.source_locations import FindLinksSource
+from kpip.core.urls import path_to_url
+from kpip.index.links import Link
+from kpip.index.source_locations import FindLinksSource
 
 NAMES = (
     "pkg-1.0-py3-none-any.whl",

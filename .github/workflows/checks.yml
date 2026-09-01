@@ -63,7 +63,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes subversion
       - run: uv sync --locked --group test
       - name: Unit and package tests
-        # Excludes tests/cli/functional, which drives a real cpip in a
+        # Excludes tests/cli/functional, which drives a real kpip in a
         # subprocess and runs in its own job below. Network-marked tests are
         # deselected here so a slow index cannot fail an unrelated pull
         # request; the functional job covers what needs the network.

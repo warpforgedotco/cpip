@@ -9,19 +9,19 @@ comes from a constraints file.
 from __future__ import annotations
 
 import pytest
-from cpip.core.errors import (
+from kpip.core.errors import (
     DirectoryUrlHashUnsupported,
     HashMissing,
     HashUnpinned,
     VcsHashUnsupported,
 )
-from cpip.resolution.hash_checking import (
+from kpip.resolution.hash_checking import (
     HashErrors,
     check_requirement,
     constraint_pinned_names,
     enforce_hash_checking,
 )
-from cpip.resolution.input_requirements import install_req_from_line
+from kpip.resolution.input_requirements import install_req_from_line
 
 DIGEST = "0" * 64
 

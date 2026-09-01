@@ -19,8 +19,8 @@ import threading
 from pathlib import Path
 
 import pytest
-from cpip.platform import lock
-from cpip.platform.lock import environment_write_lock, lock_path_for
+from kpip.platform import lock
+from kpip.platform.lock import environment_write_lock, lock_path_for
 
 
 def test_the_lock_excludes_a_second_holder(tmp_path: Path) -> None:
@@ -93,7 +93,7 @@ def test_the_lock_lives_outside_the_temp_directory(
 ) -> None:
     """A caller pointing TMPDIR at a scratch dir gets no lock file in it.
 
-    The functional harness runs cpip under a private ``TMPDIR`` and asserts
+    The functional harness runs kpip under a private ``TMPDIR`` and asserts
     it is empty afterwards, so a lock left there fails every install test.
     """
 
@@ -111,10 +111,10 @@ def test_the_lock_path_ignores_the_configured_cache_dir(
     """Installers that disagree about the cache still meet on one lock file."""
 
     target = str(tmp_path / "site-packages")
-    monkeypatch.delenv("CPIP_CACHE_DIR", raising=False)
+    monkeypatch.delenv("KPIP_CACHE_DIR", raising=False)
     default = lock_path_for(target)
 
-    monkeypatch.setenv("CPIP_CACHE_DIR", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("KPIP_CACHE_DIR", str(tmp_path / "elsewhere"))
 
     assert lock_path_for(target) == default
 

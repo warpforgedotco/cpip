@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from cpip_test_support import CpipTestEnvironment, create_basic_wheel_for_package
+from kpip_test_support import KpipTestEnvironment, create_basic_wheel_for_package
 
 
-def test_all_releases_allows_prereleases(script: CpipTestEnvironment) -> None:
+def test_all_releases_allows_prereleases(script: KpipTestEnvironment) -> None:
     """Test that --all-releases :all: allows installing pre-release versions."""
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "--all-releases=:all:",
         "simple==1.0a1",
         find_links=[pkg_path.parent],
@@ -17,11 +17,11 @@ def test_all_releases_allows_prereleases(script: CpipTestEnvironment) -> None:
     result.assert_installed("simple", editable=False)
 
 
-def test_all_releases_package_specific(script: CpipTestEnvironment) -> None:
+def test_all_releases_package_specific(script: KpipTestEnvironment) -> None:
     """Test --all-releases with package allows pre-releases for that package."""
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "--all-releases=simple",
         "simple==1.0a1",
         find_links=[pkg_path.parent],
@@ -29,11 +29,11 @@ def test_all_releases_package_specific(script: CpipTestEnvironment) -> None:
     result.assert_installed("simple", editable=False)
 
 
-def test_only_final_blocks_prereleases(script: CpipTestEnvironment) -> None:
+def test_only_final_blocks_prereleases(script: KpipTestEnvironment) -> None:
     """Test that --only-final :all: blocks pre-release versions."""
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "--only-final=:all:",
         "simple==1.0a1",
         find_links=[pkg_path.parent],
@@ -44,11 +44,11 @@ def test_only_final_blocks_prereleases(script: CpipTestEnvironment) -> None:
     )
 
 
-def test_only_final_package_specific(script: CpipTestEnvironment) -> None:
+def test_only_final_package_specific(script: KpipTestEnvironment) -> None:
     """Test --only-final with package blocks pre-releases for that package."""
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "--only-final=simple",
         "simple==1.0a1",
         find_links=[pkg_path.parent],
@@ -59,11 +59,11 @@ def test_only_final_package_specific(script: CpipTestEnvironment) -> None:
     )
 
 
-def test_pre_transforms_to_all_releases(script: CpipTestEnvironment) -> None:
+def test_pre_transforms_to_all_releases(script: KpipTestEnvironment) -> None:
     """Test that --pre is equivalent to --all-releases :all:."""
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "--pre",
         "simple==1.0a1",
         find_links=[pkg_path.parent],
@@ -71,9 +71,9 @@ def test_pre_transforms_to_all_releases(script: CpipTestEnvironment) -> None:
     result.assert_installed("simple", editable=False)
 
 
-def test_pre_with_all_releases_fails(script: CpipTestEnvironment) -> None:
+def test_pre_with_all_releases_fails(script: KpipTestEnvironment) -> None:
     """Test that --pre cannot be used with --all-releases."""
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--pre",
         "--all-releases=pkg1",
@@ -83,9 +83,9 @@ def test_pre_with_all_releases_fails(script: CpipTestEnvironment) -> None:
     assert "--pre cannot be used with --all-releases or --only-final" in result.stderr
 
 
-def test_pre_with_only_final_fails(script: CpipTestEnvironment) -> None:
+def test_pre_with_only_final_fails(script: KpipTestEnvironment) -> None:
     """Test that --pre cannot be used with --only-final."""
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--pre",
         "--only-final=pkg1",
@@ -95,12 +95,12 @@ def test_pre_with_only_final_fails(script: CpipTestEnvironment) -> None:
     assert "--pre cannot be used with --all-releases or --only-final" in result.stderr
 
 
-def test_all_releases_none(script: CpipTestEnvironment) -> None:
+def test_all_releases_none(script: KpipTestEnvironment) -> None:
     """Test that --all-releases :none: empties the set."""
     pre_pkg = create_basic_wheel_for_package(script, "simple", "1.0a1")
     create_basic_wheel_for_package(script, "simple", "1.0")
 
-    script.cpip_install_local(
+    script.kpip_install_local(
         "--all-releases=:all:",
         "--all-releases=:none:",
         "simple",
@@ -109,11 +109,11 @@ def test_all_releases_none(script: CpipTestEnvironment) -> None:
     script.assert_installed(simple="1.0")
 
 
-def test_package_specific_overrides_all(script: CpipTestEnvironment) -> None:
+def test_package_specific_overrides_all(script: KpipTestEnvironment) -> None:
     """Test that package-specific --only-final overrides :all: --all-releases."""
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "--all-releases=:all:",
         "--only-final=simple",
         "simple==1.0a1",
@@ -125,7 +125,7 @@ def test_package_specific_overrides_all(script: CpipTestEnvironment) -> None:
     )
 
 
-def test_requirements_file_all_releases(script: CpipTestEnvironment) -> None:
+def test_requirements_file_all_releases(script: KpipTestEnvironment) -> None:
     """Test --all-releases in requirements file."""
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
@@ -134,22 +134,22 @@ def test_requirements_file_all_releases(script: CpipTestEnvironment) -> None:
         "--all-releases :all:\nsimple==1.0a1\n",
     )
 
-    result = script.cpip_install_local("-r", req_file, find_links=[pkg_path.parent])
+    result = script.kpip_install_local("-r", req_file, find_links=[pkg_path.parent])
     result.assert_installed("simple", editable=False)
 
 
-def test_requirements_file_only_final(script: CpipTestEnvironment) -> None:
+def test_requirements_file_only_final(script: KpipTestEnvironment) -> None:
     """Test --only-final in requirements file."""
     pre_pkg = create_basic_wheel_for_package(script, "simple", "1.0a1")
     create_basic_wheel_for_package(script, "simple", "1.0")
 
     req_file = script.temporary_file("reqs.txt", "--only-final :all:\nsimple\n")
 
-    script.cpip_install_local("-r", req_file, find_links=[pre_pkg.parent])
+    script.kpip_install_local("-r", req_file, find_links=[pre_pkg.parent])
     script.assert_installed(simple="1.0")
 
 
-def test_order_only_final_then_all_releases(script: CpipTestEnvironment) -> None:
+def test_order_only_final_then_all_releases(script: KpipTestEnvironment) -> None:
     """Test critical case: --only-final=:all: --all-releases=<package>.
 
     This tests that argument order is preserved when passed to build backends.
@@ -158,7 +158,7 @@ def test_order_only_final_then_all_releases(script: CpipTestEnvironment) -> None
     """
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "--only-final=:all:",
         "--all-releases=simple",
         "simple==1.0a1",
@@ -167,7 +167,7 @@ def test_order_only_final_then_all_releases(script: CpipTestEnvironment) -> None
     result.assert_installed("simple", editable=False)
 
 
-def test_order_all_releases_then_only_final(script: CpipTestEnvironment) -> None:
+def test_order_all_releases_then_only_final(script: KpipTestEnvironment) -> None:
     """Test reverse case: --all-releases=:all: --only-final=<package>.
 
     This tests that when the user specifies --all-releases=:all: --only-final=simple,
@@ -175,7 +175,7 @@ def test_order_all_releases_then_only_final(script: CpipTestEnvironment) -> None
     """
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "--all-releases=:all:",
         "--only-final=simple",
         "simple==1.0a1",
@@ -188,7 +188,7 @@ def test_order_all_releases_then_only_final(script: CpipTestEnvironment) -> None
 
 
 def test_no_matching_version_without_release_control(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     """Test error message when no version matches without release control flags.
 
@@ -197,7 +197,7 @@ def test_no_matching_version_without_release_control(
     """
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0")
 
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "simple==2.0",
         find_links=[pkg_path.parent],
         expect_error=True,
@@ -207,7 +207,7 @@ def test_no_matching_version_without_release_control(
 
 
 def test_no_matching_version_with_all_releases(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     """Test error message when no version matches with --all-releases.
 
@@ -216,7 +216,7 @@ def test_no_matching_version_with_all_releases(
     """
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0")
 
-    result = script.cpip_install_local(
+    result = script.kpip_install_local(
         "--all-releases=:all:",
         "simple==2.0",
         find_links=[pkg_path.parent],
@@ -226,7 +226,7 @@ def test_no_matching_version_with_all_releases(
 
 
 def test_pre_flag_with_requirements_file_containing_options(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     """Test --pre on command line works with requirements file options.
 
@@ -240,17 +240,17 @@ def test_pre_flag_with_requirements_file_containing_options(
         f"--find-links {pre_pkg.parent.as_posix()}\nsimple\n",
     )
 
-    report = script.cpip_install_local_report("-r", req_file, find_links=[])
+    report = script.kpip_install_local_report("-r", req_file, find_links=[])
     assert len(report["install"]) == 1
     assert report["install"][0]["metadata"]["version"] == "1.0"
 
-    report = script.cpip_install_local_report("--pre", "-r", req_file, find_links=[])
+    report = script.kpip_install_local_report("--pre", "-r", req_file, find_links=[])
     assert len(report["install"]) == 1
     assert report["install"][0]["metadata"]["version"] == "2.0a1"
 
 
 def test_reqfile_all_releases_overrides_cmdline_only_final(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     """Test requirements file --all-releases overrides command line --only-final."""
     pre_pkg = create_basic_wheel_for_package(script, "simple", "2.0a1")
@@ -261,7 +261,7 @@ def test_reqfile_all_releases_overrides_cmdline_only_final(
         f"--find-links {pre_pkg.parent.as_posix()}\n--all-releases :all:\nsimple\n",
     )
 
-    report = script.cpip_install_local_report(
+    report = script.kpip_install_local_report(
         "--only-final=:all:",
         "-r",
         req_file,
@@ -272,7 +272,7 @@ def test_reqfile_all_releases_overrides_cmdline_only_final(
 
 
 def test_reqfile_only_final_overrides_cmdline_all_releases(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     """Test requirements file --only-final overrides command line --all-releases."""
     pre_pkg = create_basic_wheel_for_package(script, "simple", "2.0a1")
@@ -283,7 +283,7 @@ def test_reqfile_only_final_overrides_cmdline_all_releases(
         f"--find-links {pre_pkg.parent.as_posix()}\n--only-final :all:\nsimple\n",
     )
 
-    report = script.cpip_install_local_report(
+    report = script.kpip_install_local_report(
         "--all-releases=:all:",
         "-r",
         req_file,
@@ -294,7 +294,7 @@ def test_reqfile_only_final_overrides_cmdline_all_releases(
 
 
 def test_package_specific_overrides_all_in_requirements_file(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     """Test package-specific setting overrides :all: in requirements file."""
     pre_pkg = create_basic_wheel_for_package(script, "simple", "2.0a1")
@@ -306,6 +306,6 @@ def test_package_specific_overrides_all_in_requirements_file(
         "--only-final simple\nsimple\n",
     )
 
-    report = script.cpip_install_local_report("-r", req_file, find_links=[])
+    report = script.kpip_install_local_report("-r", req_file, find_links=[])
     assert len(report["install"]) == 1
     assert report["install"][0]["metadata"]["version"] == "1.0"

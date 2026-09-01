@@ -4,11 +4,11 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from cpip.core.errors import HashMismatch
-from cpip.index.artifacts import ArtifactLocator
-from cpip.index.artifact_cache import ARTIFACT_CACHE_BUCKET
-from cpip.network.cache import SafeFileCache
-from cpip.core.appdirs import http_cache_path
+from kpip.core.errors import HashMismatch
+from kpip.index.artifacts import ArtifactLocator
+from kpip.index.artifact_cache import ARTIFACT_CACHE_BUCKET
+from kpip.network.cache import SafeFileCache
+from kpip.core.appdirs import http_cache_path
 
 
 class FakeResponse:
@@ -44,7 +44,7 @@ def test_artifacts_are_reused_from_http_cache(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from cpip.index import artifacts
+    from kpip.index import artifacts
 
     monkeypatch.setattr(artifacts, "DOWNLOAD_DIR", str(tmp_path / "downloads"))
     cache = SafeFileCache(str(tmp_path / "cache"))
@@ -65,7 +65,7 @@ def test_artifacts_are_stored_once_by_sha256(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from cpip.index import artifacts
+    from kpip.index import artifacts
 
     monkeypatch.setattr(artifacts, "DOWNLOAD_DIR", str(tmp_path / "downloads"))
     body = b"content addressed wheel"
@@ -102,7 +102,7 @@ def test_unhashed_artifact_uses_url_receipt(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from cpip.index import artifacts
+    from kpip.index import artifacts
 
     monkeypatch.setattr(artifacts, "DOWNLOAD_DIR", str(tmp_path / "downloads"))
     cache_root = tmp_path / "cache"
@@ -129,7 +129,7 @@ def test_hash_mismatch_is_not_published(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from cpip.index import artifacts
+    from kpip.index import artifacts
 
     monkeypatch.setattr(artifacts, "DOWNLOAD_DIR", str(tmp_path / "downloads"))
     cache_root = tmp_path / "cache"
@@ -153,8 +153,8 @@ def test_artifact_cache_write_failure_falls_back_to_download(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from cpip.index import artifacts
-    from cpip.index.artifact_cache import ArtifactCache
+    from kpip.index import artifacts
+    from kpip.index.artifact_cache import ArtifactCache
 
     monkeypatch.setattr(artifacts, "DOWNLOAD_DIR", str(tmp_path / "downloads"))
     monkeypatch.setattr(

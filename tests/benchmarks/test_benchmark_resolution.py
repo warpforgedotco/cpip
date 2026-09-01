@@ -11,17 +11,17 @@ from pathlib import Path
 from typing import Any
 
 from benchmark_support import cold_metadata_cache_dir, reset_caches
-from cpip._vendor.nab_resolver import decide
-from cpip._vendor.nab_resolver.ranges import Range
-from cpip._vendor.nab_resolver.resolver import Resolver
-from cpip._vendor.nab_resolver.types import Incompatibility, IncompatibilityCause
-from cpip.core.errors import ResolutionError
-from cpip.core.packaging import parse_requirement
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.api import ResolutionEngine
-from cpip.resolution.files import parse_requirements
-from cpip.resolution.models import ResolutionConfig
-from cpip.resolution.nab_provider import NabProvider
+from kpip._vendor.nab_resolver import decide
+from kpip._vendor.nab_resolver.ranges import Range
+from kpip._vendor.nab_resolver.resolver import Resolver
+from kpip._vendor.nab_resolver.types import Incompatibility, IncompatibilityCause
+from kpip.core.errors import ResolutionError
+from kpip.core.packaging import parse_requirement
+from kpip.index.provider import CandidateProvider
+from kpip.resolution.api import ResolutionEngine
+from kpip.resolution.files import parse_requirements
+from kpip.resolution.models import ResolutionConfig
+from kpip.resolution.nab_provider import NabProvider
 from pytest_codspeed import BenchmarkFixture
 
 

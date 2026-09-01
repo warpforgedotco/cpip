@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 import tomllib
-from cpip.core.urls import path_to_url
-from cpip_test_support import CpipTestEnvironment, TestData
+from kpip.core.urls import path_to_url
+from kpip_test_support import KpipTestEnvironment, TestData
 
 
 def expected_simplewheel_lock(
@@ -23,12 +23,12 @@ def expected_simplewheel_lock(
 
 
 def test_lock_wheel_from_findlinks(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     shared_data: TestData,
     tmp_path: Path,
 ) -> None:
     """Test locking a simple wheel package, to the default pylock.toml."""
-    result = script.cpip(
+    result = script.kpip(
         "lock",
         "simplewheel==2.0",
         "--no-index",
@@ -40,7 +40,7 @@ def test_lock_wheel_from_findlinks(
     pylock = tomllib.loads(script.scratch_path.joinpath("pylock.toml").read_text())
     wheel_name = pylock["packages"][0]["wheels"][0]["name"]
     assert pylock == {
-        "created-by": "cpip",
+        "created-by": "kpip",
         "lock-version": "1.0",
         "packages": [
             {
@@ -57,14 +57,14 @@ def test_lock_wheel_from_findlinks(
 
 
 def test_lock_applies_constraint_file(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     shared_data: TestData,
     tmp_path: Path,
 ) -> None:
     constraint = tmp_path / "constraints.txt"
     constraint.write_text("simplewheel==1.0\n", encoding="utf-8")
 
-    result = script.cpip(
+    result = script.kpip(
         "lock",
         "simplewheel>=1.0",
         "--constraint",
@@ -82,11 +82,11 @@ def test_lock_applies_constraint_file(
 
 
 def test_lock_sdist_from_findlinks(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     shared_data: TestData,
 ) -> None:
     """Test locking a simple wheel package, to the default pylock.toml."""
-    result = script.cpip(
+    result = script.kpip(
         "lock",
         "--no-build-isolation",
         "simple==2.0",
@@ -120,7 +120,7 @@ def test_lock_sdist_from_findlinks(
 
 
 def test_lock_local_directory(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     shared_data: TestData,
     tmp_path: Path,
 ) -> None:
@@ -133,7 +133,7 @@ def test_lock_local_directory(
             version = "1.0"
             """),
     )
-    result = script.cpip(
+    result = script.kpip(
         "lock",
         ".",
         "--quiet",
@@ -155,7 +155,7 @@ def test_lock_local_directory(
 
 
 def test_lock_local_editable_with_dep(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     shared_data: TestData,
     tmp_path: Path,
 ) -> None:
@@ -169,7 +169,7 @@ def test_lock_local_editable_with_dep(
             dependencies = ["simplewheel==2.0"]
             """),
     )
-    result = script.cpip(
+    result = script.kpip(
         "lock",
         "-e",
         ".",
@@ -202,8 +202,8 @@ def test_lock_local_editable_with_dep(
 
 
 @pytest.mark.network
-def test_lock_vcs(script: CpipTestEnvironment, shared_data: TestData) -> None:
-    result = script.cpip(
+def test_lock_vcs(script: KpipTestEnvironment, shared_data: TestData) -> None:
+    result = script.kpip(
         "lock",
         "git+https://github.com/pypa/pip-test-package@0.1.2",
         "--quiet",
@@ -227,8 +227,8 @@ def test_lock_vcs(script: CpipTestEnvironment, shared_data: TestData) -> None:
 
 
 @pytest.mark.network
-def test_lock_archive(script: CpipTestEnvironment, shared_data: TestData) -> None:
-    result = script.cpip(
+def test_lock_archive(script: KpipTestEnvironment, shared_data: TestData) -> None:
+    result = script.kpip(
         "lock",
         "https://github.com/pypa/pip-test-package/tarball/0.1.2",
         "--quiet",
@@ -254,10 +254,10 @@ def test_lock_archive(script: CpipTestEnvironment, shared_data: TestData) -> Non
     ]
 
 
-def test_lock_roundtrip(script: CpipTestEnvironment, data: TestData) -> None:
+def test_lock_roundtrip(script: KpipTestEnvironment, data: TestData) -> None:
     pylock_path = data.lockfiles.joinpath("pylock.toml")
     pylock_result_path = pylock_path.parent / "pylock.result.toml"
-    script.cpip(
+    script.kpip(
         "lock",
         "--quiet",
         "--no-build-isolation",

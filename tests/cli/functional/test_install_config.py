@@ -7,8 +7,8 @@ from itertools import repeat
 from pathlib import Path
 
 import pytest
-from cpip_test_support import CertFactory, CpipTestEnvironment, ScriptFactory, TestData
-from cpip_test_support.server import (
+from kpip_test_support import CertFactory, KpipTestEnvironment, ScriptFactory, TestData
+from kpip_test_support.server import (
     MockServer,
     authorization_response,
     file_response,
@@ -16,28 +16,28 @@ from cpip_test_support.server import (
     package_page,
     server_running,
 )
-from cpip_test_support.venv import VirtualEnvironment
+from kpip_test_support.venv import VirtualEnvironment
 
 
-def test_options_from_env_vars(script: CpipTestEnvironment) -> None:
+def test_options_from_env_vars(script: KpipTestEnvironment) -> None:
     """Test if ConfigOptionParser reads env vars (e.g. not using PyPI here)"""
-    script.environ["CPIP_NO_INDEX"] = "1"
-    result = script.cpip("install", "-vvv", "INITools", expect_error=True)
+    script.environ["KPIP_NO_INDEX"] = "1"
+    result = script.kpip("install", "-vvv", "INITools", expect_error=True)
     assert "Ignoring indexes:" in result.stdout, str(result)
     msg = "DistributionNotFound: No matching distribution found for INITools"
     assert msg.lower() in result.stdout.lower(), str(result)
 
 
 def test_command_line_options_override_env_vars(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     virtualenv: VirtualEnvironment,
 ) -> None:
     """Test that command line options override environmental variables."""
-    script.environ["CPIP_INDEX_URL"] = "https://example.com/simple/"
-    result = script.cpip("install", "-vvv", "INITools", expect_error=True)
+    script.environ["KPIP_INDEX_URL"] = "https://example.com/simple/"
+    result = script.kpip("install", "-vvv", "INITools", expect_error=True)
     assert "Getting page https://example.com/simple/initools" in result.stdout
     virtualenv.clear()
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "-vvv",
         "--index-url",
@@ -51,30 +51,30 @@ def test_command_line_options_override_env_vars(
 
 @pytest.mark.network
 def test_env_vars_override_config_file(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     virtualenv: VirtualEnvironment,
 ) -> None:
     """Test that environmental variables override settings in config files."""
-    config_file = script.scratch_path / "test-cpip.cfg"
-    script.environ["CPIP_CONFIG_FILE"] = str(config_file)
+    config_file = script.scratch_path / "test-kpip.cfg"
+    script.environ["KPIP_CONFIG_FILE"] = str(config_file)
     config_file.write_text(
         textwrap.dedent("""\
         [global]
         no-index = 1
         """),
     )
-    result = script.cpip("install", "-vvv", "INITools", expect_error=True)
+    result = script.kpip("install", "-vvv", "INITools", expect_error=True)
     msg = "DistributionNotFound: No matching distribution found for INITools"
     assert msg.lower() in result.stdout.lower(), str(result)
-    script.environ["CPIP_NO_INDEX"] = "0"
+    script.environ["KPIP_NO_INDEX"] = "0"
     virtualenv.clear()
-    result = script.cpip("install", "-vvv", "INITools")
+    result = script.kpip("install", "-vvv", "INITools")
     assert "Successfully installed INITools" in result.stdout
 
 
 @pytest.mark.network
 def test_command_line_append_flags(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     virtualenv: VirtualEnvironment,
     data: TestData,
     mock_server: MockServer,
@@ -95,8 +95,8 @@ def test_command_line_append_flags(
     mock_server.set_responses(repeat(response))
     mock_server.start()
     try:
-        script.environ["CPIP_FIND_LINKS"] = index_url
-        result = script.cpip(
+        script.environ["KPIP_FIND_LINKS"] = index_url
+        result = script.kpip(
             "install",
             "-vvv",
             "INITools",
@@ -107,7 +107,7 @@ def test_command_line_append_flags(
             f"Fetching project page and analyzing links: {index_url}" in result.stdout
         )
         virtualenv.clear()
-        result = script.cpip(
+        result = script.kpip(
             "install",
             "-vvv",
             "--find-links",
@@ -125,7 +125,7 @@ def test_command_line_append_flags(
 
 @pytest.mark.network
 def test_command_line_appends_correctly(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     mock_server: MockServer,
 ) -> None:
@@ -139,8 +139,8 @@ def test_command_line_appends_correctly(
     )
     mock_server.start()
     try:
-        script.environ["CPIP_FIND_LINKS"] = f"{index_url} {data.find_links}"
-        result = script.cpip(
+        script.environ["KPIP_FIND_LINKS"] = f"{index_url} {data.find_links}"
+        result = script.kpip(
             "install",
             "-vvv",
             "INITools",
@@ -156,7 +156,7 @@ def test_command_line_appends_correctly(
 
 
 def test_config_file_override_stack(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     virtualenv: VirtualEnvironment,
     mock_server: MockServer,
     shared_data: TestData,
@@ -175,9 +175,9 @@ def test_config_file_override_stack(
     mock_server.start()
     base_address = f"http://{mock_server.host}:{mock_server.port}"
 
-    config_file = script.scratch_path / "test-cpip.cfg"
+    config_file = script.scratch_path / "test-kpip.cfg"
 
-    script.environ["CPIP_CONFIG_FILE"] = str(config_file)
+    script.environ["KPIP_CONFIG_FILE"] = str(config_file)
 
     config_file.write_text(
         textwrap.dedent(f"""\
@@ -185,7 +185,7 @@ def test_config_file_override_stack(
         index-url = {base_address}/simple1
         """),
     )
-    script.cpip("install", "-vvv", "INITools", expect_error=True)
+    script.kpip("install", "-vvv", "INITools", expect_error=True)
     virtualenv.clear()
 
     config_file.write_text(
@@ -196,8 +196,8 @@ def test_config_file_override_stack(
         index-url = {base_address}/simple2
         """),
     )
-    script.cpip("install", "-vvv", "INITools", expect_error=True)
-    script.cpip(
+    script.kpip("install", "-vvv", "INITools", expect_error=True)
+    script.kpip(
         "install",
         "--no-build-isolation",
         "-vvv",
@@ -216,29 +216,29 @@ def test_config_file_override_stack(
 
 
 def test_options_from_venv_config(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     virtualenv: VirtualEnvironment,
 ) -> None:
     """Test if ConfigOptionParser reads a virtualenv-local config file"""
-    from cpip.cli.config import CONFIG_BASENAME
+    from kpip.cli.config import CONFIG_BASENAME
 
     conf = "[global]\nno-index = true"
     ini = virtualenv.location / CONFIG_BASENAME
     with open(ini, "w") as f:
         f.write(conf)
-    result = script.cpip("install", "-vvv", "INITools", expect_error=True)
+    result = script.kpip("install", "-vvv", "INITools", expect_error=True)
     assert "Ignoring indexes:" in result.stdout, str(result)
     msg = "DistributionNotFound: No matching distribution found for INITools"
     assert msg.lower() in result.stdout.lower(), str(result)
 
 
 def test_install_no_binary_via_config_disables_cached_wheels(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     config_file = tempfile.NamedTemporaryFile(mode="wt", delete=False)
     try:
-        script.environ["CPIP_CONFIG_FILE"] = config_file.name
+        script.environ["KPIP_CONFIG_FILE"] = config_file.name
         config_file.write(
             textwrap.dedent("""\
             [global]
@@ -246,7 +246,7 @@ def test_install_no_binary_via_config_disables_cached_wheels(
             """),
         )
         config_file.close()
-        res = script.cpip(
+        res = script.kpip(
             "install",
             "--no-build-isolation",
             "--no-index",
@@ -262,7 +262,7 @@ def test_install_no_binary_via_config_disables_cached_wheels(
 
 
 def test_prompt_for_authentication(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     cert_factory: CertFactory,
 ) -> None:
@@ -287,7 +287,7 @@ def test_prompt_for_authentication(
     url = f"https://{server.host}:{server.port}/simple"
 
     with server_running(server):
-        result = script.cpip(
+        result = script.kpip(
             "install",
             "--index-url",
             url,
@@ -303,7 +303,7 @@ def test_prompt_for_authentication(
 
 
 def test_do_not_prompt_for_authentication(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     cert_factory: CertFactory,
 ) -> None:
@@ -329,7 +329,7 @@ def test_do_not_prompt_for_authentication(
     url = f"https://{server.host}:{server.port}/simple"
 
     with server_running(server):
-        result = script.cpip(
+        result = script.kpip(
             "install",
             "--index-url",
             url,
@@ -346,7 +346,7 @@ def test_do_not_prompt_for_authentication(
 
 
 def test_do_not_prompt_for_authentication_git(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
     cert_factory: CertFactory,
 ) -> None:
@@ -363,7 +363,7 @@ def test_do_not_prompt_for_authentication_git(
     url = f"git+http://{server.host}:{server.port}/simple"
 
     with server_running(server):
-        result = script.cpip(
+        result = script.kpip(
             "install",
             url,
             "--no-input",
@@ -444,7 +444,7 @@ def test_prompt_for_keyring_if_needed(
             workspace.joinpath("keyring"),
             keyring_virtualenv,
         )
-        keyring_script.cpip_install_local(
+        keyring_script.kpip_install_local(
             "keyring",
             "jaraco.classes",
             "jaraco.context",
@@ -468,7 +468,7 @@ def test_prompt_for_keyring_if_needed(
         )
     elif keyring_provider_implementation == "import":
         virtualenv_script = script_factory(workspace.joinpath("venv"), virtualenv)
-        virtualenv_script.cpip_install_local(
+        virtualenv_script.kpip_install_local(
             "keyring",
             "jaraco.classes",
             "jaraco.context",
@@ -548,7 +548,7 @@ def test_prompt_for_keyring_if_needed(
         keyring_path.write_text(keyring_content)
 
     with server_running(server):
-        virtualenv_script.cpip(
+        virtualenv_script.kpip(
             "install",
             "--no-build-isolation",
             "--index-url",
@@ -569,9 +569,9 @@ def test_prompt_for_keyring_if_needed(
 
 
 @pytest.mark.network
-def test_install_quiet_log(script: CpipTestEnvironment, data: TestData) -> None:
+def test_install_quiet_log(script: KpipTestEnvironment, data: TestData) -> None:
     """Test suppressing the progress bar with --quiet and --log."""
     logfile = script.scratch_path / "log"
-    result = script.cpip("install", "-qqq", "setuptools==62.0.0", "--log", logfile)
+    result = script.kpip("install", "-qqq", "setuptools==62.0.0", "--log", logfile)
     assert result.stdout == ""
     assert result.stderr == ""

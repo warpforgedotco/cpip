@@ -13,13 +13,13 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
-from cpip.index.candidate_materialization import (
+from kpip.index.candidate_materialization import (
     _RANGED_METADATA_MIN_WHEEL_BYTES,
     CandidateMaterializer,
 )
-from cpip.index.catalog_cache import link_from_record, link_record
-from cpip.index.links import Link
-from cpip.index.page_parsing import IndexPageParser
+from kpip.index.catalog_cache import link_from_record, link_record
+from kpip.index.links import Link
+from kpip.index.page_parsing import IndexPageParser
 
 
 def parse_links(files: list[dict[str, Any]]) -> list[Link]:
@@ -60,7 +60,7 @@ def test_size_survives_the_catalog_record_round_trip() -> None:
 
 
 def test_a_negative_cached_size_is_rejected_at_load_time() -> None:
-    from cpip.index.catalog_cache import valid_record
+    from kpip.index.catalog_cache import valid_record
 
     [link] = parse_links(
         [{"url": "demo-1.0-py3-none-any.whl", "filename": "x", "size": 4096}],
@@ -77,7 +77,7 @@ def test_a_negative_cached_size_is_rejected_at_load_time() -> None:
 
 def test_legacy_nine_tuple_records_still_load() -> None:
     """Records written before the size field stay valid: no cache cold-start."""
-    from cpip.index.catalog_cache import valid_record
+    from kpip.index.catalog_cache import valid_record
 
     [link] = parse_links(
         [{"url": "demo-1.0-py3-none-any.whl", "filename": "x", "size": 4096}],

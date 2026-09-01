@@ -5,8 +5,8 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from cpip.cli.fast_install import install_resolved_pure_wheels
-from cpip.core.wheel import wheel_candidate
+from kpip.cli.fast_install import install_resolved_pure_wheels
+from kpip.core.wheel import wheel_candidate
 
 
 def build_wheel(directory: Path, record: str | None) -> Path:
@@ -71,7 +71,7 @@ def test_cold_resolve_installs_with_pre_read_members(tmp_path: Path) -> None:
     import os
     import sys
 
-    from cpip.cli.fast_install import (
+    from kpip.cli.fast_install import (
         install_resolved_pure_wheels,
         resolve_simple_wheelhouse,
     )

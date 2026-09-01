@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import tarfile
 import zipfile
 from pathlib import Path
 
 import pytest
-from cpip.build import build
-from cpip.build.build_backend import (
+from kpip.build import build
+from kpip.build.build_backend import (
     BackendSpec,
     ProjectBuilder,
     ProjectMetadataReader,
+    build_sdist,
     prepare_project_metadata,
 )
-from cpip.core.errors import BuildError
-from cpip.index.candidate_materialization import validate_build_requirements
+from kpip.core.errors import BuildError
+from kpip.index.candidate_materialization import validate_build_requirements
 
 
 def test_build_backend_builds_static_wheel_with_typed_marker(tmp_path: Path) -> None:
@@ -100,6 +103,34 @@ def test_build_backend_packages_pep639_license_metadata(tmp_path: Path) -> None:
     assert license_text == "license text\n"
 
 
+def test_build_backend_packages_readme_and_project_metadata(tmp_path: Path) -> None:
+    project = write_project(tmp_path, "described-pkg", "described_pkg", "1.0")
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8")
+        + 'readme = "README.md"\n'
+        + 'authors = [{ name = "Example Author", email = "author@example.com" }]\n'
+        + 'classifiers = ["Development Status :: 3 - Alpha"]\n'
+        + '[project.urls]\nSource = "https://example.com/source"\n',
+        encoding="utf-8",
+    )
+    project.joinpath("README.md").write_text(
+        "# Described package\n",
+        encoding="utf-8",
+    )
+    wheel_dir = tmp_path / "wheelhouse"
+
+    wheel_name = ProjectBuilder(project).build_wheel(wheel_dir)
+
+    with zipfile.ZipFile(wheel_dir / wheel_name) as archive:
+        metadata = archive.read("described_pkg-1.0.dist-info/METADATA").decode()
+    assert "Author-email: Example Author <author@example.com>\n" in metadata
+    assert "Classifier: Development Status :: 3 - Alpha\n" in metadata
+    assert "Project-URL: Source, https://example.com/source\n" in metadata
+    assert "Description-Content-Type: text/markdown\n" in metadata
+    assert metadata.endswith("\n\n# Described package\n")
+
+
 def test_build_backend_builds_editable_wheel(tmp_path: Path) -> None:
     project = write_project(tmp_path, "editable-pkg", "editable_pkg", "1.0")
     wheel_dir = tmp_path / "wheelhouse"
@@ -112,6 +143,58 @@ def test_build_backend_builds_editable_wheel(tmp_path: Path) -> None:
         assert pth == str((project / "src").resolve()) + "\n"
         assert "editable_pkg-1.0.dist-info/METADATA" in archive.namelist()
         assert "editable_pkg-1.0.dist-info/RECORD" in archive.namelist()
+
+
+def test_build_sdist_honors_gitignore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = write_project(tmp_path, "source-pkg", "source_pkg", "1.0")
+    project.joinpath(".gitignore").write_text(".venv/\ndist/\n", encoding="utf-8")
+    ignored_python = project / ".venv" / "bin" / "python"
+    ignored_python.parent.mkdir(parents=True)
+    ignored_python.write_text("not part of the source release", encoding="utf-8")
+    subprocess.run(["git", "init", "--quiet"], cwd=project, check=True)
+    sdist_dir = tmp_path / "artifacts"
+    monkeypatch.chdir(project)
+
+    sdist_name = build_sdist(str(sdist_dir))
+
+    with tarfile.open(sdist_dir / sdist_name) as archive:
+        names = set(archive.getnames())
+        pkg_info = archive.extractfile("source_pkg-1.0/PKG-INFO")
+        assert pkg_info is not None
+        metadata = pkg_info.read().decode()
+    assert "source_pkg-1.0/pyproject.toml" in names
+    assert "source_pkg-1.0/src/source_pkg/__init__.py" in names
+    assert "Name: source-pkg\n" in metadata
+    assert "Version: 1.0\n" in metadata
+    assert "Metadata-Version: 2.2\n" in metadata
+    assert not any("/.venv/" in name for name in names)
+
+
+def test_build_sdist_honors_project_exclusions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = write_project(tmp_path, "source-pkg", "source_pkg", "1.0")
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8")
+        + '[tool.kpip.build-backend]\nsdist-exclude = ["fixtures/**"]\n',
+        encoding="utf-8",
+    )
+    project.joinpath("fixtures").mkdir()
+    project.joinpath("fixtures", "large.whl").write_bytes(b"fixture")
+    project.joinpath("tests").mkdir()
+    project.joinpath("tests", "test_source.py").write_text("", encoding="utf-8")
+    sdist_dir = tmp_path / "artifacts"
+    monkeypatch.chdir(project)
+
+    sdist_name = build_sdist(str(sdist_dir))
+
+    with tarfile.open(sdist_dir / sdist_name) as archive:
+        names = set(archive.getnames())
+    assert "source_pkg-1.0/tests/test_source.py" in names
+    assert "source_pkg-1.0/fixtures/large.whl" not in names
 
 
 def test_build_backend_reads_setup_py_console_scripts(tmp_path: Path) -> None:

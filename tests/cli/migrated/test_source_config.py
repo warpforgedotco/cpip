@@ -4,25 +4,25 @@ import argparse
 from pathlib import Path
 
 import pytest
-from cpip.cli.config import SourceConfig, load_source_config, resolve_sources
+from kpip.cli.config import SourceConfig, load_source_config, resolve_sources
 
 
 @pytest.fixture(autouse=True)
 def clean_source_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
-        "CPIP_FIND_LINKS",
-        "CPIP_INDEX_URL",
-        "CPIP_EXTRA_INDEX_URL",
-        "CPIP_NO_INDEX",
-        "CPIP_CONFIG_FILE",
+        "KPIP_FIND_LINKS",
+        "KPIP_INDEX_URL",
+        "KPIP_EXTRA_INDEX_URL",
+        "KPIP_NO_INDEX",
+        "KPIP_CONFIG_FILE",
     ):
         monkeypatch.delenv(name, raising=False)
 
 
 def write_config(tmp_path: Path, body: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    path = tmp_path / "cpip.conf"
+    path = tmp_path / "kpip.conf"
     path.write_text(body, encoding="utf-8")
-    monkeypatch.setenv("CPIP_CONFIG_FILE", str(path))
+    monkeypatch.setenv("KPIP_CONFIG_FILE", str(path))
 
 
 def test_blank_find_links_is_no_find_links(
@@ -60,8 +60,8 @@ def test_environment_overrides_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     write_config(tmp_path, "[global]\nno-index = false\n", monkeypatch)
-    monkeypatch.setenv("CPIP_NO_INDEX", "yes")
-    monkeypatch.setenv("CPIP_FIND_LINKS", "/one /two")
+    monkeypatch.setenv("KPIP_NO_INDEX", "yes")
+    monkeypatch.setenv("KPIP_FIND_LINKS", "/one /two")
 
     config = load_source_config("install")
 
@@ -92,7 +92,7 @@ def test_resolve_sources_prefers_command_line() -> None:
 
 
 def test_resolve_sources_without_find_links_option() -> None:
-    """``cpip index`` has no --find-links; the configured value survives."""
+    """``kpip index`` has no --find-links; the configured value survives."""
     config = SourceConfig(["/configured"], None, [], False)
     options = argparse.Namespace(index_url=None, extra_index_url=[], no_index=False)
 

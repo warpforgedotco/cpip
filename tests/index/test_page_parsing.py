@@ -6,7 +6,7 @@ import random
 import urllib.parse
 
 import pytest
-from cpip.index.page_parsing import IndexPageParser, join_index_url
+from kpip.index.page_parsing import IndexPageParser, join_index_url
 
 BASES = (
     "https://pypi.org/simple/pkg/",

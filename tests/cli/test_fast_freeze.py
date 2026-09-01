@@ -10,7 +10,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
-from cpip.cli import fast
+from kpip.cli import fast
 
 
 def _dist(
@@ -31,7 +31,7 @@ def _dist(
 
 
 def _normal(args: list[str]) -> str:
-    from cpip.cli.freeze import run_freeze
+    from kpip.cli.freeze import run_freeze
 
     out = io.StringIO()
     with redirect_stdout(out):
@@ -64,13 +64,13 @@ def site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             "archive_info": {"hashes": {"sha256": "ab" * 32}},
         },
     )
-    _dist(second, "cpip-0.0.1.dist-info", "cpip", "0.0.1")
+    _dist(second, "kpip-0.0.1.dist-info", "kpip", "0.0.1")
     _dist(second, "argparse-1.4.0.dist-info", "argparse", "1.4.0")
     (second / "empty-9.dist-info").mkdir()
     monkeypatch.setattr(
         sys, "path", [str(tmp_path / "missing"), str(first), str(second)]
     )
-    monkeypatch.delenv("CPIP_TARGET_PREFIX", raising=False)
+    monkeypatch.delenv("KPIP_TARGET_PREFIX", raising=False)
     return tmp_path
 
 
@@ -79,7 +79,7 @@ def test_matches_the_normal_path(site: Path) -> None:
         [],
         ["--all"],
         ["--exclude", "alpha"],
-        ["--exclude", "cpip"],
+        ["--exclude", "kpip"],
         ["--exclude-editable"],
         ["--path", str(site / "second")],
         ["--path", str(site / "second"), "--path", str(site / "first"), "--all"],
@@ -137,5 +137,5 @@ def test_declines_what_needs_the_normal_path(
     (site / "first" / "legacy-0.1.egg-info" / "PKG-INFO").unlink()
     (site / "first" / "legacy-0.1.egg-info").rmdir()
 
-    monkeypatch.setenv("CPIP_TARGET_PREFIX", "/elsewhere")
+    monkeypatch.setenv("KPIP_TARGET_PREFIX", "/elsewhere")
     assert _fast([]) is None

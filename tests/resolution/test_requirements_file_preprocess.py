@@ -10,7 +10,7 @@ space, so a tab before ``#`` made the comment part of the requirement.
 from __future__ import annotations
 
 import pytest
-from cpip.resolution.files.parser import preprocess_requirement_lines
+from kpip.resolution.files.parser import preprocess_requirement_lines
 
 CASES = [
     pytest.param(

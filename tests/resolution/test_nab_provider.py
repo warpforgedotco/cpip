@@ -4,13 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 
-import cpip.resolution.nab_provider
-from cpip._vendor.nab_resolver.ranges import Range
-from cpip.core.packaging import parse_requirement
-from cpip.core.versions import Version
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.models import ResolutionConfig
-from cpip.resolution.nab_provider import NabProvider
+import kpip.resolution.nab_provider
+from kpip._vendor.nab_resolver.ranges import Range
+from kpip.core.packaging import parse_requirement
+from kpip.core.versions import Version
+from kpip.index.provider import CandidateProvider
+from kpip.resolution.models import ResolutionConfig
+from kpip.resolution.nab_provider import NabProvider
 
 
 class FakeProvider:
@@ -105,7 +105,7 @@ class EmptyConstraints(tuple):
 
 def test_constraints_are_indexed_once(monkeypatch: pytest.MonkeyPatch) -> None:
     marker_calls = 0
-    marker_applies = cpip.resolution.nab_provider.marker_applies
+    marker_applies = kpip.resolution.nab_provider.marker_applies
 
     def counting_marker_applies(marker, extras=()):
         nonlocal marker_calls
@@ -113,7 +113,7 @@ def test_constraints_are_indexed_once(monkeypatch: pytest.MonkeyPatch) -> None:
         return marker_applies(marker, extras=extras)
 
     monkeypatch.setattr(
-        cpip.resolution.nab_provider,
+        kpip.resolution.nab_provider,
         "marker_applies",
         counting_marker_applies,
     )
@@ -139,7 +139,7 @@ def test_empty_constraint_lookup_skips_name_normalization(
         raise AssertionError("empty constraint maps do not need name normalization")
 
     monkeypatch.setattr(
-        cpip.resolution.nab_provider,
+        kpip.resolution.nab_provider,
         "canonicalize_name",
         fail_normalization,
     )
@@ -481,13 +481,13 @@ def test_cache_keys_do_not_renormalize_frozen_extras(
         raise AssertionError("frozen extras are already valid cache keys")
 
     monkeypatch.setattr(
-        cpip.resolution.nab_provider,
+        kpip.resolution.nab_provider,
         "sorted",
         fail_normalization,
         raising=False,
     )
     monkeypatch.setattr(
-        cpip.resolution.nab_provider,
+        kpip.resolution.nab_provider,
         "frozenset",
         fail_normalization,
         raising=False,
@@ -655,7 +655,7 @@ def test_dependency_prefetch_reuses_non_self_dependency_tuple(
     key_calls: list[object] = []
     calls_at_prefetch: list[tuple[object, ...]] = []
     prefetched: list[tuple[object, ...]] = []
-    dependency_key = cpip.resolution.nab_provider._key
+    dependency_key = kpip.resolution.nab_provider._key
 
     def counting_key(requirement):
         key_calls.append(requirement)
@@ -665,7 +665,7 @@ def test_dependency_prefetch_reuses_non_self_dependency_tuple(
         calls_at_prefetch.append(tuple(key_calls))
         prefetched.append(requirements)
 
-    monkeypatch.setattr(cpip.resolution.nab_provider, "_key", counting_key)
+    monkeypatch.setattr(kpip.resolution.nab_provider, "_key", counting_key)
     monkeypatch.setattr(adapter, "_prefetch_available_versions", capture_prefetch)
 
     adapter.get_dependencies(root, Version("1"))

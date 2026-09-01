@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from cpip.core import appdirs
+from kpip.core import appdirs
 
 
 def test_user_cache_dir(monkeypatch, tmp_path: Path) -> None:
@@ -11,12 +11,12 @@ def test_user_cache_dir(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     if sys.platform == "win32":
         monkeypatch.setenv("LOCALAPPDATA", str(home / "local"))
-        expected = home / "local" / "cpip" / "Cache"
+        expected = home / "local" / "kpip" / "Cache"
     elif sys.platform == "darwin":
-        expected = home / "Library" / "Caches" / "cpip"
+        expected = home / "Library" / "Caches" / "kpip"
     else:
-        expected = home / ".cache" / "cpip"
-    assert Path(appdirs.user_cache_dir("cpip")) == expected
+        expected = home / ".cache" / "kpip"
+    assert Path(appdirs.user_cache_dir("kpip")) == expected
 
 
 def test_user_cache_dir_override(monkeypatch, tmp_path: Path) -> None:
@@ -24,10 +24,10 @@ def test_user_cache_dir_override(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("XDG_CACHE_HOME", str(override))
     if sys.platform == "win32":
         monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
-        expected = Path(appdirs.user_cache_dir("cpip"))
+        expected = Path(appdirs.user_cache_dir("kpip"))
     else:
-        expected = override / "cpip"
-    assert Path(appdirs.user_cache_dir("cpip")) == expected
+        expected = override / "kpip"
+    assert Path(appdirs.user_cache_dir("kpip")) == expected
 
 
 def test_user_config_dir_override(monkeypatch, tmp_path: Path) -> None:
@@ -39,11 +39,11 @@ def test_user_config_dir_override(monkeypatch, tmp_path: Path) -> None:
         monkeypatch.setenv("APPDATA", str(override))
     else:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(override))
-    assert Path(appdirs.user_config_dir("cpip")) == override / "cpip"
+    assert Path(appdirs.user_config_dir("kpip")) == override / "kpip"
 
 
 def test_site_config_dirs_linux(monkeypatch) -> None:
     if sys.platform != "linux":
         return
     monkeypatch.delenv("XDG_CONFIG_DIRS", raising=False)
-    assert appdirs.site_config_dirs("cpip") == ["/etc/xdg/cpip", "/etc"]
+    assert appdirs.site_config_dirs("kpip") == ["/etc/xdg/kpip", "/etc"]

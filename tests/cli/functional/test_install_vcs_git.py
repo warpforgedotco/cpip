@@ -3,26 +3,26 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from cpip_test_support import (
-    CpipTestEnvironment,
+from kpip_test_support import (
+    KpipTestEnvironment,
     change_test_package_version,
     create_test_package,
     pyversion,  # noqa: F401
 )
-from cpip_test_support.git_submodule_helpers import (
+from kpip_test_support.git_submodule_helpers import (
     change_test_package_submodule,
     create_test_package_with_submodule,
     pull_in_submodule_changes_to_module,
 )
-from cpip_test_support.local_repos import local_checkout
+from kpip_test_support.local_repos import local_checkout
 
 
-def get_editable_repo_dir(script: CpipTestEnvironment, package_name: str) -> Path:
+def get_editable_repo_dir(script: KpipTestEnvironment, package_name: str) -> Path:
     """Return the repository directory for an editable install."""
     return script.venv_path / "src" / package_name
 
 
-def get_editable_branch(script: CpipTestEnvironment, package_name: str) -> str:
+def get_editable_branch(script: KpipTestEnvironment, package_name: str) -> str:
     """Return the current branch of an editable install."""
     repo_dir = get_editable_repo_dir(script, package_name)
     result = script.run("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=repo_dir)
@@ -30,7 +30,7 @@ def get_editable_branch(script: CpipTestEnvironment, package_name: str) -> str:
 
 
 def get_branch_remote(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     package_name: str,
     branch: str,
 ) -> str:
@@ -91,7 +91,7 @@ def make_version_pkg_url(
 
 
 def install_version_pkg_only(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     path: Path,
     rev: str | None = None,
     allow_stderr_warning: bool = False,
@@ -106,7 +106,7 @@ def install_version_pkg_only(
 
     """
     version_pkg_url = make_version_pkg_url(path, rev=rev)
-    script.cpip(
+    script.kpip(
         "install",
         "--no-build-isolation",
         "-e",
@@ -116,7 +116,7 @@ def install_version_pkg_only(
 
 
 def install_version_pkg(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     path: Path,
     rev: str | None = None,
     allow_stderr_warning: bool = False,
@@ -142,7 +142,7 @@ def install_version_pkg(
     return version
 
 
-def test_git_install_again_after_changes(script: CpipTestEnvironment) -> None:
+def test_git_install_again_after_changes(script: KpipTestEnvironment) -> None:
     """Test installing a repository a second time without specifying a revision,
     and after updates to the remote repository.
 
@@ -160,7 +160,7 @@ def test_git_install_again_after_changes(script: CpipTestEnvironment) -> None:
 
 
 def test_git_install_branch_again_after_branch_changes(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     """Test installing a branch again after the branch is updated in the remote
     repository.
@@ -176,13 +176,13 @@ def test_git_install_branch_again_after_branch_changes(
 
 @pytest.mark.network
 def test_install_editable_from_git_with_https(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmpdir: Path,
 ) -> None:
     """Test cloning from Git with https."""
     url_path = "pypa/pip-test-package.git"
     local_url = github_checkout(url_path, tmpdir, egg="pip-test-package")
-    result = script.cpip("install", "-e", local_url)
+    result = script.kpip("install", "-e", local_url)
     result.assert_installed(
         "piptestpackage",
         dist_name="pip-test-package",
@@ -191,9 +191,9 @@ def test_install_editable_from_git_with_https(
 
 
 @pytest.mark.network
-def test_install_noneditable_git(script: CpipTestEnvironment) -> None:
+def test_install_noneditable_git(script: KpipTestEnvironment) -> None:
     """Test installing from a non-editable git URL with a given tag."""
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "git+https://github.com/pypa/pip-test-package.git@0.1.1#egg=pip-test-package",
     )
@@ -206,7 +206,7 @@ def test_install_noneditable_git(script: CpipTestEnvironment) -> None:
     result.did_create(dist_info_folder)
 
 
-def test_git_with_sha1_revisions(script: CpipTestEnvironment) -> None:
+def test_git_with_sha1_revisions(script: KpipTestEnvironment) -> None:
     """Git backend should be able to install from SHA1 revisions"""
     version_pkg_path = create_test_package(script.scratch_path)
     change_test_package_version(script, version_pkg_path)
@@ -220,7 +220,7 @@ def test_git_with_sha1_revisions(script: CpipTestEnvironment) -> None:
     assert version == "0.1"
 
 
-def test_git_with_short_sha1_revisions(script: CpipTestEnvironment) -> None:
+def test_git_with_short_sha1_revisions(script: KpipTestEnvironment) -> None:
     """Git backend should be able to install from SHA1 revisions"""
     version_pkg_path = create_test_package(script.scratch_path)
     change_test_package_version(script, version_pkg_path)
@@ -239,7 +239,7 @@ def test_git_with_short_sha1_revisions(script: CpipTestEnvironment) -> None:
     assert version == "0.1"
 
 
-def test_git_with_branch_name_as_revision(script: CpipTestEnvironment) -> None:
+def test_git_with_branch_name_as_revision(script: KpipTestEnvironment) -> None:
     """Git backend should be able to install from branch names"""
     version_pkg_path = create_test_package(script.scratch_path)
     branch = "test_branch"
@@ -249,7 +249,7 @@ def test_git_with_branch_name_as_revision(script: CpipTestEnvironment) -> None:
     assert version == "some different version"
 
 
-def test_git_with_tag_name_as_revision(script: CpipTestEnvironment) -> None:
+def test_git_with_tag_name_as_revision(script: KpipTestEnvironment) -> None:
     """Git backend should be able to install from tag names"""
     version_pkg_path = create_test_package(script.scratch_path)
     script.run("git", "tag", "test_tag", cwd=version_pkg_path)
@@ -258,12 +258,12 @@ def test_git_with_tag_name_as_revision(script: CpipTestEnvironment) -> None:
     assert version == "0.1"
 
 
-def add_ref(script: CpipTestEnvironment, path: Path, ref: str) -> None:
+def add_ref(script: KpipTestEnvironment, path: Path, ref: str) -> None:
     """Add a new ref to a repository at the given path."""
     script.run("git", "update-ref", ref, "HEAD", cwd=path)
 
 
-def test_git_install_ref(script: CpipTestEnvironment) -> None:
+def test_git_install_ref(script: KpipTestEnvironment) -> None:
     """The Git backend should be able to install a ref with the first install."""
     version_pkg_path = create_test_package(script.scratch_path)
     add_ref(script, version_pkg_path, "refs/foo/bar")
@@ -278,7 +278,7 @@ def test_git_install_ref(script: CpipTestEnvironment) -> None:
     assert version == "0.1"
 
 
-def test_git_install_then_install_ref(script: CpipTestEnvironment) -> None:
+def test_git_install_then_install_ref(script: KpipTestEnvironment) -> None:
     """The Git backend should be able to install a ref after a package has
     already been installed.
     """
@@ -311,7 +311,7 @@ def test_git_install_then_install_ref(script: CpipTestEnvironment) -> None:
     ],
 )
 def test_install_git_logs_commit_sha(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     rev: str,
     expected_sha: str,
     tmpdir: Path,
@@ -320,13 +320,13 @@ def test_install_git_logs_commit_sha(
     url_path = "pypa/pip-test-package.git"
     base_local_url = github_checkout(url_path, tmpdir)
     local_url = f"{base_local_url}{rev}#egg=pip-test-package"
-    result = script.cpip("install", local_url)
+    result = script.kpip("install", local_url)
     assert f"Resolved {base_local_url[4:]} to commit {expected_sha}" in result.stdout
 
 
 @pytest.mark.network
 def test_git_branch_should_not_be_changed(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmpdir: Path,
 ) -> None:
     """Editable installations should not change branch
@@ -334,14 +334,14 @@ def test_git_branch_should_not_be_changed(
     """
     url_path = "pypa/pip-test-package.git"
     local_url = github_checkout(url_path, tmpdir, egg="pip-test-package")
-    script.cpip("install", "-e", local_url)
+    script.kpip("install", "-e", local_url)
     branch = get_editable_branch(script, "pip-test-package")
     assert branch == "master"
 
 
 @pytest.mark.network
 def test_git_with_non_editable_unpacking(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmpdir: Path,
 ) -> None:
     """Test cloning a git repository from a non-editable URL with a given tag."""
@@ -352,7 +352,7 @@ def test_git_with_non_editable_unpacking(
         rev="0.1.2",
         egg="pip-test-package",
     )
-    result = script.cpip(
+    result = script.kpip(
         "install",
         local_url,
         allow_stderr_warning=True,
@@ -362,7 +362,7 @@ def test_git_with_non_editable_unpacking(
 
 @pytest.mark.network
 def test_git_with_editable_where_egg_contains_dev_string(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmpdir: Path,
 ) -> None:
     """Test cloning a git repository from an editable url which contains "dev"
@@ -375,13 +375,13 @@ def test_git_with_editable_where_egg_contains_dev_string(
         egg="django-devserver",
         scheme="https",
     )
-    result = script.cpip("install", "-e", local_url)
+    result = script.kpip("install", "-e", local_url)
     result.assert_installed("django-devserver", with_files=[".git"])
 
 
 @pytest.mark.network
 def test_git_with_non_editable_where_egg_contains_dev_string(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmpdir: Path,
 ) -> None:
     """Test cloning a git repository from a non-editable url which contains "dev"
@@ -394,22 +394,22 @@ def test_git_with_non_editable_where_egg_contains_dev_string(
         egg="django-devserver",
         scheme="https",
     )
-    result = script.cpip("install", local_url)
+    result = script.kpip("install", local_url)
     devserver_folder = script.site_packages / "devserver"
     result.did_create(devserver_folder)
 
 
-def test_git_with_ambiguous_revs(script: CpipTestEnvironment) -> None:
+def test_git_with_ambiguous_revs(script: KpipTestEnvironment) -> None:
     """Test git with two "names" (tag/branch) pointing to the same commit"""
     version_pkg_path = create_test_package(script.scratch_path)
     version_pkg_url = make_version_pkg_url(version_pkg_path, rev="0.1")
     script.run("git", "tag", "0.1", cwd=version_pkg_path)
-    result = script.cpip("install", "--no-build-isolation", "-e", version_pkg_url)
+    result = script.kpip("install", "--no-build-isolation", "-e", version_pkg_url)
     assert "Could not find a tag or branch" not in result.stdout
     result.assert_installed("version_pkg", with_files=[".git"])
 
 
-def test_editable__no_revision(script: CpipTestEnvironment) -> None:
+def test_editable__no_revision(script: KpipTestEnvironment) -> None:
     """Test a basic install in editable mode specifying no revision."""
     version_pkg_path = create_test_package(script.scratch_path)
     install_version_pkg_only(script, version_pkg_path)
@@ -421,7 +421,7 @@ def test_editable__no_revision(script: CpipTestEnvironment) -> None:
     assert remote == "origin"
 
 
-def test_editable__branch_with_sha_same_as_default(script: CpipTestEnvironment) -> None:
+def test_editable__branch_with_sha_same_as_default(script: KpipTestEnvironment) -> None:
     """Test installing in editable mode a branch whose sha matches the sha
     of the default branch, but is different from the default branch.
     """
@@ -437,7 +437,7 @@ def test_editable__branch_with_sha_same_as_default(script: CpipTestEnvironment) 
 
 
 def test_editable__branch_with_sha_different_from_default(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     """Test installing in editable mode a branch whose sha is different from
     the sha of the default branch.
@@ -456,7 +456,7 @@ def test_editable__branch_with_sha_different_from_default(
     assert remote == "origin"
 
 
-def test_editable__non_master_default_branch(script: CpipTestEnvironment) -> None:
+def test_editable__non_master_default_branch(script: KpipTestEnvironment) -> None:
     """Test the branch you get after an editable install from a remote repo
     with a non-master default branch.
     """
@@ -469,10 +469,10 @@ def test_editable__non_master_default_branch(script: CpipTestEnvironment) -> Non
 
 
 def test_reinstalling_works_with_editable_non_master_branch(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     """Reinstalling an editable installation should not assume that the "master"
-    branch exists. See https://github.com/pypa/cpip/issues/4448.
+    branch exists. See https://github.com/pypa/pip/issues/4448.
     """
     version_pkg_path = create_test_package(script.scratch_path)
 
@@ -492,14 +492,14 @@ def test_reinstalling_works_with_editable_non_master_branch(
     reason="Git submodule against file: is not working; waiting for a good solution",
     run=True,
 )
-def test_check_submodule_addition(script: CpipTestEnvironment) -> None:
+def test_check_submodule_addition(script: KpipTestEnvironment) -> None:
     """Submodules are pulled in on install and updated on upgrade."""
     module_path, submodule_path = create_test_package_with_submodule(
         script,
         rel_path="testpkg/static",
     )
 
-    install_result = script.cpip(
+    install_result = script.kpip(
         "install",
         "-e",
         f"git+{module_path.as_uri()}#egg=version_pkg",
@@ -513,7 +513,7 @@ def test_check_submodule_addition(script: CpipTestEnvironment) -> None:
         rel_path="testpkg/static",
     )
 
-    update_result = script.cpip(
+    update_result = script.kpip(
         "install",
         "-e",
         f"git+{module_path.as_uri()}#egg=version_pkg",
@@ -523,26 +523,26 @@ def test_check_submodule_addition(script: CpipTestEnvironment) -> None:
     update_result.did_create(script.venv / "src/version-pkg/testpkg/static/testfile2")
 
 
-def test_install_git_branch_not_cached(script: CpipTestEnvironment) -> None:
+def test_install_git_branch_not_cached(script: KpipTestEnvironment) -> None:
     """Installing git urls with a branch revision does not cause wheel caching."""
     PKG = "gitbranchnotcached"
     repo_dir = create_test_package(script.scratch_path, name=PKG)
     url = make_version_pkg_url(repo_dir, rev="master", name=PKG)
-    result = script.cpip("install", "--no-build-isolation", url, "--only-binary=:all:")
+    result = script.kpip("install", "--no-build-isolation", url, "--only-binary=:all:")
     assert f"Successfully built {PKG}" in result.stdout, result.stdout
-    script.cpip("uninstall", "-y", PKG)
-    result = script.cpip("install", "--no-build-isolation", url)
+    script.kpip("uninstall", "-y", PKG)
+    result = script.kpip("install", "--no-build-isolation", url)
     assert f"Successfully built {PKG}" in result.stdout, result.stdout
 
 
-def test_install_git_sha_cached(script: CpipTestEnvironment) -> None:
+def test_install_git_sha_cached(script: KpipTestEnvironment) -> None:
     """Installing git urls with a sha revision does cause wheel caching."""
     PKG = "gitshacached"
     repo_dir = create_test_package(script.scratch_path, name=PKG)
     commit = script.run("git", "rev-parse", "HEAD", cwd=repo_dir).stdout.strip()
     url = make_version_pkg_url(repo_dir, rev=commit, name=PKG)
-    result = script.cpip("install", "--no-build-isolation", url)
+    result = script.kpip("install", "--no-build-isolation", url)
     assert f"Successfully built {PKG}" in result.stdout, result.stdout
-    script.cpip("uninstall", "-y", PKG)
-    result = script.cpip("install", "--no-build-isolation", url)
+    script.kpip("uninstall", "-y", PKG)
+    result = script.kpip("install", "--no-build-isolation", url)
     assert f"Successfully built {PKG}" not in result.stdout, result.stdout

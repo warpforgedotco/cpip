@@ -1,12 +1,12 @@
 import shutil
 import textwrap
 
-from cpip_test_support import CpipTestEnvironment, TestData
+from kpip_test_support import KpipTestEnvironment, TestData
 
 
-def test_find_links_relative_path(script: CpipTestEnvironment, data: TestData) -> None:
+def test_find_links_relative_path(script: KpipTestEnvironment, data: TestData) -> None:
     """Test find-links as a relative path."""
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "parent==0.1",
         "--no-build-isolation",
@@ -21,11 +21,11 @@ def test_find_links_relative_path(script: CpipTestEnvironment, data: TestData) -
     result.did_create(initools_folder)
 
 
-def test_find_links_no_doctype(script: CpipTestEnvironment, data: TestData) -> None:
+def test_find_links_no_doctype(script: KpipTestEnvironment, data: TestData) -> None:
     shutil.copy(data.packages / "simple-1.0.tar.gz", script.scratch_path)
     html = script.scratch_path.joinpath("index.html")
     html.write_text('<a href="simple-1.0.tar.gz"></a>')
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "simple==1.0",
         "--no-build-isolation",
@@ -38,7 +38,7 @@ def test_find_links_no_doctype(script: CpipTestEnvironment, data: TestData) -> N
 
 
 def test_find_links_requirements_file_relative_path(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     """Test find-links as a relative path to a reqs file."""
@@ -49,7 +49,7 @@ def test_find_links_requirements_file_relative_path(
         parent==0.1
         """),
     )
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "-r",
@@ -63,13 +63,13 @@ def test_find_links_requirements_file_relative_path(
 
 
 def test_install_from_file_index_hash_link(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     """Test that a pkg can be installed from a file:// index using a link with a
     hash
     """
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "-i",
@@ -80,10 +80,10 @@ def test_install_from_file_index_hash_link(
     result.did_create(dist_info_folder)
 
 
-def test_file_index_url_quoting(script: CpipTestEnvironment, data: TestData) -> None:
+def test_file_index_url_quoting(script: KpipTestEnvironment, data: TestData) -> None:
     """Test url quoting of file index url with a space"""
     index_url = data.index_url("in dex")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-build-isolation",
         "-vvv",

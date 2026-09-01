@@ -4,9 +4,9 @@ import configparser
 import os
 from pathlib import Path
 
-from cpip.vcs.mercurial import Mercurial
-from cpip.vcs.support import hide_url
-from cpip_test_support import need_mercurial
+from kpip.vcs.mercurial import Mercurial
+from kpip.vcs.support import hide_url
+from kpip_test_support import need_mercurial
 
 
 @need_mercurial

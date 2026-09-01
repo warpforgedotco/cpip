@@ -1,15 +1,15 @@
-"""Test that cpip index versions handles invalid (non-PEP 440) wheel filenames.
+"""Test that kpip index versions handles invalid (non-PEP 440) wheel filenames.
 
 This test was added for robustness after legacy wheel filename support
-was removed in cpip 25.3.
+was removed in kpip 25.3.
 """
 
 import json
 import textwrap
 from pathlib import Path
 
-from cpip_test_support import CpipTestEnvironment
-from cpip_test_support.wheel import make_wheel
+from kpip_test_support import KpipTestEnvironment
+from kpip_test_support.wheel import make_wheel
 
 
 def create_test_index_with_invalid_wheels(
@@ -71,13 +71,13 @@ def create_test_index_with_invalid_wheels(
 
 
 def test_index_versions_ignores_invalid_wheel_names(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmpdir: Path,
 ) -> None:
-    """Test that cpip index versions ignores invalid wheel names."""
+    """Test that kpip index versions ignores invalid wheel names."""
     index_dir = create_test_index_with_invalid_wheels(tmpdir)
 
-    result = script.cpip(
+    result = script.kpip(
         "index",
         "versions",
         "pkg",
@@ -97,13 +97,13 @@ def test_index_versions_ignores_invalid_wheel_names(
 
 
 def test_install_ignores_invalid_wheel_names(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmpdir: Path,
 ) -> None:
-    """Test that cpip install ignores invalid wheel names and installs valid ones."""
+    """Test that kpip install ignores invalid wheel names and installs valid ones."""
     index_dir = create_test_index_with_invalid_wheels(tmpdir)
 
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "pkg",
         "--no-cache-dir",

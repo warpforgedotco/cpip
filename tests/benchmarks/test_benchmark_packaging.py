@@ -12,14 +12,14 @@ from benchmark_support import (
     reset_caches,
     version_strings,
 )
-from cpip.core.packaging import (
+from kpip.core.packaging import (
     SpecifierSet,
     canonicalize_name,
     canonicalize_requirement,
     marker_applies,
     parse_requirement,
 )
-from cpip.core.versions import Version
+from kpip.core.versions import Version
 from pytest_codspeed import BenchmarkFixture
 
 REQUIREMENTS = requirement_lines()

@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
 
-from cpip.install import transaction
+from kpip.install import transaction
 import pytest
-from cpip.core.errors import InstallationError
-from cpip.install.transaction import InstallTransaction
-from cpip.install.wheel_state import discover_installed_wheels
+from kpip.core.errors import InstallationError
+from kpip.install.transaction import InstallTransaction
+from kpip.install.wheel_state import discover_installed_wheels
 
 
 def test_lightweight_installed_wheel_inventory_reads_dist_info(tmp_path: Path) -> None:

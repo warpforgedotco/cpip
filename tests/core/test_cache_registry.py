@@ -4,7 +4,7 @@ A cache the reset misses does not fail anything on its own: it silently
 turns the later iterations of a cold benchmark into warm ones. This test
 enumerates the caches by introspection -- every ``lru_cache`` wrapper and
 every mutable ``dict``/``set`` at module (or class) level -- so that adding
-a cache without registering it with ``cpip.core.caches`` is a test failure,
+a cache without registering it with ``kpip.core.caches`` is a test failure,
 not a quiet change in what the benchmarks measure.
 """
 
@@ -17,10 +17,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from cpip.core import light_metadata, names, packaging, target_python, versions, wheel
-from cpip.core.packaging import marker_applies, parse_requirement
-from cpip.core.versions import Version
-from cpip.core.wheel import parsed_wheel_tags, supported_wheel_tags, wheel_tag_rank
+from kpip.core import light_metadata, names, packaging, target_python, versions, wheel
+from kpip.core.packaging import marker_applies, parse_requirement
+from kpip.core.versions import Version
+from kpip.core.wheel import parsed_wheel_tags, supported_wheel_tags, wheel_tag_rank
 
 _BENCHMARKS = Path(__file__).resolve().parents[1] / "benchmarks"
 if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect
@@ -32,8 +32,8 @@ MODULES = (versions, packaging, wheel, names, light_metadata, target_python)
 
 PROCESS_CONSTANTS = frozenset(
     {
-        "cpip.core.wheel.supported_wheel_tags",
-        "cpip.core.target_python.get_supported_internal",
+        "kpip.core.wheel.supported_wheel_tags",
+        "kpip.core.target_python.get_supported_internal",
     }
 )
 
@@ -80,9 +80,9 @@ def _warm_everything() -> None:
 
 def test_the_core_modules_expose_caches() -> None:
     found = [name for module in MODULES for name, _ in _caches(module)]
-    assert "cpip.core.packaging.parse_requirement" in found
-    assert "cpip.core.wheel.wheel_metadata_cache" in found
-    assert "cpip.core.versions._versions" in found
+    assert "kpip.core.packaging.parse_requirement" in found
+    assert "kpip.core.wheel.wheel_metadata_cache" in found
+    assert "kpip.core.versions._versions" in found
 
 
 def test_reset_caches_empties_every_core_cache() -> None:
@@ -90,8 +90,8 @@ def test_reset_caches_empties_every_core_cache() -> None:
     warmed = {
         name for module in MODULES for name, cache in _caches(module) if _size(cache)
     }
-    assert "cpip.core.packaging.parse_requirement" in warmed
-    assert "cpip.core.versions._versions" in warmed
+    assert "kpip.core.packaging.parse_requirement" in warmed
+    assert "kpip.core.versions._versions" in warmed
     reset_caches()
     still_full = {
         name: _size(cache)

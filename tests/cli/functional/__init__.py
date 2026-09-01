@@ -1,1 +1,1 @@
-"""End-to-end tests for the cpip command-line package."""
+"""End-to-end tests for the kpip command-line package."""

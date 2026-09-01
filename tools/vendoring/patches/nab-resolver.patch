@@ -1,7 +1,7 @@
-diff --git a/src/cpip/_vendor/nab_resolver/conflict.py b/src/cpip/_vendor/nab_resolver/conflict.py
+diff --git a/src/kpip/_vendor/nab_resolver/conflict.py b/src/kpip/_vendor/nab_resolver/conflict.py
 index e573c14..c7ad5d7 100644
---- a/src/cpip/_vendor/nab_resolver/conflict.py
-+++ b/src/cpip/_vendor/nab_resolver/conflict.py
+--- a/src/kpip/_vendor/nab_resolver/conflict.py
++++ b/src/kpip/_vendor/nab_resolver/conflict.py
 @@ -164,9 +164,12 @@ def conflict_resolution(
              # Count only one package per conflict so it gets decided first
              # after restart and its dependencies constrain the culprit.
@@ -54,10 +54,10 @@ index e573c14..c7ad5d7 100644
  
      return apply_targeted_backtrack(resolver)
  
-diff --git a/src/cpip/_vendor/nab_resolver/decide.py b/src/cpip/_vendor/nab_resolver/decide.py
+diff --git a/src/kpip/_vendor/nab_resolver/decide.py b/src/kpip/_vendor/nab_resolver/decide.py
 index 9dd16ee..822a662 100644
---- a/src/cpip/_vendor/nab_resolver/decide.py
-+++ b/src/cpip/_vendor/nab_resolver/decide.py
+--- a/src/kpip/_vendor/nab_resolver/decide.py
++++ b/src/kpip/_vendor/nab_resolver/decide.py
 @@ -71,10 +71,18 @@ def choose_package_to_decide(resolver: Resolver[Any, Any]) -> Any | None:
              tiebreak_cache[package] = tiebreak
          return (ready_penalty, priority, tiebreak)
@@ -78,10 +78,10 @@ index 9dd16ee..822a662 100644
          resolver.priority_epoch,
          key_inputs_arrived,
      )
-diff --git a/src/cpip/_vendor/nab_resolver/incompat_index.py b/src/cpip/_vendor/nab_resolver/incompat_index.py
+diff --git a/src/kpip/_vendor/nab_resolver/incompat_index.py b/src/kpip/_vendor/nab_resolver/incompat_index.py
 index c771106..eebbef5 100644
---- a/src/cpip/_vendor/nab_resolver/incompat_index.py
-+++ b/src/cpip/_vendor/nab_resolver/incompat_index.py
+--- a/src/kpip/_vendor/nab_resolver/incompat_index.py
++++ b/src/kpip/_vendor/nab_resolver/incompat_index.py
 @@ -11,6 +11,7 @@ per-clause skip stamp.
  
  from __future__ import annotations
@@ -261,10 +261,10 @@ index c771106..eebbef5 100644
      resolver.clause_contradicted_at[existing_index] = _NOT_CONTRADICTED
 +    _register_fallback_parent(resolver, existing_pkg.package, existing_index)
      return True
-diff --git a/src/cpip/_vendor/nab_resolver/partial_solution.py b/src/cpip/_vendor/nab_resolver/partial_solution.py
+diff --git a/src/kpip/_vendor/nab_resolver/partial_solution.py b/src/kpip/_vendor/nab_resolver/partial_solution.py
 index c330a27..f2245b6 100644
---- a/src/cpip/_vendor/nab_resolver/partial_solution.py
-+++ b/src/cpip/_vendor/nab_resolver/partial_solution.py
+--- a/src/kpip/_vendor/nab_resolver/partial_solution.py
++++ b/src/kpip/_vendor/nab_resolver/partial_solution.py
 @@ -149,6 +149,15 @@ class _Snapshot(Mapping[PackageType, _ValueType]):
      def __len__(self) -> int:
          return sum(1 for _ in self)
@@ -551,10 +551,10 @@ index c330a27..f2245b6 100644
  
          return term.satisfies(effective)
  
-diff --git a/src/cpip/_vendor/nab_resolver/propagate.py b/src/cpip/_vendor/nab_resolver/propagate.py
+diff --git a/src/kpip/_vendor/nab_resolver/propagate.py b/src/kpip/_vendor/nab_resolver/propagate.py
 index bc7edc0..c5e99af 100644
---- a/src/cpip/_vendor/nab_resolver/propagate.py
-+++ b/src/cpip/_vendor/nab_resolver/propagate.py
+--- a/src/kpip/_vendor/nab_resolver/propagate.py
++++ b/src/kpip/_vendor/nab_resolver/propagate.py
 @@ -11,6 +11,9 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propa
  from __future__ import annotations
  
@@ -866,10 +866,10 @@ index bc7edc0..c5e99af 100644
          result = resolver.relation_cache.get(key)
  
      if result is None:
-diff --git a/src/cpip/_vendor/nab_resolver/ranges.py b/src/cpip/_vendor/nab_resolver/ranges.py
+diff --git a/src/kpip/_vendor/nab_resolver/ranges.py b/src/kpip/_vendor/nab_resolver/ranges.py
 index 4385af4..6de29ba 100644
---- a/src/cpip/_vendor/nab_resolver/ranges.py
-+++ b/src/cpip/_vendor/nab_resolver/ranges.py
+--- a/src/kpip/_vendor/nab_resolver/ranges.py
++++ b/src/kpip/_vendor/nab_resolver/ranges.py
 @@ -27,6 +27,8 @@ _EMPTY_REL = RangeRelation.EMPTY
  _SUBSET_REL = RangeRelation.SUBSET
  _DISJOINT_REL = RangeRelation.DISJOINT
@@ -1510,10 +1510,10 @@ index 4385af4..6de29ba 100644
  
      merged: list[Interval] = [intervals[0]]
      for lower, lower_inclusive, upper, upper_inclusive in intervals[1:]:
-diff --git a/src/cpip/_vendor/nab_resolver/resolver.py b/src/cpip/_vendor/nab_resolver/resolver.py
+diff --git a/src/kpip/_vendor/nab_resolver/resolver.py b/src/kpip/_vendor/nab_resolver/resolver.py
 index 2a881be..f6f6d1b 100644
---- a/src/cpip/_vendor/nab_resolver/resolver.py
-+++ b/src/cpip/_vendor/nab_resolver/resolver.py
+--- a/src/kpip/_vendor/nab_resolver/resolver.py
++++ b/src/kpip/_vendor/nab_resolver/resolver.py
 @@ -236,6 +236,14 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
          """
          ...

@@ -13,10 +13,10 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from cpip.core.utils import default_worker_count
-from cpip.core.wheel import wheel_candidate
-from cpip.install import wheel_archive_cache as cache_module
-from cpip.install.wheel_archive_cache import prepare_cached_wheels
+from kpip.core.utils import default_worker_count
+from kpip.core.wheel import wheel_candidate
+from kpip.install import wheel_archive_cache as cache_module
+from kpip.install.wheel_archive_cache import prepare_cached_wheels
 
 
 def _wheel_with(directory: Path, name: str, members: dict[str, str]) -> Path:
@@ -151,13 +151,13 @@ def test_extract_permits_are_returned(tmp_path: Path) -> None:
 def test_default_worker_count_scales_and_can_be_overridden(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("CPIP_CONCURRENCY", raising=False)
+    monkeypatch.delenv("KPIP_CONCURRENCY", raising=False)
     assert default_worker_count() >= 1
     assert default_worker_count() <= 32
 
-    monkeypatch.setenv("CPIP_CONCURRENCY", "3")
+    monkeypatch.setenv("KPIP_CONCURRENCY", "3")
     assert default_worker_count() == 3
 
     for bad in ("0", "-2", "many", ""):
-        monkeypatch.setenv("CPIP_CONCURRENCY", bad)
+        monkeypatch.setenv("KPIP_CONCURRENCY", bad)
         assert default_worker_count() >= 1, f"{bad!r} should be ignored, not fatal"

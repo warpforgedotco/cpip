@@ -1,4 +1,4 @@
-from cpip.cli.main import main
+from kpip.cli.main import main
 
 
 def test_layered_cli_help(capsys) -> None:
@@ -13,4 +13,4 @@ def test_layered_cli_version(capsys) -> None:
     assert main(["--version"]) == 0
 
     output = capsys.readouterr().out
-    assert output.startswith("cpip ")
+    assert output.startswith("kpip ")

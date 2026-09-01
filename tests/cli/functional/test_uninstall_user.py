@@ -3,9 +3,9 @@
 from os.path import isdir, isfile, normcase
 
 import pytest
-from cpip_test_support import CpipTestEnvironment, TestData, assert_all_changes
-from cpip_test_support.venv import VirtualEnvironment
-from cpip_test_support.wheel import make_wheel
+from kpip_test_support import KpipTestEnvironment, TestData, assert_all_changes
+from kpip_test_support.venv import VirtualEnvironment
+from kpip_test_support.wheel import make_wheel
 
 from .test_install_user import patch_dist_in_site_packages
 
@@ -13,16 +13,16 @@ from .test_install_user import patch_dist_in_site_packages
 @pytest.mark.usefixtures("enable_user_site")
 class Tests_UninstallUserSite:
     @pytest.mark.network
-    def test_uninstall_from_usersite(self, script: CpipTestEnvironment) -> None:
+    def test_uninstall_from_usersite(self, script: KpipTestEnvironment) -> None:
         """Test uninstall from usersite"""
-        result1 = script.cpip("install", "--user", "INITools==0.3")
-        result2 = script.cpip("uninstall", "-y", "INITools")
+        result1 = script.kpip("install", "--user", "INITools==0.3")
+        result2 = script.kpip("uninstall", "-y", "INITools")
         assert_all_changes(result1, result2, [script.venv / "build", "cache"])
 
     def test_uninstall_from_usersite_with_dist_in_global_site(
         self,
         virtualenv: VirtualEnvironment,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
     ) -> None:
         """Test uninstall from usersite (with same dist in global site)"""
         entry_points_txt = "[console_scripts]\nscript = pkg:func"
@@ -39,7 +39,7 @@ class Tests_UninstallUserSite:
 
         patch_dist_in_site_packages(virtualenv)
 
-        script.cpip(
+        script.kpip(
             "install",
             "--no-index",
             "--find-links",
@@ -48,7 +48,7 @@ class Tests_UninstallUserSite:
             "pkg==0.1",
         )
 
-        result2 = script.cpip(
+        result2 = script.kpip(
             "install",
             "--no-index",
             "--find-links",
@@ -57,7 +57,7 @@ class Tests_UninstallUserSite:
             "--user",
             "pkg==0.1.1",
         )
-        result3 = script.cpip("uninstall", "-vy", "pkg")
+        result3 = script.kpip("uninstall", "-vy", "pkg")
 
         assert normcase(script.user_bin_path) in result3.stdout, str(result3)
         assert normcase(script.bin_path) not in result3.stdout, str(result3)
@@ -69,7 +69,7 @@ class Tests_UninstallUserSite:
 
     def test_uninstall_editable_from_usersite(
         self,
-        script: CpipTestEnvironment,
+        script: KpipTestEnvironment,
         data: TestData,
     ) -> None:
         """Test uninstall editable local user install"""
@@ -87,7 +87,7 @@ class Tests_UninstallUserSite:
         egg_link = script.user_site / "FSPkg.egg-link"
         result1.did_create(egg_link)
 
-        result2 = script.cpip("uninstall", "-y", "FSPkg")
+        result2 = script.kpip("uninstall", "-y", "FSPkg")
         assert not isfile(script.base_path / egg_link)
 
         assert_all_changes(

@@ -431,7 +431,7 @@ toml = [
 ]
 
 [[package]]
-name = "cpip"
+name = "kpip"
 version = "0.0.1"
 source = { editable = "." }
 

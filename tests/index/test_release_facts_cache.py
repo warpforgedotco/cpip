@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from cpip.index.release_facts_cache import NAME, get_release_facts_cache
+from kpip.index.release_facts_cache import NAME, get_release_facts_cache
 
 
 def test_release_facts_cache_roundtrip(tmp_path: Path) -> None:

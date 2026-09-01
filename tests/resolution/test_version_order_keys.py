@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import random
 
-from cpip.core.versions import Version
-from cpip.index.links import Link
-from cpip.index.source_models import CandidateRecord
+from kpip.core.versions import Version
+from kpip.index.links import Link
+from kpip.index.source_models import CandidateRecord
 from packaging import version
 
 

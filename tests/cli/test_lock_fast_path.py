@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from cpip.cli.lock import remote_hashed_sdist, remote_hashed_wheel
-from cpip.core.versions import Version
+from kpip.cli.lock import remote_hashed_sdist, remote_hashed_wheel
+from kpip.core.versions import Version
 
 
 class Candidate:

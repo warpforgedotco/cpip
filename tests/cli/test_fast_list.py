@@ -10,7 +10,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
-from cpip.cli import fast
+from kpip.cli import fast
 
 
 def _dist(
@@ -41,7 +41,7 @@ def _dist(
 
 
 def _normal(args: list[str]) -> str:
-    from cpip.cli.list import run_list
+    from kpip.cli.list import run_list
 
     out = io.StringIO()
     with redirect_stdout(out):
@@ -89,7 +89,7 @@ def test_every_format_matches_the_normal_path(
     src = tmp_path / "src" / "editable-pkg"
     src.mkdir(parents=True)
     _dist(
-        site, "Zeta_Pkg-1.0.dist-info", "Zeta-Pkg", "1.0", build="7", installer="cpip"
+        site, "Zeta_Pkg-1.0.dist-info", "Zeta-Pkg", "1.0", build="7", installer="kpip"
     )
     _dist(
         site,
@@ -104,7 +104,7 @@ def test_every_format_matches_the_normal_path(
     (site / "empty-9.dist-info").mkdir()
     (site / "notes.txt").write_text("x")
     monkeypatch.setattr(sys, "path", [str(tmp_path / "missing"), str(site)])
-    monkeypatch.delenv("CPIP_TARGET_PREFIX", raising=False)
+    monkeypatch.delenv("KPIP_TARGET_PREFIX", raising=False)
 
     for args in (
         [],
@@ -135,7 +135,7 @@ def test_declines_what_it_cannot_render_identically(
     site = tmp_path / "site"
     _dist(site, "simple-1.0.dist-info", "simple", "1.0")
     monkeypatch.setattr(sys, "path", [str(site)])
-    monkeypatch.delenv("CPIP_TARGET_PREFIX", raising=False)
+    monkeypatch.delenv("KPIP_TARGET_PREFIX", raising=False)
     assert _fast([]) is not None
 
     for args in (
@@ -160,20 +160,20 @@ def test_declines_what_it_cannot_render_identically(
     monkeypatch.setattr(sys, "path", [str(tmp_path / "other")])
     (tmp_path / "other").mkdir()
     assert _fast([]) is not None
-    monkeypatch.setenv("CPIP_TARGET_PREFIX", "/elsewhere")
+    monkeypatch.setenv("KPIP_TARGET_PREFIX", "/elsewhere")
     assert _fast([]) is None
 
 
-def test_pip_exclusion_covers_cpip(
+def test_pip_exclusion_covers_kpip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
+    from kpip.core.kpip_version import KPIP_DISTRIBUTION_NAMES
 
     site = tmp_path / "site"
-    for name in (*CPIP_DISTRIBUTION_NAMES, "pip", "keep"):
+    for name in (*KPIP_DISTRIBUTION_NAMES, "pip", "keep"):
         _dist(site, f"{name.replace('-', '_')}-1.0.dist-info", name, "1.0")
     monkeypatch.setattr(sys, "path", [str(site)])
-    monkeypatch.delenv("CPIP_TARGET_PREFIX", raising=False)
+    monkeypatch.delenv("KPIP_TARGET_PREFIX", raising=False)
 
     assert (
         _fast(["--exclude", "pip"])

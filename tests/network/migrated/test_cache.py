@@ -3,8 +3,8 @@ import os
 from pathlib import Path
 
 import pytest
-from cpip.network.cache import SafeFileCache
-from cpip_test_support.filesystem import chmod
+from kpip.network.cache import SafeFileCache
+from kpip_test_support.filesystem import chmod
 
 
 @pytest.fixture
@@ -16,7 +16,7 @@ def cache_tmpdir(tmp_path: Path) -> Path:
 
 class TestSafeFileCache:
     """The no_perms test are useless on Windows since SafeFileCache uses
-    cpip.platform.filesystem.check_path_owner which is based on
+    kpip.platform.filesystem.check_path_owner which is based on
     os.geteuid which is absent on Windows.
     """
 

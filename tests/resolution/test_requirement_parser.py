@@ -5,11 +5,11 @@ import time
 from pathlib import Path
 
 import pytest
-from cpip.core.errors import InstallationError
-from cpip.core.http import HttpResponse
-from cpip.resolution.files.models import RequirementsFileParseError
-from cpip.resolution.files.parser import parse_requirements
-from cpip_test_support.transport_mocks import make_response
+from kpip.core.errors import InstallationError
+from kpip.core.http import HttpResponse
+from kpip.resolution.files.models import RequirementsFileParseError
+from kpip.resolution.files.parser import parse_requirements
+from kpip_test_support.transport_mocks import make_response
 
 
 def test_deep_requirement_includes_without_recursion(tmp_path: Path) -> None:

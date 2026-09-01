@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import pytest
-from cpip.install.requirement_set import RequirementSet
-from cpip.resolution.input_requirements import (
+from kpip.install.requirement_set import RequirementSet
+from kpip.resolution.input_requirements import (
     install_req_from_editable,
     install_req_from_line,
 )
-from cpip.resolution.req_install import InstallRequirement
+from kpip.resolution.req_install import InstallRequirement
 
 
 def test_add_named_requirement_tracks_lookup_by_canonical_name() -> None:

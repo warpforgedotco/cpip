@@ -1,15 +1,15 @@
 import json
 from pathlib import Path
 
-from cpip_test_support import CpipTestEnvironment, TestData
+from kpip_test_support import KpipTestEnvironment, TestData
 
 
 def test_install_pylock(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     pylock_path = data.lockfiles.joinpath("pylock.toml")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--find-links",
@@ -41,7 +41,7 @@ def test_install_pylock(
 
 
 def test_install_pylock_wheel_cache(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     """Installing the same sdist twice triggered a hash checking bug."""
@@ -53,12 +53,12 @@ def test_install_pylock_wheel_cache(
         "-r",
         pylock_path,
     ]
-    result = script.cpip("install", *args, allow_stderr_warning=True)
+    result = script.kpip("install", *args, allow_stderr_warning=True)
     assert "experimental" in result.stderr
     assert "Successfully installed simple-2.0" in result.stdout
-    result = script.cpip("install", *args, allow_stderr_warning=True)
+    result = script.kpip("install", *args, allow_stderr_warning=True)
     assert "Requirement already satisfied: simple==2.0" in result.stdout
-    result = script.cpip(
+    result = script.kpip(
         "install",
         *args,
         "--ignore-installed",
@@ -68,11 +68,11 @@ def test_install_pylock_wheel_cache(
 
 
 def test_install_pylock_directory(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     pylock_path = data.lockfiles.joinpath("pylock.directory.toml")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--find-links",
@@ -90,11 +90,11 @@ def test_install_pylock_directory(
 
 
 def test_install_pylock_invalid_hash(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     pylock_path = data.lockfiles.joinpath("pylock.invalidhash.toml")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--dry-run",
@@ -114,11 +114,11 @@ def test_install_pylock_invalid_hash(
 
 
 def test_install_pylock_not_found(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     tmp_path: Path,
 ) -> None:
     pylock_path = tmp_path / "pylock.doesnotexist.toml"
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--dry-run",
@@ -130,10 +130,10 @@ def test_install_pylock_not_found(
 
 
 def test_install_remote_pylock_preserves_network_diagnostic(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
 ) -> None:
     """Remote pylock network failures should render the diagnostic error."""
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--dry-run",
         "-r",
@@ -147,11 +147,11 @@ def test_install_remote_pylock_preserves_network_diagnostic(
 
 
 def test_install_pylock_invalid_lockfile(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     pylock_path = data.lockfiles.joinpath("pylock.invalid.toml")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--dry-run",
@@ -163,11 +163,11 @@ def test_install_pylock_invalid_lockfile(
 
 
 def test_install_pylock_select_error(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     pylock_path = data.lockfiles.joinpath("pylock.oldpython.toml")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--dry-run",
@@ -179,11 +179,11 @@ def test_install_pylock_select_error(
 
 
 def test_install_pylock_no_binary(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     pylock_path = data.lockfiles.joinpath("pylock.onewheel.toml")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--dry-run",
@@ -199,11 +199,11 @@ def test_install_pylock_no_binary(
 
 
 def test_install_pylock_only_binary(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     pylock_path = data.lockfiles.joinpath("pylock.onesdist.toml")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--dry-run",
@@ -219,12 +219,12 @@ def test_install_pylock_only_binary(
 
 
 def test_install_pylock_only_binary_ignored_for_archives(
-    script: CpipTestEnvironment,
+    script: KpipTestEnvironment,
     data: TestData,
 ) -> None:
     """--only-binary is ignored for direct URL"""
     pylock_path = data.lockfiles.joinpath("pylock.onearchive.toml")
-    result = script.cpip(
+    result = script.kpip(
         "install",
         "--no-index",
         "--find-links",

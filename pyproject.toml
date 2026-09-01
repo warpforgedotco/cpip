@@ -1,7 +1,9 @@
 [project]
-name = "cpip"
+name = "kpip"
+# Bump with `uv run scripts/bump_version.py --bump patch`; it syncs __version__.
 version = "0.0.1"
 description = "Pip Reimagined for Performance"
+readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE.txt"]
 classifiers = [
@@ -21,25 +23,25 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 authors = [
-    { name = "turcioskevinr@gmail.com", email = "turcioskevinr@gmail.com" },
+    { name = "Kevin Turcios", email = "turcioskevinr@gmail.com" },
 ]
 
-# NOTE: requires-python is duplicated in __cpip-runner__.py.
+# NOTE: requires-python is duplicated in __kpip-runner__.py.
 # When changing this value, please change the other copy as well.
 requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-cpip = "cpip.cli.entrypoint:main"
+kpip = "kpip.cli.entrypoint:main"
 
 [project.urls]
-Homepage = "https://cpip.pypa.io/"
-Documentation = "https://cpip.pypa.io"
-Source = "https://github.com/pypa/cpip"
+Homepage = "https://github.com/warpforgedotco/kpip"
+Documentation = "https://github.com/warpforgedotco/kpip#readme"
+Source = "https://github.com/warpforgedotco/kpip"
 
 [build-system]
 requires = []
-build-backend = "cpip.build.build_backend"
+build-backend = "kpip.build.build_backend"
 backend-path = ["src"]
 
 [dependency-groups]
@@ -73,12 +75,15 @@ test = [
 default-groups = ["typing"]
 
 [tool.uv.build-backend]
-module-name = "cpip"
+module-name = "kpip"
+
+[tool.kpip.build-backend]
+sdist-exclude = ["tests/cli/data/**"]
 
 [tool.vendoring]
-destination = "src/cpip/_vendor/"
-requirements = "src/cpip/_vendor/vendor.txt"
-namespace = "cpip._vendor"
+destination = "src/kpip/_vendor/"
+requirements = "src/kpip/_vendor/vendor.txt"
+namespace = "kpip._vendor"
 protected-files = ["VENDORED.md", "vendor.txt"]
 patches-dir = "tools/vendoring/patches"
 
@@ -99,7 +104,7 @@ drop = [
 ]
 
 [tool.ruff]
-extend-exclude = ["tests/cli/data", "src/cpip/_vendor"]
+extend-exclude = ["tests/cli/data", "src/kpip/_vendor"]
 
 [tool.ruff.lint]
 # TC004: catches a real bug class -- a name imported only under
@@ -118,13 +123,13 @@ markers = [
     "integration: integration test",
     "mercurial: tests requiring Mercurial",
     "network: test requiring network access",
-    "search: cpip search test",
+    "search: kpip search test",
     "svn: tests requiring Subversion",
     "unit: unit test",
 ]
 
 [tool.ty.src]
-exclude = ["src/cpip/_vendor/**"]
+exclude = ["src/kpip/_vendor/**"]
 
 [tool.ty.environment]
 python-version = "3.14"

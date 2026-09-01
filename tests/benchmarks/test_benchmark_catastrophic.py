@@ -28,8 +28,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from benchmark_support import reset_caches
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.api import ResolutionEngine
+from kpip.index.provider import CandidateProvider
+from kpip.resolution.api import ResolutionEngine
 from pytest_codspeed import BenchmarkFixture
 
 

@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from cpip.cli.dependency_groups import parse_dependency_groups
-from cpip.core.errors import InstallationError
+from kpip.cli.dependency_groups import parse_dependency_groups
+from kpip.core.errors import InstallationError
 
 
 def test_parse_simple_dependency_groups(
@@ -132,7 +132,7 @@ def test_parse_gets_unexpected_oserror(
     def epipe_toml_load(*args: Any, **kwargs: Any) -> None:
         raise OSError(errno.EPIPE, "Broken pipe")
 
-    monkeypatch.setattr("cpip.cli.dependency_groups.tomllib.load", epipe_toml_load)
+    monkeypatch.setattr("kpip.cli.dependency_groups.tomllib.load", epipe_toml_load)
 
     with pytest.raises(InstallationError, match=r"Error reading pyproject\.toml"):
         parse_dependency_groups([("pyproject.toml", "foo")])

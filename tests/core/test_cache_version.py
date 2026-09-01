@@ -1,7 +1,7 @@
 """Every cache store carries its own format version, inside a versioned root.
 
 Two levels, for two different jobs. The ``v<N>`` root retires the whole tree
-at once and is what ``cpip cache purge`` keys on. Each store then versions
+at once and is what ``kpip cache purge`` keys on. Each store then versions
 itself, so a format change to one does not throw away the others -- stores
 cost wildly different amounts to refill, and sharing a version lets the
 cheapest one decide when the most expensive is discarded.
@@ -16,15 +16,15 @@ import os
 import re
 
 import pytest
-from cpip.cli import fast, fast_install
-from cpip.core.appdirs import (
+from kpip.cli import fast, fast_install
+from kpip.core.appdirs import (
     cache_root,
     configured_cache_dir,
     resolve_cache_dir,
     versioned_cache_dir,
 )
-from cpip.core.utils import CACHE_INTERPRETER_TAG, CACHE_VERSION, CACHE_VERSION_TAG
-from cpip.index import (
+from kpip.core.utils import CACHE_INTERPRETER_TAG, CACHE_VERSION, CACHE_VERSION_TAG
+from kpip.index import (
     artifact_cache,
     cache as wheel_cache,
     candidate_metadata_cache,
@@ -32,8 +32,8 @@ from cpip.index import (
     metadata_cache,
     release_facts_cache,
 )
-from cpip.install import wheel_archive_cache, wheel_install_plan_cache
-from cpip.core.appdirs import HTTP_CACHE_BUCKET
+from kpip.install import wheel_archive_cache, wheel_install_plan_cache
+from kpip.core.appdirs import HTTP_CACHE_BUCKET
 
 STORAGE_NAMES = (
     HTTP_CACHE_BUCKET,
@@ -69,11 +69,11 @@ def test_every_writer_lands_under_the_versioned_directory(
         "/explicit",
         CACHE_VERSION_TAG,
     )
-    monkeypatch.setenv("CPIP_CACHE_DIR", "/configured")
+    monkeypatch.setenv("KPIP_CACHE_DIR", "/configured")
     assert cache_root() == "/configured"
     assert resolve_cache_dir() == os.path.join("/configured", CACHE_VERSION_TAG)
     assert configured_cache_dir() == os.path.join("/configured", CACHE_VERSION_TAG)
-    monkeypatch.delenv("CPIP_CACHE_DIR")
+    monkeypatch.delenv("KPIP_CACHE_DIR")
     assert configured_cache_dir() is None
     assert resolve_cache_dir() == versioned_cache_dir(cache_root())
 
@@ -109,7 +109,7 @@ def test_store_names_are_distinct() -> None:
 
 
 def test_bumping_one_store_leaves_the_others_alone() -> None:
-    from cpip.core.utils import versioned_bucket
+    from kpip.core.utils import versioned_bucket
 
     assert versioned_bucket("simple", 1) != versioned_bucket("simple", 2)
     assert versioned_bucket("simple", 2) != versioned_bucket("archive", 2)

@@ -21,16 +21,16 @@ from benchmark_support import (
     make_wrong_package_graph,
     reset_caches,
 )
-from cpip.core import names
-from cpip.core import packaging
-from cpip.core import wheel
-from cpip.index import metadata_cache
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.api import ResolutionEngine
+from kpip.core import names
+from kpip.core import packaging
+from kpip.core import wheel
+from kpip.index import metadata_cache
+from kpip.index.provider import CandidateProvider
+from kpip.resolution.api import ResolutionEngine
 
 CACHED_MODULES = (names, packaging, wheel)
 
-ENVIRONMENT_DERIVED = frozenset({"cpip.core.wheel.supported_wheel_tags"})
+ENVIRONMENT_DERIVED = frozenset({"kpip.core.wheel.supported_wheel_tags"})
 
 
 def memoized_callables() -> list[tuple[str, Any]]:

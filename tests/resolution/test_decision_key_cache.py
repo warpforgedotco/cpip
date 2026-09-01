@@ -4,7 +4,7 @@
 scans and rebuilds only the ones whose inputs were reported to have moved --
 the package's range, its conflict and culprit counts, or provider state.
 That is a local patch to a vendored package (see
-``src/cpip/_vendor/VENDORED.md``).
+``src/kpip/_vendor/VENDORED.md``).
 
 Its failure mode is quiet and expensive rather than loud.  A key that
 outlives an input still sorts, so the resolver simply decides a different
@@ -24,12 +24,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from cpip._vendor.nab_resolver import decide
-from cpip._vendor.nab_resolver.resolver import BaseProvider
-from cpip.core.errors import ResolutionError
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.api import ResolutionEngine
-from cpip.resolution.nab_provider import NabProvider
+from kpip._vendor.nab_resolver import decide
+from kpip._vendor.nab_resolver.resolver import BaseProvider
+from kpip.core.errors import ResolutionError
+from kpip.index.provider import CandidateProvider
+from kpip.resolution.api import ResolutionEngine
+from kpip.resolution.nab_provider import NabProvider
 
 _HAS_PRIORITY_INVALIDATIONS = hasattr(BaseProvider, "consume_priority_invalidations")
 
@@ -188,7 +188,7 @@ class StubProvider:
     """A provider whose sort key the test controls outright."""
 
     def __init__(self) -> None:
-        from cpip._vendor.nab_resolver.ranges import Range
+        from kpip._vendor.nab_resolver.ranges import Range
 
         self.priorities: dict[str, int] = {}
         self.invalidations: set[str] = set()
@@ -223,9 +223,9 @@ class StubProvider:
 
 def scan_resolver() -> tuple[Any, StubProvider]:
     """A resolver with two undecided packages and nothing decided."""
-    from cpip._vendor.nab_resolver.ranges import Range
-    from cpip._vendor.nab_resolver.resolver import Resolver
-    from cpip._vendor.nab_resolver.types import (
+    from kpip._vendor.nab_resolver.ranges import Range
+    from kpip._vendor.nab_resolver.resolver import Resolver
+    from kpip._vendor.nab_resolver.types import (
         Incompatibility,
         IncompatibilityCause,
     )
@@ -245,8 +245,8 @@ def choose(resolver: Any) -> Any:
 
 
 def test_a_moved_range_rebuilds_the_key() -> None:
-    from cpip._vendor.nab_resolver.ranges import Range
-    from cpip._vendor.nab_resolver.types import (
+    from kpip._vendor.nab_resolver.ranges import Range
+    from kpip._vendor.nab_resolver.types import (
         Incompatibility,
         IncompatibilityCause,
     )
@@ -282,7 +282,7 @@ def test_a_moved_culprit_count_rebuilds_the_key() -> None:
 
 @pytest.mark.skipif(
     not _HAS_PRIORITY_INVALIDATIONS,
-    reason="requires cpip's provider-priority invalidation patch",
+    reason="requires kpip's provider-priority invalidation patch",
 )
 def test_a_provider_reported_change_rebuilds_the_key() -> None:
     resolver, stub = scan_resolver()
@@ -297,7 +297,7 @@ def test_a_provider_reported_change_rebuilds_the_key() -> None:
 
 @pytest.mark.skipif(
     not _HAS_PRIORITY_INVALIDATIONS,
-    reason="requires cpip's provider-priority invalidation patch",
+    reason="requires kpip's provider-priority invalidation patch",
 )
 def test_a_provider_that_cannot_report_rebuilds_every_key() -> None:
     resolver, stub = scan_resolver()
@@ -313,7 +313,7 @@ def test_a_provider_that_cannot_report_rebuilds_every_key() -> None:
 
 @pytest.mark.skipif(
     not _HAS_PRIORITY_INVALIDATIONS,
-    reason="requires cpip's provider-priority invalidation patch",
+    reason="requires kpip's provider-priority invalidation patch",
 )
 def test_a_provider_without_the_method_rebuilds_every_key() -> None:
     """A third-party provider predating the hook still resolves correctly."""
@@ -332,7 +332,7 @@ _ORIGINAL_CONSUME = StubProvider.consume_priority_invalidations
 
 
 def test_a_restart_drops_every_key() -> None:
-    from cpip._vendor.nab_resolver import conflict
+    from kpip._vendor.nab_resolver import conflict
 
     resolver, stub = scan_resolver()
     assert choose(resolver) == "alpha"
