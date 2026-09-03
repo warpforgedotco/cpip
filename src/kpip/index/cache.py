@@ -21,7 +21,11 @@ def wheel_cache_path(root: str, url: str) -> str:
     return os.path.join(root, WHEEL_CACHE_BUCKET, digest[:2], digest[2:4], digest)
 
 
-def origin_hashes(path: str | os.PathLike[str]) -> dict[str, str] | None:
+def origin_hashes(
+    path: str | os.PathLike[str],
+    *,
+    expected_cache_key: str | None = None,
+) -> dict[str, str] | None:
     try:
         with open(path, encoding="utf-8") as file:
             data = json.load(file)
@@ -32,6 +36,15 @@ def origin_hashes(path: str | os.PathLike[str]) -> dict[str, str] | None:
         return None
     if not isinstance(data, dict):
         logger.warning("Ignoring invalid cache entry origin file %s", path)
+        return None
+    if (
+        expected_cache_key is not None
+        and data.get("cache_key_hash")
+        != hashlib.sha256(
+            expected_cache_key.encode(),
+        ).hexdigest()
+    ):
+        logger.warning("Ignoring mismatched cache entry origin file %s", path)
         return None
     archive_info = data.get("archive_info")
     if not isinstance(archive_info, dict):

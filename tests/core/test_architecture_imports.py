@@ -42,7 +42,8 @@ KNOWN_DEBT = frozenset(
 def test_first_party_imports_follow_architecture() -> None:
     package_root = Path(__file__).parents[2] / "src" / "kpip"
     violations: list[str] = []
-    for path in package_root.glob("*/*.py"):
+    observed_debt: set[tuple[str, str]] = set()
+    for path in package_root.rglob("*.py"):
         relative = path.relative_to(package_root)
         owner = relative.parts[0]
         if owner not in ALLOWED_IMPORTS:
@@ -62,9 +63,15 @@ def test_first_party_imports_follow_architecture() -> None:
                 if target in {owner, "_vendor"} or target in ALLOWED_IMPORTS[owner]:
                     continue
                 debt_key = (relative.as_posix(), target)
-                if debt_key not in KNOWN_DEBT:
-                    violations.append(
-                        f"{relative}:{node.lineno}: {owner} may not import {target}",
-                    )
+                if debt_key in KNOWN_DEBT:
+                    observed_debt.add(debt_key)
+                    continue
+                violations.append(
+                    f"{relative}:{node.lineno}: {owner} may not import {target}",
+                )
 
     assert not violations, "\n" + "\n".join(violations)
+    assert observed_debt == KNOWN_DEBT, (
+        "remove stale architecture debt exceptions: "
+        f"{sorted(KNOWN_DEBT - observed_debt)}"
+    )

@@ -9,11 +9,11 @@ look and which rules to keep.
 | Question | Start at |
 | --- | --- |
 | What happens when `kpip` starts? | `cli/entrypoint.py:main` |
-| Where is a command implemented? | `cli/registry.py` → `run_*` in `cli/<name>.py` |
+| Where is a command implemented? | `cli/registry.py` → the `CommandSpec.module_path` and runner named there |
 | How does install choose a plan? | `cli/install.py:run_install` |
 | How are dependencies resolved? | `resolution/api.py:ResolutionEngine` → `nab_provider.py` → `_vendor/nab_resolver/` |
 | Where do index candidates come from? | `index/provider.py:CandidateProvider` |
-| How does an artifact become local? | `index/artifacts.py:ArtifactLocator` |
+| How does an artifact become local? | `index/candidate_materialization.py:CandidateMaterializer.ensure_local_text` → `index/artifacts.py:ArtifactLocator` for VCS and remote links |
 | How are selected candidates prepared? | `install/output.py:prepare_install_candidates` |
 | How are wheels installed? | `install/wheel_transaction.py:install_wheels_transactionally` |
 | Where do persistent caches live? | the owner in the cache table below; `cli/cache.py` for `kpip cache` |
@@ -45,8 +45,8 @@ Rules:
 - Fast paths are recognizers, not separate semantics: they return `None` for
   any argument, target state or feature they do not implement completely, and
   normal dispatch always remains available afterwards. Keep recognition rules
-  in `cli/fast.py` and `cli/fast_install.py`; `cli/entrypoint.py` must not name
-  a command.
+  in `cli/fast.py` and `cli/fast_install.py`; ordinary command dispatch stays
+  registry-driven. `cli/entrypoint.py` names only its built-in `help` handling.
 - The registry stores module paths and imports a command on first use. Startup
   gating belongs in `CommandSpec` flags (`needs_logging`, `needs_tempdir`,
   `needs_execution_context`), not in command-name tests.
@@ -114,16 +114,18 @@ adopting the resolving check.
 ResolutionEngine.resolve                     resolution/api.py
   -> inputs.coerce_requirements
   -> NabProvider(CandidateProvider)          resolution/nab_provider.py
-  -> nab_resolver.Resolver.resolve           _vendor/nab_resolver/ (vendored; the search itself)
+  -> nab_resolver.Resolver.solve             _vendor/nab_resolver/ (vendored; the search itself)
   -> ResolutionResult                        resolution/models.py
 ```
 
-`NabProvider` is the whole contract between kpip and the search
-(`choose_version`, `get_dependencies`, `has_satisfying_version`, `prioritize`,
-and the conflict-display hooks). Everything the resolver learns about the
-index, installed state or policy arrives through it. On failure `api.py`
-renders the resolver's error with `format_error` and restores the user's
-original specifier text.
+`NabProvider` is the adapter between kpip and the search. It supplies version
+choice, dependency and satisfiability queries; decision priority and readiness;
+priority/dependency invalidations, partial-solution hints, pending clauses and
+targeted-backtrack signals; decision widening; and conflict-display narrowing.
+Everything the resolver learns about the index, installed state or policy
+arrives through this provider surface. On failure `api.py` renders the
+resolver's error with `format_error` and restores the user's original specifier
+text.
 
 `resolve_wheelhouse` is only a constructor that pins the engine to local
 `find_links` with the index disabled; there is no second search. The separate
@@ -136,8 +138,10 @@ and must not grow an implementation arrow to this one.
 CandidateProvider.find_candidates            index/provider.py
   -> source locations, Simple API / find-links catalogs (catalog_cache.py)
   -> Link records -> CandidateEvaluator, candidate_filters
-  -> CandidateRecord -> CandidateMaterializer.iter_materialize
-  -> CandidateStream[WheelCandidate]          replayable, advances on demand
+  -> CandidateRecord -> CandidateMaterializer.materialize
+  -> CandidateStream[LazyWheelCandidate]      replayable, advances on demand
+  -> selected LazyWheelCandidate.build_candidate
+  -> CandidateMaterializer.iter_materialize -> WheelCandidate
 ```
 
 `CandidateProvider` coordinates discovery; it owns neither backtracking nor
@@ -145,10 +149,13 @@ installation. `CandidateMaterializer` localizes artifacts only when metadata
 or a selected winner needs them and builds sdists through
 `build.build:build_wheel_from_source`.
 
-`ArtifactLocator.ensure_local[_text]` is the one route from a link to local
-bytes: local path → artifact cache (URL receipt or expected SHA-256) → HTTP
-cache body → `NetworkSession` stream. `network/download.py:Downloader` is the
-resumable/progress downloader for the preparer path, not this route.
+`CandidateMaterializer.ensure_local_text` is the boundary from a candidate link
+to local bytes. It returns file links directly and delegates VCS and remote
+links to `ArtifactLocator.ensure_local_text`. The locator routes VCS links
+through `materialize_vcs`; remote links try the artifact cache (URL receipt or
+expected hash), then an HTTP-cache body, then a `NetworkSession` stream.
+`network/download.py:Downloader` is currently standalone code covered by tests
+and benchmarks; no production command imports it, so it is not on this path.
 
 ## Caches
 
@@ -172,10 +179,10 @@ has never written; the old one is inert until a purge.
 
 | Owner | Under `v1/` | Contents |
 | --- | --- | --- |
-| `network/cache.py` | `http-v1/` | HTTP metadata/body pairs; a partial pair is a miss |
+| `network/cache.py` | `http-v1/` | HTTP metadata and bodies; normal responses use one atomically replaced combined file, while raw artifact bodies use a split metadata/`.body` layout for hard-linking; incomplete split entries are misses |
 | `index/catalog_cache.py` | entries in `http-v1/` | parsed Simple API catalogs, release summaries (`Version.to_wire()`), target choices; key prefixes and payload headers carry their own versions; checksum-validated, recompiled from the catalog on any failure |
 | `index/artifact_cache.py` | `artifacts-v1/` | bodies by SHA-256 plus URL receipts |
-| `index/candidate_cache.py` | `wheels-v1/` | wheels built from source |
+| `index/candidate_cache.py` | `wheels-v2/` | validated wheels built from content-identified sdists or immutable VCS sources, keyed by source, build settings, interpreter and target, then published as completed entry directories |
 | `index/metadata_cache.py` | `metadata-v1.sqlite` | parsed headers of local wheel files and of installed `METADATA` files, and SHA-256 of local wheels, by path, size, mtime |
 | `index/candidate_metadata_cache.py` | `candidate-metadata-v1.sqlite` | dependency metadata reused during resolution |
 | `index/release_facts_cache.py` | `release-facts-v1-<interp>.marshal` | deterministic release rejection reasons |
@@ -193,11 +200,15 @@ versioned.
 Invariants:
 
 1. A cache is optional. Missing, corrupt, inaccessible or ineligible entries
-   are misses, never correctness failures; every load validates shape.
-2. Keys include every input that can change the result: requirement, source,
-   interpreter/target, policy, hashes, filesystem identity.
-3. Entries are published only after validation, atomically; readers never see
-   a partial write.
+   are misses, never correctness failures; every load validates its store's
+   shape and identity contract.
+2. A key and its eligibility checks cover every input that the store permits to
+   affect reuse: requirement, source, interpreter/target, policy, hashes or
+   filesystem identity as applicable. If a stable identity cannot be
+   established, the result is not persisted.
+3. Validation precedes publication. Self-contained entries are atomically
+   replaced; multi-file and tree stores publish a final marker or rename a
+   completed staging directory, so readers never accept a partial write.
 4. Caches stay independent. No cross-cache transactions or shared mutable
    database.
 
@@ -215,7 +226,8 @@ Invariants:
 | `install` | targets, inventories, wheel plans, transactions | index parsing |
 | `cli` | argument parsing, dispatch, presentation, fast paths | reusable mechanics |
 
-Allowed runtime imports (enforced by `tests/core/test_architecture_imports.py`):
+Allowed first-party dependency edges (enforced by
+`tests/core/test_architecture_imports.py`):
 
 | Domain | May import |
 | --- | --- |
@@ -237,9 +249,10 @@ Four edges cross the table and are known debt, not precedent:
 count as edges too; move the shared shape down instead of guarding the import.
 Vendored code is outside these rules.
 
-The test parses nested and `TYPE_CHECKING` imports too. Extend the exception
-set only while documenting an existing edge here; new shared shapes should
-move down instead.
+The test walks every non-vendored Python file recursively and parses nested and
+`TYPE_CHECKING` imports too; it also rejects stale debt exceptions once an edge
+is removed. Extend the exception set only while documenting an existing edge
+here; new shared shapes should move down instead.
 
 ## Performance boundaries
 

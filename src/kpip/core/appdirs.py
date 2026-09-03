@@ -22,7 +22,7 @@ def user_cache_dir(appname: str) -> str:
 
 
 HTTP_CACHE_BUCKET = versioned_bucket("http", 1)
-WHEEL_CACHE_BUCKET = versioned_bucket("wheels", 1)
+WHEEL_CACHE_BUCKET = versioned_bucket("wheels", 2)
 
 
 def http_cache_path(cache_dir: str) -> str:

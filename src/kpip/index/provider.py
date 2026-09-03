@@ -2399,6 +2399,7 @@ class CandidateProvider:
                     build_options=self.build_options,
                     build_constraints=self.build_constraints,
                     wheel_cache_dir=self.wheel_cache_dir,
+                    target_key=self.catalog_target_internal()[1],
                     build_isolation=self.build_isolation,
                     dry_run=self.dry_run,
                     compute_source_hashes=self.compute_source_hashes,
